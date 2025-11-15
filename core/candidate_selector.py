@@ -28,9 +28,10 @@ class CandidateStock:
 class CandidateSelector:
     """매수 후보 종목 선정기"""
     
-    def __init__(self, config: TradingConfig, api_manager: KISAPIManager):
+    def __init__(self, config: TradingConfig, api_manager: KISAPIManager, db_manager=None):
         self.config = config
         self.api_manager = api_manager
+        self.db_manager = db_manager
         self.logger = setup_logger(__name__)
         
         # stock_list.json 파일 경로
@@ -462,6 +463,43 @@ class CandidateSelector:
             
         except Exception as e:
             self.logger.error(f"후보 종목 설정 업데이트 실패: {e}")
+    
+    def get_all_stock_list(self) -> List[Dict]:
+        """전체 종목 리스트 반환"""
+        return self._load_stock_list()
+
+    async def get_quant_candidates(self, limit: int = 50) -> List[CandidateStock]:
+        """
+        퀀트 점수 기반 후보 종목 조회
+        """
+        try:
+            if self.db_manager:
+                calc_date = now_kst().strftime('%Y%m%d')
+                portfolio_rows = self.db_manager.get_quant_portfolio(calc_date, limit)
+                if portfolio_rows:
+                    candidates = []
+                    stock_name_map = {stock['code']: stock['name'] for stock in self.get_all_stock_list()}
+                    for row in portfolio_rows:
+                        code = row['stock_code']
+                        name = row['stock_name'] or stock_name_map.get(code, f"Stock_{code}")
+                        candidates.append(
+                            CandidateStock(
+                                code=code,
+                                name=name,
+                                market='KRX',
+                                score=row.get('total_score', 0),
+                                reason=row.get('reason', '퀀트 스크리닝'),
+                                prev_close=0.0
+                            )
+                        )
+                    return candidates
+
+            # fallback
+            candidates = await self.select_daily_candidates(max_candidates=limit)
+            return candidates
+        except Exception as e:
+            self.logger.error(f"퀀트 후보 조회 실패: {e}")
+            return []
     
     
     def get_condition_search_results(self, seq: str) -> Optional[List[Dict]]:

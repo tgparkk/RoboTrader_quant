@@ -28,6 +28,7 @@ from utils.logger import setup_logger
 from utils.korean_time import now_kst, get_market_status, is_market_open, KST
 from config.market_hours import MarketHours
 from post_market_chart_generator import PostMarketChartGenerator
+from core.quant.quant_screening_service import QuantScreeningService
 
 
 class DayTradingBot:
@@ -50,7 +51,7 @@ class DayTradingBot:
         self.telegram = TelegramIntegration(trading_bot=self)
         self.data_collector = RealTimeDataCollector(self.config, self.api_manager)
         self.order_manager = OrderManager(self.config, self.api_manager, self.telegram)
-        self.candidate_selector = CandidateSelector(self.config, self.api_manager)
+        self.candidate_selector = CandidateSelector(self.config, self.api_manager, db_manager=self.db_manager)
         self.intraday_manager = IntradayStockManager(self.api_manager)  # 🆕 장중 종목 관리자
         self.trading_manager = TradingStockManager(
             self.intraday_manager, self.data_collector, self.order_manager, self.telegram
@@ -69,6 +70,11 @@ class DayTradingBot:
 
         self.fund_manager = FundManager()  # 🆕 자금 관리자
         self.chart_generator = None  # 🆕 장 마감 후 차트 생성기 (지연 초기화)
+        self.quant_screening_service = QuantScreeningService(
+            self.api_manager, self.db_manager, self.candidate_selector
+        )
+        self._last_quant_screening_date = None
+        self._quant_screening_task = None
         
         
         # 신호 핸들러 등록
@@ -585,6 +591,10 @@ class DayTradingBot:
                         last_intraday_update = current_time
                 
                 # 장마감 청산 로직 제거: 15:00 시장가 매도로 대체됨
+                # 15:40 퀀트 스크리닝 실행
+                if (current_time.hour > 15 or (current_time.hour == 15 and current_time.minute >= 40)):
+                    if self._last_quant_screening_date != current_time.date() and self._quant_screening_task is None:
+                        self._quant_screening_task = asyncio.create_task(self._run_quant_screening())
                 
                 # 🆕 차트 생성 카운터 매일 리셋 (주석처리)
                 # current_date = current_time.date()
@@ -743,6 +753,22 @@ class DayTradingBot:
         except Exception as e:
             self.logger.error(f"❌ 시스템 상태 로깅 오류: {e}")
     
+    async def _run_quant_screening(self):
+        """일일 퀀트 스크리닝 실행"""
+        try:
+            self.logger.info("📊 15:40 퀀트 스크리닝 시작")
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, self.quant_screening_service.run_daily_screening)
+            self._last_quant_screening_date = now_kst().date()
+            self.logger.info("✅ 퀀트 스크리닝 완료")
+            if self.telegram:
+                await self.telegram.notify_system_status("퀀트 스크리닝 완료")
+        except Exception as e:
+            self.logger.error(f"❌ 퀀트 스크리닝 실패: {e}")
+            if self.telegram:
+                await self.telegram.notify_error("Quant Screening", e)
+        finally:
+            self._quant_screening_task = None
     async def _refresh_api(self):
         """API 재초기화"""
         try:
@@ -840,117 +866,88 @@ class DayTradingBot:
             self.logger.error(f"❌ 오늘 후보 종목 복원 실패: {e}")
    
     async def _check_condition_search(self):
-        """장중 조건검색 체크"""
+        """장중 퀀트 후보 스크리닝 결과 반영"""
         try:
-            #self.logger.debug("🔍 장중 조건검색 체크 시작")
-            
-            # 조건검색 seq 리스트 (필요에 따라 여러 조건 추가 가능)
-            #condition_seqs = ["0", "1", "2"]  # 예: 0, 1, 2번 조건
-            condition_seqs = ["0"]
-            
-            all_condition_results = []
-            
-            for seq in condition_seqs:
-                try:
-                    # 조건검색 결과 조회 (단순 조회만)
-                    condition_results = self.candidate_selector.get_condition_search_candidates(seq=seq)
-                    
-                    if condition_results:
-                        all_condition_results.extend(condition_results)
-                        #self.logger.debug(f"✅ 조건검색 {seq}번: {len(condition_results)}개 종목 발견")
-                        #self.logger.debug(f"🔍 조건검색 {seq}번 결과: {condition_results}")
-                    else:
-                        self.logger.debug(f"ℹ️ 조건검색 {seq}번: 해당 종목 없음")
-                        
-                except Exception as e:
-                    self.logger.warning(f"⚠️ 조건검색 {seq}번 오류: {e}")
-                    continue
-            
-            # 결과가 있으면 알림 발송
-            #self.logger.debug(f"🔍 조건검색 전체 결과: {len(all_condition_results)}개 종목")
-            if all_condition_results:
-                
-                # 🆕 장중 선정 종목 관리자에 추가 (과거 분봉 데이터 포함)
-                #self.logger.debug(f"🎯 장중 선정 종목 관리자에 {len(all_condition_results)}개 종목 추가 시작")
-                candidates_to_save = []
-                for stock_data in all_condition_results:
-                    stock_code = stock_data.get('code', '')
-                    stock_name = stock_data.get('name', '')
-                    change_rate = stock_data.get('chgrate', '')
-                    
-                    if stock_code:
-                        # 전날 종가 조회 (일봉 데이터) - 주말 안전 처리
-                        prev_close = 0.0
-                        try:
-                            # 충분한 기간의 데이터 요청 (주말 고려하여 7일)
-                            daily_data = self.api_manager.get_ohlcv_data(stock_code, "D", 7)
-                            if daily_data is not None and len(daily_data) >= 2:
-                                if hasattr(daily_data, 'iloc'):  # DataFrame
-                                    # 데이터 정렬 (날짜순)
-                                    daily_data = daily_data.sort_values('stck_bsop_date')
-                                    
-                                    # 오늘 데이터가 있는지 확인
-                                    last_date = daily_data.iloc[-1]['stck_bsop_date']
-                                    if isinstance(last_date, str):
-                                        last_date = datetime.strptime(last_date, '%Y%m%d').date()
-                                    elif hasattr(last_date, 'date'):
-                                        last_date = last_date.date()
-                                    
-                                    # 오늘 데이터가 있으면 전날(iloc[-2]), 없으면 마지막 거래일(iloc[-1]) 사용
-                                    if last_date == now_kst().date() and len(daily_data) >= 2:
-                                        prev_close = float(daily_data.iloc[-2]['stck_clpr'])
-                                        #self.logger.debug(f"📊 {stock_code}: 전날 종가 {prev_close} (오늘 데이터 제외)")
-                                    else:
-                                        prev_close = float(daily_data.iloc[-1]['stck_clpr'])
-                                        #self.logger.debug(f"📊 {stock_code}: 전날 종가 {prev_close} (마지막 거래일)")
-                                elif len(daily_data) >= 2:  # List
-                                    prev_close = daily_data[-2].close_price
-                        except Exception as e:
-                            self.logger.debug(f"⚠️ {stock_code} 전날 종가 조회 실패: {e}")
-                        
-                        # 거래 상태 통합 관리자에 추가 (분봉 데이터 수집 + 거래 상태 관리)
-                        selection_reason = f"조건검색 급등주 (등락률: {change_rate}%)"
-                        success = await self.trading_manager.add_selected_stock(
-                            stock_code=stock_code,
-                            stock_name=stock_name,
-                            selection_reason=selection_reason,
+            quant_candidates = await self.candidate_selector.get_quant_candidates(limit=50)
+
+            if not quant_candidates:
+                self.logger.debug("ℹ️ 퀀트 스크리닝: 후보 종목 없음")
+                return
+
+            candidates_to_save = []
+
+            for candidate in quant_candidates:
+                stock_code = candidate.code
+                stock_name = candidate.name
+                prev_close = candidate.prev_close if candidate.prev_close > 0 else self._get_previous_close_price(stock_code)
+
+                selection_reason = candidate.reason or f"퀀트 스코어 {candidate.score:.1f}점"
+
+                success = await self.trading_manager.add_selected_stock(
+                    stock_code=stock_code,
+                    stock_name=stock_name,
+                    selection_reason=selection_reason,
+                    prev_close=prev_close
+                )
+
+                if success:
+                    candidates_to_save.append(
+                        CandidateStock(
+                            code=stock_code,
+                            name=stock_name,
+                            market=candidate.market,
+                            score=candidate.score,
+                            reason=selection_reason,
                             prev_close=prev_close
                         )
-                        
-                        if success:
-                            #self.logger.debug(f"🎯 거래 종목 추가: {stock_code}({stock_name}) - {selection_reason}")
-                            # 🆕 후보 종목 DB 저장용 리스트 구성
-                            try:
-                                score_val = 0.0
-                                if isinstance(change_rate, (int, float)):
-                                    score_val = float(change_rate)
-                                else:
-                                    # 문자열인 경우 숫자만 추출 시도 (예: '3.2')
-                                    score_val = float(str(change_rate).replace('%', '').strip()) if str(change_rate).strip() else 0.0
-                            except Exception:
-                                score_val = 0.0
-                            candidates_to_save.append(
-                                CandidateStock(
-                                    code=stock_code,
-                                    name=stock_name,
-                                    market=stock_data.get('market', 'KOSPI'),
-                                    score=score_val,
-                                    reason=selection_reason
-                                )
-                            )
-                # 🆕 후보 종목 DB 저장
+                    )
+
+            if candidates_to_save:
                 try:
-                    if candidates_to_save:
-                        self.db_manager.save_candidate_stocks(candidates_to_save)
-                        #self.logger.debug(f"🗄️ 후보 종목 DB 저장 완료: {len(candidates_to_save)}건")
+                    self.db_manager.save_candidate_stocks(candidates_to_save)
                 except Exception as db_err:
                     self.logger.error(f"❌ 후보 종목 DB 저장 오류: {db_err}")
             else:
-                self.logger.debug("ℹ️ 장중 조건검색: 발견된 종목 없음")
+                self.logger.debug("ℹ️ 퀀트 스크리닝: 추가할 종목 없음")
             
         except Exception as e:
             self.logger.error(f"❌ 장중 조건검색 체크 오류: {e}")
             await self.telegram.notify_error("Condition Search", e)
+
+    def _get_previous_close_price(self, stock_code: str) -> float:
+        """전날 종가 조회 (주말/공휴일 포함 안전 처리)"""
+        try:
+            daily_data = self.api_manager.get_ohlcv_data(stock_code, "D", 7)
+            if daily_data is None or (hasattr(daily_data, "empty") and daily_data.empty):
+                return 0.0
+
+            if hasattr(daily_data, "sort_values"):
+                daily_df = daily_data.sort_values("stck_bsop_date")
+                dates = pd.to_datetime(daily_df["stck_bsop_date"], format="%Y%m%d", errors="coerce").dt.date
+                daily_df = daily_df.assign(parsed_date=dates)
+
+                if daily_df.empty:
+                    return 0.0
+
+                last_row = daily_df.iloc[-1]
+                today = now_kst().date()
+
+                if last_row["parsed_date"] == today and len(daily_df) >= 2:
+                    return float(daily_df.iloc[-2]["stck_clpr"])
+
+                return float(last_row["stck_clpr"])
+
+            # 리스트 형태 대응 (fallback)
+            if len(daily_data) >= 2:
+                last_entry = daily_data[-1]
+                # today인지 판단할 수 없으므로 마지막 이전 값 사용
+                return getattr(daily_data[-2], "close_price", 0.0)
+
+            return 0.0
+
+        except Exception as e:
+            self.logger.debug(f"⚠️ {stock_code} 전날 종가 조회 실패: {e}")
+            return 0.0
     
     async def _update_intraday_data(self):
         """장중 종목 실시간 데이터 업데이트 + 매수 판단 실행 (완성된 분봉만 수집)"""

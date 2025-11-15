@@ -1,0 +1,2217 @@
+{
+  "total_patterns": 0,
+  "win_patterns": 0,
+  "loss_patterns": 0,
+  "win_rate": 0,
+  "processed_stocks": 0,
+  "skipped_logs": 534,
+  "collection_results": {
+    "082800": true,
+    "034730": true,
+    "099430": true,
+    "420770": true,
+    "125490": true,
+    "437730": true,
+    "086390": true,
+    "054540": true,
+    "200710": true,
+    "014940": true,
+    "402490": true,
+    "430690": true,
+    "347850": true,
+    "333430": true,
+    "403490": true,
+    "039030": true,
+    "128940": true,
+    "204620": true,
+    "322310": true,
+    "170920": true,
+    "356860": true,
+    "100090": true,
+    "049470": true,
+    "025550": true,
+    "064260": true,
+    "073010": true,
+    "391710": true,
+    "012030": true,
+    "357580": true,
+    "413630": true,
+    "272210": true,
+    "950160": true,
+    "008770": true,
+    "273060": true,
+    "004170": true,
+    "023790": true,
+    "249420": true,
+    "032350": true,
+    "009540": true,
+    "090710": true,
+    "452160": true,
+    "103840": true,
+    "484870": true,
+    "075580": true,
+    "462310": true,
+    "215100": true,
+    "332570": true,
+    "023160": true,
+    "099320": true,
+    "011790": true,
+    "078520": true,
+    "103140": true,
+    "234340": true,
+    "389650": true,
+    "099440": true,
+    "380550": true,
+    "351330": true,
+    "250060": true,
+    "160190": true,
+    "101930": true,
+    "000400": true,
+    "108490": true,
+    "458870": true,
+    "290650": true,
+    "199430": true,
+    "397030": true,
+    "187660": true,
+    "094940": true,
+    "069960": true,
+    "009470": true,
+    "064820": true,
+    "003570": true,
+    "007820": true,
+    "006910": true,
+    "080580": true,
+    "127120": true,
+    "382900": true,
+    "459510": true,
+    "200670": true,
+    "053260": true,
+    "077360": true,
+    "048770": true,
+    "089150": true,
+    "327260": true,
+    "468530": true,
+    "160980": true,
+    "376930": true,
+    "234030": true,
+    "463020": true,
+    "248070": true,
+    "445680": true,
+    "044480": true,
+    "032820": true,
+    "338840": true,
+    "097230": true,
+    "484810": true,
+    "348150": true,
+    "136150": true,
+    "168360": true,
+    "045970": true,
+    "092870": true,
+    "441270": true,
+    "466100": true,
+    "092460": true,
+    "052420": true,
+    "080220": true,
+    "425420": true,
+    "381620": true,
+    "036620": true,
+    "084990": true,
+    "005360": true,
+    "417970": true,
+    "030530": true,
+    "089970": true,
+    "072710": true,
+    "476060": true,
+    "265740": true,
+    "014620": true,
+    "403870": true,
+    "085310": true,
+    "215600": true,
+    "134580": true,
+    "014280": true,
+    "319400": true,
+    "460930": true,
+    "452280": true,
+    "034220": true,
+    "488080": true,
+    "036810": true,
+    "114840": true,
+    "456160": true,
+    "440110": true,
+    "317830": true,
+    "019180": true,
+    "073540": true,
+    "177350": true,
+    "475960": true,
+    "047810": true,
+    "226950": true,
+    "272110": true,
+    "099410": true
+  },
+  "quality_report": {
+    "082800": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "034730": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "396500": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "126340": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "006800": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "099430": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "420770": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "125490": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "437730": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "086390": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "054540": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "336260": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "200710": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "287840": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "014940": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "380540": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "064350": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "402490": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "119850": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "430690": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "084370": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "347850": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "012510": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "333430": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "000150": {
+      "status": "ok",
+      "records": 7,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-07",
+        "days": 7
+      },
+      "quality_score": 0.07
+    },
+    "078350": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "403490": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "059210": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "039030": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "128940": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "204620": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "457480": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "098070": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "322310": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "001270": {
+      "status": "ok",
+      "records": 7,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-07",
+        "days": 7
+      },
+      "quality_score": 0.07
+    },
+    "170920": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "095610": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "356860": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "100090": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "036200": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "049470": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "025550": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "240810": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "064260": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "073010": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "071970": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "004020": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "469150": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "391710": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "357780": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "267770": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "364950": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "012030": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "357580": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "413630": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "272210": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "036570": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "028260": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "105740": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "950160": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "008770": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "273060": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "004170": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "023790": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "140410": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "249420": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "000990": {
+      "status": "ok",
+      "records": 7,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-07",
+        "days": 7
+      },
+      "quality_score": 0.07
+    },
+    "032350": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "298040": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "226590": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "009540": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "090710": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "452160": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "494310": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "267260": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "166090": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "056080": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "103840": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "484870": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "075580": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "475580": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "319660": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "402340": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "462310": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "215100": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "332570": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "023160": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "095340": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "099320": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "011790": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "222800": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "078520": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "102710": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "267250": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "103140": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "124500": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "393210": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "336570": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "234340": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "389650": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "099440": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "380550": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "031210": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "351330": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "008040": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "250060": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "039200": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "160190": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "101930": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "088350": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "126730": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "064290": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "005290": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "204270": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "450140": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "000400": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "108490": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "475400": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "458870": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "290650": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "199430": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "000880": {
+      "status": "ok",
+      "records": 7,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-07",
+        "days": 7
+      },
+      "quality_score": 0.07
+    },
+    "397030": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "114810": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "077970": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "104830": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "187660": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "395270": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "094940": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "069960": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "009470": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "183300": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "074600": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "064820": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "003570": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "007820": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "322000": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "006910": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "014680": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "080580": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "127120": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "089010": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "122630": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "042700": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "382900": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "459510": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "200670": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "476040": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "053260": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "077360": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "252990": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "048770": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "356890": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "010060": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "067310": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "102970": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "089150": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "327260": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "468530": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "499790": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "214370": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "160980": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "376930": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "005690": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "201490": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "234030": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "463020": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "248070": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "218410": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "445680": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "232140": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "044480": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "032820": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "001040": {
+      "status": "ok",
+      "records": 7,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-07",
+        "days": 7
+      },
+      "quality_score": 0.07
+    },
+    "304100": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "338840": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "097230": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "484810": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "018000": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "348150": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "475830": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "310210": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "136150": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "168360": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "358570": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "045970": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "092870": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "103230": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "441270": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "157500": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "466100": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "092460": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "052420": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "080220": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "425420": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "381620": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "007660": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "036620": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "010130": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "071050": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "086450": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "010170": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "064760": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "084990": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "005360": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "417970": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "030530": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "469750": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "089970": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "072710": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "476060": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "265740": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "014620": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "403870": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "085310": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "215600": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "090360": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "134580": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "014280": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "319400": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "460930": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "452280": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "034220": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "488080": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "036810": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "114840": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "217500": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "456160": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "440110": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "317830": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "019180": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "082270": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "156100": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "311390": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "073540": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "039490": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "007810": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "177350": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "475960": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "042520": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "047810": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "226950": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "089030": {
+      "status": "ok",
+      "records": 1,
+      "date_range": null,
+      "quality_score": 0.0
+    },
+    "000660": {
+      "status": "ok",
+      "records": 7,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-07",
+        "days": 7
+      },
+      "quality_score": 0.07
+    },
+    "272110": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    },
+    "099410": {
+      "status": "ok",
+      "records": 15,
+      "date_range": {
+        "start": "2025-09-01",
+        "end": "2025-09-19",
+        "days": 15
+      },
+      "quality_score": 0.15
+    }
+  }
+}

@@ -3,6 +3,7 @@
 후보 종목 선정 이력 및 관련 데이터 저장/조회
 """
 import sqlite3
+import json
 import pandas as pd
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -136,6 +137,68 @@ class DatabaseManager:
                     )
                 ''')
                 
+                # 재무 데이터 테이블
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS financial_data (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        stock_code VARCHAR(10) NOT NULL,
+                        base_year TEXT NOT NULL,
+                        base_quarter TEXT NOT NULL,
+                        report_date TEXT,
+                        per REAL,
+                        pbr REAL,
+                        eps REAL,
+                        bps REAL,
+                        roe REAL,
+                        roa REAL,
+                        debt_ratio REAL,
+                        operating_margin REAL,
+                        sales REAL,
+                        net_income REAL,
+                        market_cap REAL,
+                        industry_code TEXT,
+                        retrieved_at DATETIME,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(stock_code, base_year, base_quarter)
+                    )
+                ''')
+                
+                # 팩터 점수 테이블
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS quant_factors (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        calc_date TEXT NOT NULL,
+                        stock_code VARCHAR(10) NOT NULL,
+                        value_score REAL,
+                        momentum_score REAL,
+                        quality_score REAL,
+                        growth_score REAL,
+                        total_score REAL,
+                        factor_rank INTEGER,
+                        factor_details TEXT,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(calc_date, stock_code)
+                    )
+                ''')
+                
+                # 상위 포트폴리오 테이블
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS quant_portfolio (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        calc_date TEXT NOT NULL,
+                        stock_code VARCHAR(10) NOT NULL,
+                        stock_name TEXT,
+                        rank INTEGER,
+                        total_score REAL,
+                        reason TEXT,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(calc_date, stock_code)
+                    )
+                ''')
+                
                 # 기존 stock_prices 테이블에 인덱스 추가 (조회 성능 향상)
                 cursor.execute('''
                     CREATE INDEX IF NOT EXISTS idx_stock_prices_stock_datetime 
@@ -206,6 +269,12 @@ class DatabaseManager:
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_virtual_trading_test ON virtual_trading_records(is_test)')
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_real_trading_code_date ON real_trading_records(stock_code, timestamp)')
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_real_trading_action ON real_trading_records(action)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_financial_data_code ON financial_data(stock_code)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_financial_data_base ON financial_data(base_year, base_quarter)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_quant_factors_date ON quant_factors(calc_date)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_quant_factors_rank ON quant_factors(calc_date, factor_rank)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_quant_portfolio_date ON quant_portfolio(calc_date)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_quant_portfolio_rank ON quant_portfolio(calc_date, rank)')
                 
                 conn.commit()
                 self.logger.info("데이터베이스 테이블 생성 완료")
@@ -354,6 +423,197 @@ class DatabaseManager:
                 
         except Exception as e:
             self.logger.error(f"1분봉 데이터 저장 실패 ({stock_code}, {date_str}): {e}")
+            return False
+    
+    def upsert_financial_data(self, financial_rows: List[Dict[str, Any]]) -> bool:
+        """재무 지표 데이터 저장/갱신"""
+        try:
+            if not financial_rows:
+                self.logger.debug("재무 데이터 입력 없음")
+                return True
+            
+            def to_float(value: Any) -> float:
+                try:
+                    if value in (None, ""):
+                        return 0.0
+                    return float(str(value).replace(',', ''))
+                except (ValueError, TypeError):
+                    return 0.0
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                rows = []
+                now_str = now_kst().strftime('%Y-%m-%d %H:%M:%S')
+                
+                for row in financial_rows:
+                    rows.append((
+                        row.get('stock_code', '').strip(),
+                        str(row.get('base_year', '')).strip(),
+                        str(row.get('base_quarter', '')).strip(),
+                        str(row.get('report_date', '') or ''),
+                        to_float(row.get('per')),
+                        to_float(row.get('pbr')),
+                        to_float(row.get('eps')),
+                        to_float(row.get('bps')),
+                        to_float(row.get('roe')),
+                        to_float(row.get('roa')),
+                        to_float(row.get('debt_ratio')),
+                        to_float(row.get('operating_margin')),
+                        to_float(row.get('sales')),
+                        to_float(row.get('net_income')),
+                        to_float(row.get('market_cap')),
+                        str(row.get('industry_code', '') or '').strip(),
+                        row.get('retrieved_at') or row.get('created_at') or now_str,
+                        now_str
+                    ))
+                
+                cursor.executemany('''
+                    INSERT INTO financial_data (
+                        stock_code, base_year, base_quarter, report_date,
+                        per, pbr, eps, bps, roe, roa, debt_ratio, operating_margin,
+                        sales, net_income, market_cap, industry_code,
+                        retrieved_at, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(stock_code, base_year, base_quarter) DO UPDATE SET
+                        report_date = excluded.report_date,
+                        per = excluded.per,
+                        pbr = excluded.pbr,
+                        eps = excluded.eps,
+                        bps = excluded.bps,
+                        roe = excluded.roe,
+                        roa = excluded.roa,
+                        debt_ratio = excluded.debt_ratio,
+                        operating_margin = excluded.operating_margin,
+                        sales = excluded.sales,
+                        net_income = excluded.net_income,
+                        market_cap = excluded.market_cap,
+                        industry_code = excluded.industry_code,
+                        retrieved_at = excluded.retrieved_at,
+                        updated_at = CURRENT_TIMESTAMP
+                ''', rows)
+                
+                conn.commit()
+                self.logger.info(f"재무 데이터 {len(rows)}건 저장/갱신")
+                return True
+        
+        except Exception as e:
+            self.logger.error(f"재무 데이터 저장 실패: {e}")
+            return False
+    
+    def save_quant_factors(self, calc_date: str, factor_rows: List[Dict[str, Any]]) -> bool:
+        """일자별 팩터 스코어 저장 (기존 데이터 덮어쓰기)"""
+        try:
+            if not factor_rows:
+                self.logger.warning("저장할 팩터 데이터가 없습니다")
+                return True
+            
+            calc_date = str(calc_date)
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM quant_factors WHERE calc_date = ?', (calc_date,))
+                
+                now_str = now_kst().strftime('%Y-%m-%d %H:%M:%S')
+                rows = []
+                for idx, row in enumerate(factor_rows, start=1):
+                    factor_details = row.get('factor_details')
+                    if isinstance(factor_details, dict):
+                        factor_details = json.dumps(factor_details, ensure_ascii=False)
+                    rows.append((
+                        calc_date,
+                        row.get('stock_code', '').strip(),
+                        float(row.get('value_score', 0) or 0),
+                        float(row.get('momentum_score', 0) or 0),
+                        float(row.get('quality_score', 0) or 0),
+                        float(row.get('growth_score', 0) or 0),
+                        float(row.get('total_score', 0) or 0),
+                        int(row.get('rank') or row.get('factor_rank') or idx),
+                        factor_details or '',
+                        now_str,
+                        now_str
+                    ))
+                
+                cursor.executemany('''
+                    INSERT INTO quant_factors (
+                        calc_date, stock_code,
+                        value_score, momentum_score, quality_score, growth_score,
+                        total_score, factor_rank, factor_details,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', rows)
+                
+                conn.commit()
+                self.logger.info(f"{calc_date} 팩터 스코어 {len(rows)}건 저장")
+                return True
+        
+        except Exception as e:
+            self.logger.error(f"팩터 스코어 저장 실패: {e}")
+            return False
+    
+    def save_quant_portfolio(self, calc_date: str, portfolio_rows: List[Dict[str, Any]]) -> bool:
+        """일자별 상위 포트폴리오 저장 (기존 데이터 덮어쓰기)"""
+        try:
+            calc_date = str(calc_date)
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM quant_portfolio WHERE calc_date = ?', (calc_date,))
+                
+                if not portfolio_rows:
+                    conn.commit()
+                    self.logger.info(f"{calc_date} 포트폴리오 데이터 없음")
+                    return True
+                
+                now_str = now_kst().strftime('%Y-%m-%d %H:%M:%S')
+                rows = []
+                for row in portfolio_rows:
+                    rows.append((
+                        calc_date,
+                        row.get('stock_code', '').strip(),
+                        int(row.get('rank') or row.get('portfolio_rank') or 0),
+                        float(row.get('total_score', 0) or 0),
+                        row.get('reason', ''),
+                        now_str,
+                        now_str
+                    ))
+                
+                cursor.executemany('''
+                    INSERT INTO quant_portfolio (
+                        calc_date, stock_code, stock_name, rank, total_score, reason,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', rows)
+    def get_quant_portfolio(self, calc_date: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """일자별 상위 포트폴리오 조회"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT stock_code, stock_name, rank, total_score, reason
+                    FROM quant_portfolio
+                    WHERE calc_date = ?
+                    ORDER BY rank ASC
+                    LIMIT ?
+                ''', (calc_date, limit))
+                rows = cursor.fetchall()
+                return [
+                    {
+                        'stock_code': row[0],
+                        'stock_name': row[1],
+                        'rank': row[2],
+                        'total_score': row[3],
+                        'reason': row[4] or ''
+                    }
+                    for row in rows
+                ]
+        except Exception as e:
+            self.logger.error(f"quant 포트폴리오 조회 실패: {e}")
+            return []
+                
+                conn.commit()
+                self.logger.info(f"{calc_date} 포트폴리오 {len(rows)}건 저장")
+                return True
+        
+        except Exception as e:
+            self.logger.error(f"포트폴리오 저장 실패: {e}")
             return False
     
     def get_minute_data(self, stock_code: str, date_str: str) -> Optional[pd.DataFrame]:
