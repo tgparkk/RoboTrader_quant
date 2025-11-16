@@ -22,6 +22,35 @@
 - `main.DayTradingBot`에 `QuantScreeningService`를 주입하고 `_system_monitoring_task`에서 15:40 이후 하루 한 번 스크리닝을 실행하도록 스케줄링했습니다.  
   - 결과는 텔레그램으로 통지되며 `_check_condition_search()`에서 즉시 활용됩니다.
 
+## 5. 스코어링/정렬/저장 고도화 (7단계)
+- 최종 점수 = Value(30%) + Momentum(30%) + Quality(20%) + Growth(20%) 적용  
+- 동점 시 Momentum 우선 정렬 후 상위 50개 선정 저장
+
+## 6. 스케줄러 안정화 (8단계)
+- 일일 스크리닝 실행에 오류 재시도(기본 3회) 적용  
+- 완료 시 상위 5개 종목 텔레그램 요약 알림
+
+## 7. 리밸런싱 시스템 (9단계)
+- `core/quant/quant_rebalancing_service.py` 추가  
+  - 보유 vs 목표 비교로 매도/매수/유지 리스트 산출  
+  - 동등 비중 매수, 일간/주간/월간 주기 지원  
+
+## 8. 전략 통합 (10단계)
+- `strategies/quant_strategy.py`: 상위 50 포함 시 BUY 신호  
+- `strategies/combined_strategy.py`: quant 40%, pullback 20%, momentum 15%, breakout 10%, 기타 15%
+
+## 9. 테스트 및 백테스트 (11단계)
+- 단위 테스트 추가:  
+  - `tests/test_quant_factors.py` (팩터/점수 검증)  
+  - `tests/test_primary_filter.py` (1차 필터)  
+  - `tests/test_rebalancing.py` (리밸런싱 계획/실행)  
+- 백테스트 스크립트: `backtests/quant_monthly_backtest.py` (월간 리밸런싱)
+
+## 10. 실행 환경 및 운영 개선
+- `run_robotrader.bat` 개선: UTF-8 모드, 로그 파일 자동 생성, 선택적 pip/requirements 설치, PID 경고  
+- `config/trading_config.json`: `"paper_trading": true` (기본값)로 가상 매매 모드 지원  
+  - 실제 매매 전환은 `"paper_trading": false`로 설정
+
 ## 다음 단계
 1. **팩터 계산 정밀화**  
    - Value/Momentum/Quality/Growth 점수식을 사용자 정의 기준(문서 3~6단계)에 맞게 세분화  

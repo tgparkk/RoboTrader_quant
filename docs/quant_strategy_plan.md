@@ -68,3 +68,49 @@
 - 2주차: Momentum/Quality/Growth, 스코어링
 - 3주차: 스케줄러, 리밸런싱, 통합, 테스트/검증
 
+
+## 구현 현황 요약 (업데이트)
+
+- 2단계: 1차 필터링 구현
+  - 시총 ≥ 1,000억원, 최근 20일 일평균 거래대금 ≥ 10억원, 주가 1,000~500,000원, 상장 ≥ 250 거래일, 재무데이터 존재 확인
+  - 통계 로깅(제외 사유 TOP5) 추가
+
+- 3~6단계: 팩터 점수 계산 적용
+  - Value: PER/PBR/PSR 점수화(임시 기준값 기반), EPS/BPS 음수 0점 처리. PCR, EV/EBITDA는 추후 데이터 확충 시 추가
+  - Momentum: 1M/3M/6M/12M 수익률 + RSI(14) 점수, 가중치 계획서대로 반영
+  - Quality: ROE/ROA(근사)/부채·유동비율(근사)/영업이익률 점수, 가중치 반영
+  - Growth: 매출·순이익·EPS 성장률 점수(일부 근사), 가중치 반영
+
+- 7단계: 종합 스코어링 및 동점 처리
+  - 최종 점수 = Value(30%) + Momentum(30%) + Quality(20%) + Growth(20%)
+  - 동점 시 Momentum 우선 정렬, 상위 50개 선정 저장
+
+- 8단계: 스케줄러
+  - 15:40 일일 스크리닝 실행
+  - 오류 재시도(기본 3회) 및 상위 5개 텔레그램 알림
+
+- 9단계: 리밸런싱
+  - `core/quant/quant_rebalancing_service.py`
+  - 보유 vs 목표 비교 → 매도/매수/유지 산출, 동등 비중 매수
+  - 주기: 일간/주간/월간 지원
+
+- 10단계: 통합 전략
+  - `strategies/quant_strategy.py`: 상위 50 포함 시 BUY
+  - `strategies/combined_strategy.py`: quant 40%, pullback 20%, momentum 15%, breakout 10%, 기타 15%
+
+- 11단계: 테스트/백테스트
+  - 단위 테스트: `tests/test_quant_factors.py`, `tests/test_primary_filter.py`, `tests/test_rebalancing.py`
+  - 월간 리밸런싱 백테스트: `backtests/quant_monthly_backtest.py`
+
+- 실행/운영
+  - 배치: `run_robotrader.bat` 개선 (UTF-8, 로그 파일, 선택적 pip/requirements 설치, PID 경고)
+  - 가상 매매 모드: `config/trading_config.json` → `"paper_trading": true` (기본 활성화)
+  - 실제 매매 전환 시 `"paper_trading": false` 로 변경
+
+
+## 실행/운영 메모
+
+- 일일 스크리닝: 메인 프로세스에서 15:40 자동 실행 (실패 시 3회 재시도)
+- 상위 포트/팩터 저장: DB `quant_portfolio`, `quant_factors`
+- 텔레그램: 스크리닝 완료 후 상위 5개 종목 요약 전송
+- 리밸런싱: 계획 계산/실행 분리(실행부는 향후 예약 주문 로직으로 확장 예정)

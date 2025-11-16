@@ -89,6 +89,37 @@ class OrderManager:
             timeout_seconds = timeout_seconds or self.config.order_management.buy_timeout_seconds
             
             self.logger.info(f"📈 매수 주문 시도: {stock_code} {quantity}주 @{price:,.0f}원 (타임아웃: {timeout_seconds}초)")
+
+            # 🆕 가상매매 모드: 즉시 체결로 시뮬레이션
+            if getattr(self.config, "paper_trading", False):
+                fake_order_id = f"VT-BUY-{stock_code}-{int(now_kst().timestamp())}"
+                order = Order(
+                    order_id=fake_order_id,
+                    stock_code=stock_code,
+                    order_type=OrderType.BUY,
+                    price=price,
+                    quantity=quantity,
+                    timestamp=now_kst(),
+                    status=OrderStatus.FILLED,
+                    remaining_quantity=0,
+                    order_3min_candle_time=self._get_current_3min_candle_time()
+                )
+                self.completed_orders.append(order)
+                self.logger.info(f"🧪(가상) 매수 체결: {fake_order_id} - {stock_code} {quantity}주 @{price:,.0f}원")
+                if self.telegram:
+                    await self.telegram.notify_order_filled({
+                        'stock_code': stock_code,
+                        'stock_name': f'Stock_{stock_code}',
+                        'order_type': order.order_type.value,
+                        'quantity': order.quantity,
+                        'price': order.price
+                    })
+                if self.trading_manager:
+                    try:
+                        await self.trading_manager.on_order_filled(order)
+                    except Exception as callback_err:
+                        self.logger.error(f"❌ (가상) 체결 콜백 오류: {callback_err}")
+                return fake_order_id
             
             # API 호출을 별도 스레드에서 실행
             loop = asyncio.get_event_loop()
@@ -146,6 +177,36 @@ class OrderManager:
             timeout_seconds = timeout_seconds or self.config.order_management.sell_timeout_seconds
             
             self.logger.info(f"📉 매도 주문 시도: {stock_code} {quantity}주 @{price:,.0f}원 (타임아웃: {timeout_seconds}초, 시장가: {market})")
+
+            # 🆕 가상매매 모드: 즉시 체결로 시뮬레이션
+            if getattr(self.config, "paper_trading", False):
+                fake_order_id = f"VT-SELL-{stock_code}-{int(now_kst().timestamp())}"
+                order = Order(
+                    order_id=fake_order_id,
+                    stock_code=stock_code,
+                    order_type=OrderType.SELL,
+                    price=price,
+                    quantity=quantity,
+                    timestamp=now_kst(),
+                    status=OrderStatus.FILLED,
+                    remaining_quantity=0
+                )
+                self.completed_orders.append(order)
+                self.logger.info(f"🧪(가상) 매도 체결: {fake_order_id} - {stock_code} {quantity}주 @{price:,.0f}원 ({'시장가' if market else '지정가'})")
+                if self.telegram:
+                    await self.telegram.notify_order_filled({
+                        'stock_code': stock_code,
+                        'stock_name': f'Stock_{stock_code}',
+                        'order_type': order.order_type.value,
+                        'quantity': order.quantity,
+                        'price': order.price
+                    })
+                if self.trading_manager:
+                    try:
+                        await self.trading_manager.on_order_filled(order)
+                    except Exception as callback_err:
+                        self.logger.error(f"❌ (가상) 체결 콜백 오류: {callback_err}")
+                return fake_order_id
             
             # API 호출을 별도 스레드에서 실행
             loop = asyncio.get_event_loop()

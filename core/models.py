@@ -308,6 +308,7 @@ class TradingConfig:
     risk_management: RiskManagementConfig = field(default_factory=RiskManagementConfig)
     strategy: StrategyConfig = field(default_factory=StrategyConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    paper_trading: bool = True  # 🆕 가상 매매 모드 (기본 활성화)
     
     @classmethod
     def from_json(cls, json_data: Dict[str, Any]) -> 'TradingConfig':
@@ -340,5 +341,6 @@ class TradingConfig:
             logging=LoggingConfig(
                 level=json_data.get('logging', {}).get('level', 'INFO'),
                 file_retention_days=json_data.get('logging', {}).get('file_retention_days', 30)
-            )
+            ),
+            paper_trading=json_data.get('paper_trading', True)
         )

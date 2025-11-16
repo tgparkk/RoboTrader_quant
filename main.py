@@ -46,17 +46,16 @@ class DayTradingBot:
         # 설정 초기화
         self.config = self._load_config()
         
-        # 핵심 모듈 초기화
+        # 핵심 모듈 초기화 (의존 순서 주의)
         self.api_manager = KISAPIManager()
+        self.db_manager = DatabaseManager()  # 먼저 생성 (후속 모듈에서 필요)
         self.telegram = TelegramIntegration(trading_bot=self)
         self.data_collector = RealTimeDataCollector(self.config, self.api_manager)
         self.order_manager = OrderManager(self.config, self.api_manager, self.telegram)
-        self.candidate_selector = CandidateSelector(self.config, self.api_manager, db_manager=self.db_manager)
         self.intraday_manager = IntradayStockManager(self.api_manager)  # 🆕 장중 종목 관리자
         self.trading_manager = TradingStockManager(
             self.intraday_manager, self.data_collector, self.order_manager, self.telegram
         )  # 🆕 거래 상태 통합 관리자
-        self.db_manager = DatabaseManager()
         self.decision_engine = TradingDecisionEngine(
             db_manager=self.db_manager,
             telegram_integration=self.telegram,
@@ -64,7 +63,8 @@ class DayTradingBot:
             api_manager=self.api_manager,
             intraday_manager=self.intraday_manager
         )  # 🆕 매매 판단 엔진
-
+        self.candidate_selector = CandidateSelector(self.config, self.api_manager, db_manager=self.db_manager)
+        
         # 🆕 TradingStockManager에 decision_engine 연결 (쿨다운 설정용)
         self.trading_manager.set_decision_engine(self.decision_engine)
 
@@ -754,17 +754,39 @@ class DayTradingBot:
             self.logger.error(f"❌ 시스템 상태 로깅 오류: {e}")
     
     async def _run_quant_screening(self):
-        """일일 퀀트 스크리닝 실행"""
+        """일일 퀀트 스크리닝 실행 (8단계 기준)"""
         try:
             self.logger.info("📊 15:40 퀀트 스크리닝 시작")
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self.quant_screening_service.run_daily_screening)
-            self._last_quant_screening_date = now_kst().date()
-            self.logger.info("✅ 퀀트 스크리닝 완료")
-            if self.telegram:
-                await self.telegram.notify_system_status("퀀트 스크리닝 완료")
+            
+            # 오류 재시도 포함된 스크리닝 실행
+            result = await loop.run_in_executor(
+                None, 
+                self.quant_screening_service.run_daily_screening,
+                None,  # calc_date (오늘)
+                50,    # portfolio_size
+                3      # max_retries
+            )
+            
+            if result:
+                self._last_quant_screening_date = now_kst().date()
+                self.logger.info("✅ 퀀트 스크리닝 완료")
+                if self.telegram:
+                    # 상위 종목 정보 포함하여 알림
+                    portfolio = self.db_manager.get_quant_portfolio(now_kst().strftime('%Y%m%d'), limit=5)
+                    if portfolio:
+                        message = "📊 퀀트 스크리닝 완료\n\n상위 5개 종목:\n"
+                        for row in portfolio[:5]:
+                            message += f"{row['rank']}. {row['stock_name']} ({row['stock_code']}) - {row['total_score']:.1f}점\n"
+                        await self.telegram.notify_system_status(message)
+                    else:
+                        await self.telegram.notify_system_status("퀀트 스크리닝 완료")
+            else:
+                self.logger.error("❌ 퀀트 스크리닝 실패 (재시도 모두 실패)")
+                if self.telegram:
+                    await self.telegram.notify_error("Quant Screening", "스크리닝 실패 (재시도 3회 모두 실패)")
         except Exception as e:
-            self.logger.error(f"❌ 퀀트 스크리닝 실패: {e}")
+            self.logger.error(f"❌ 퀀트 스크리닝 예외 발생: {e}")
             if self.telegram:
                 await self.telegram.notify_error("Quant Screening", e)
         finally:

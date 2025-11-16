@@ -36,5 +36,6 @@
   "logging": {
     "level": "INFO",
     "file_retention_days": 30
-  }
+  },
+  "paper_trading": true
 }
