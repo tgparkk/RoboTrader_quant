@@ -1,0 +1,10 @@
+pandas
+numpy
+psutil
+aiohttp
+requests
+python-dateutil
+pytz
+python-telegram-bot
+PyYAML
+matplotlib

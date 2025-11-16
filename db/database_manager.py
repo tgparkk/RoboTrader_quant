@@ -568,6 +568,7 @@ class DatabaseManager:
                     rows.append((
                         calc_date,
                         row.get('stock_code', '').strip(),
+                        row.get('stock_name', ''),
                         int(row.get('rank') or row.get('portfolio_rank') or 0),
                         float(row.get('total_score', 0) or 0),
                         row.get('reason', ''),
@@ -581,6 +582,15 @@ class DatabaseManager:
                         created_at, updated_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ''', rows)
+                
+                conn.commit()
+                self.logger.info(f"{calc_date} 포트폴리오 {len(rows)}건 저장")
+                return True
+        
+        except Exception as e:
+            self.logger.error(f"포트폴리오 저장 실패: {e}")
+            return False
+    
     def get_quant_portfolio(self, calc_date: str, limit: int = 50) -> List[Dict[str, Any]]:
         """일자별 상위 포트폴리오 조회"""
         try:
@@ -607,14 +617,6 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"quant 포트폴리오 조회 실패: {e}")
             return []
-                
-                conn.commit()
-                self.logger.info(f"{calc_date} 포트폴리오 {len(rows)}건 저장")
-                return True
-        
-        except Exception as e:
-            self.logger.error(f"포트폴리오 저장 실패: {e}")
-            return False
     
     def get_minute_data(self, stock_code: str, date_str: str) -> Optional[pd.DataFrame]:
         """1분봉 데이터를 기존 stock_prices 테이블에서 조회"""
@@ -908,7 +910,7 @@ class DatabaseManager:
                 ))
                 conn.commit()
                 self.logger.info(
-                    f"✅ 실거래 매도 기록 저장: {stock_code} {quantity}주 @{price:,.0f} 손익 {profit_loss:+,.0f}원 ({profit_rate:+.2f}%)"
+                    f"✅ 실거래 매도 기록 저장: {stock_code} {quantity}주 @{price:,.0f} 손익 {profit_loss:+, .0f}원 ({profit_rate:+.2f}%)"
                 )
                 return True
         except Exception as e:
