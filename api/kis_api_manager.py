@@ -149,8 +149,10 @@ class KISAPIManager:
                 if not self._ensure_authenticated():
                     raise Exception("인증 실패")
                 
-                # API 호출 속도 제한
-                self._rate_limit()
+                # 🆕 kis_auth의 _url_fetch가 이미 속도 제한을 처리하므로
+                # kis_api_manager의 _rate_limit()은 제거 (중복 제한 방지)
+                # 단, kis_auth를 거치지 않는 직접 호출의 경우에만 필요
+                # self._rate_limit()  # 주석 처리: kis_auth에서 이미 처리됨
                 
                 # 실제 API 호출
                 result = api_func(*args, **kwargs)

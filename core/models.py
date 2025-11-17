@@ -309,6 +309,7 @@ class TradingConfig:
     strategy: StrategyConfig = field(default_factory=StrategyConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     paper_trading: bool = True  # 🆕 가상 매매 모드 (기본 활성화)
+    rebalancing_mode: bool = False  # 🆕 리밸런싱 모드 (일봉 데이터만 수집)
     
     @classmethod
     def from_json(cls, json_data: Dict[str, Any]) -> 'TradingConfig':
@@ -342,5 +343,6 @@ class TradingConfig:
                 level=json_data.get('logging', {}).get('level', 'INFO'),
                 file_retention_days=json_data.get('logging', {}).get('file_retention_days', 30)
             ),
-            paper_trading=json_data.get('paper_trading', True)
+            paper_trading=json_data.get('paper_trading', True),
+            rebalancing_mode=json_data.get('rebalancing_mode', False)
         )

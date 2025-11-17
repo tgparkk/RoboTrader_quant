@@ -36,6 +36,15 @@ class CandidateSelector:
         
         # stock_list.json 파일 경로
         self.stock_list_file = Path(__file__).parent.parent / "stock_list.json"
+        
+        # 선정 통계 수집
+        self.selection_stats = {
+            'total_analyzed': 0,
+            'passed_basic_filter': 0,
+            'passed_detailed_analysis': 0,
+            'final_selected': 0,
+            'last_selection_time': None
+        }
     
     async def select_daily_candidates(self, max_candidates: int = 5) -> List[CandidateStock]:
         """
@@ -57,20 +66,28 @@ class CandidateSelector:
                 return []
             
             self.logger.info(f"전체 종목 수: {len(all_stocks)}")
+            self.selection_stats['total_analyzed'] = len(all_stocks)
             
             # 2. 1차 필터링: 기본 조건 체크
             filtered_stocks = await self._apply_basic_filters(all_stocks)
             self.logger.info(f"1차 필터링 후: {len(filtered_stocks)}개 종목")
+            self.selection_stats['passed_basic_filter'] = len(filtered_stocks)
             
             # 3. 2차 필터링: 상세 분석
             candidate_stocks = await self._analyze_candidates(filtered_stocks)
             self.logger.info(f"2차 분석 후: {len(candidate_stocks)}개 후보")
+            self.selection_stats['passed_detailed_analysis'] = len(candidate_stocks)
             
             # 4. 점수 기준 정렬 및 상위 종목 선정
             candidate_stocks.sort(key=lambda x: x.score, reverse=True)
             selected_candidates = candidate_stocks[:max_candidates]
+            self.selection_stats['final_selected'] = len(selected_candidates)
+            self.selection_stats['last_selection_time'] = now_kst()
             
-            self.logger.info(f"✅ 최종 선정된 후보 종목: {len(selected_candidates)}개")
+            # 통계 로깅
+            success_rate = (len(selected_candidates) / max(len(all_stocks), 1)) * 100
+            filter_rate = (len(filtered_stocks) / max(len(all_stocks), 1)) * 100
+            self.logger.info(f"✅ 최종 선정된 후보 종목: {len(selected_candidates)}개 (선정률: {success_rate:.2f}%, 1차 통과율: {filter_rate:.2f}%)")
             for candidate in selected_candidates:
                 self.logger.info(f"  - {candidate.code}({candidate.name}): {candidate.score:.2f}점 - {candidate.reason}")
             
@@ -79,6 +96,23 @@ class CandidateSelector:
         except Exception as e:
             self.logger.error(f"❌ 후보 종목 선정 실패: {e}")
             return []
+    
+    def get_selection_statistics(self) -> Dict:
+        """선정 통계 정보 반환"""
+        stats = self.selection_stats.copy()
+        if stats['total_analyzed'] > 0:
+            stats['basic_filter_rate'] = round((stats['passed_basic_filter'] / stats['total_analyzed']) * 100, 2)
+            stats['detailed_analysis_rate'] = round((stats['passed_detailed_analysis'] / stats['total_analyzed']) * 100, 2)
+            stats['final_selection_rate'] = round((stats['final_selected'] / stats['total_analyzed']) * 100, 2)
+        else:
+            stats['basic_filter_rate'] = 0
+            stats['detailed_analysis_rate'] = 0
+            stats['final_selection_rate'] = 0
+        
+        if stats['last_selection_time']:
+            stats['last_selection_time'] = stats['last_selection_time'].isoformat()
+        
+        return stats
     
     def _load_stock_list(self) -> List[Dict]:
         """stock_list.json 파일에서 종목 리스트 로드"""

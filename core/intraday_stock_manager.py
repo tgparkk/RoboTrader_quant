@@ -64,14 +64,16 @@ class IntradayStockManager:
     4. 데이터 분석을 위한 편의 함수 제공
     """
     
-    def __init__(self, api_manager):
+    def __init__(self, api_manager, config=None):
         """
         초기화
 
         Args:
             api_manager: KIS API 매니저 인스턴스
+            config: 거래 설정 (선택, 리밸런싱 모드 확인용)
         """
         self.api_manager = api_manager
+        self.config = config
         self.logger = setup_logger(__name__)
 
         # 메모리 저장소
@@ -149,7 +151,13 @@ class IntradayStockManager:
             # 🔥 과거 데이터 수집 (09:05 이전에도 시도)
             current_time = now_kst()
             self.logger.info(f"📈 {stock_code} 과거 데이터 수집 시작... (선정시간: {current_time.strftime('%H:%M:%S')})")
-            success = await self._collect_historical_data(stock_code)
+            
+            # 🆕 리밸런싱 모드: 일봉 데이터만 수집 (분봉 데이터 불필요)
+            # 리밸런싱 방식은 09:05에 한 번에 매수하므로 분봉 데이터가 필요 없음
+            if hasattr(self, 'config') and getattr(self.config, 'rebalancing_mode', False):
+                success = await self._collect_daily_data_only(stock_code)
+            else:
+                success = await self._collect_historical_data(stock_code)
 
             # 🆕 시장 시작 5분 이내 선정이고 데이터 부족한 경우 플래그 설정 (동적 시간 적용)
             market_hours = MarketHours.get_market_hours('KRX', current_time)
@@ -185,6 +193,64 @@ class IntradayStockManager:
                     del self.selected_stocks[stock_code]
             self.logger.error(f"❌ {stock_code} 종목 추가 오류: {e}")
             return False
+    
+    async def _collect_daily_data_only(self, stock_code: str) -> bool:
+        """
+        리밸런싱 모드: 일봉 데이터만 수집 (분봉 데이터 불필요)
+        
+        리밸런싱 방식은 09:05에 한 번에 매수하므로 분봉 데이터가 필요 없습니다.
+        일봉 데이터만 수집하여 API 호출을 최소화합니다.
+        
+        Args:
+            stock_code: 종목코드
+            
+        Returns:
+            bool: 수집 성공 여부
+        """
+        try:
+            with self._lock:
+                if stock_code not in self.selected_stocks:
+                    return False
+                    
+                stock_data = self.selected_stocks[stock_code]
+                selected_time = stock_data.selected_time
+            
+            self.logger.info(f"📊 {stock_code} 일봉 데이터만 수집 (리밸런싱 모드)")
+            
+            # 일봉 데이터 조회 (최근 30일)
+            daily_data = self.api_manager.get_ohlcv_data(stock_code, "D", 30)
+            
+            if daily_data is None or daily_data.empty:
+                self.logger.warning(f"⚠️ {stock_code} 일봉 데이터 조회 실패")
+                # 실패해도 종목은 추가 (일봉 데이터는 나중에 재시도 가능)
+                with self._lock:
+                    if stock_code in self.selected_stocks:
+                        self.selected_stocks[stock_code].daily_data = pd.DataFrame()
+                        self.selected_stocks[stock_code].data_complete = True
+                        self.selected_stocks[stock_code].last_update = now_kst()
+                return True  # 종목은 추가하되 데이터는 빈 DataFrame
+            
+            # 메모리에 저장
+            with self._lock:
+                if stock_code in self.selected_stocks:
+                    self.selected_stocks[stock_code].daily_data = daily_data
+                    self.selected_stocks[stock_code].historical_data = pd.DataFrame()  # 분봉 데이터는 빈 DataFrame
+                    self.selected_stocks[stock_code].data_complete = True
+                    self.selected_stocks[stock_code].last_update = now_kst()
+            
+            self.logger.info(f"✅ {stock_code} 일봉 데이터 수집 완료: {len(daily_data)}개")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ {stock_code} 일봉 데이터 수집 오류: {e}")
+            # 오류 발생 시에도 종목은 추가 (데이터는 나중에 재시도)
+            with self._lock:
+                if stock_code in self.selected_stocks:
+                    self.selected_stocks[stock_code].daily_data = pd.DataFrame()
+                    self.selected_stocks[stock_code].historical_data = pd.DataFrame()
+                    self.selected_stocks[stock_code].data_complete = True
+                    self.selected_stocks[stock_code].last_update = now_kst()
+            return True
     
     async def _collect_historical_data(self, stock_code: str) -> bool:
         """

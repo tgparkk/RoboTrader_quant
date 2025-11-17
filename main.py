@@ -29,6 +29,7 @@ from utils.korean_time import now_kst, get_market_status, is_market_open, KST
 from config.market_hours import MarketHours
 from post_market_chart_generator import PostMarketChartGenerator
 from core.quant.quant_screening_service import QuantScreeningService
+from core.quant.quant_rebalancing_service import QuantRebalancingService, RebalancingPeriod
 
 
 class DayTradingBot:
@@ -53,7 +54,7 @@ class DayTradingBot:
         self.telegram = TelegramIntegration(trading_bot=self)
         self.data_collector = RealTimeDataCollector(self.config, self.api_manager)
         self.order_manager = OrderManager(self.config, self.api_manager, self.telegram)
-        self.intraday_manager = IntradayStockManager(self.api_manager)  # 🆕 장중 종목 관리자
+        self.intraday_manager = IntradayStockManager(self.api_manager, self.config)  # 🆕 장중 종목 관리자
         self.trading_manager = TradingStockManager(
             self.intraday_manager, self.data_collector, self.order_manager, self.telegram
         )  # 🆕 거래 상태 통합 관리자
@@ -76,6 +77,16 @@ class DayTradingBot:
         )
         self._last_quant_screening_date = None
         self._quant_screening_task = None
+        
+        # 🆕 리밸런싱 서비스 초기화 (9단계)
+        self.rebalancing_service = QuantRebalancingService(
+            api_manager=self.api_manager,
+            db_manager=self.db_manager,
+            order_manager=self.order_manager,
+            telegram=self.telegram
+        )
+        self.rebalancing_service.rebalancing_period = RebalancingPeriod.DAILY  # 일간 리밸런싱
+        self._last_rebalancing_date = None  # 마지막 리밸런싱 실행 날짜
         
         
         # 신호 핸들러 등록
@@ -204,7 +215,8 @@ class DayTradingBot:
                 self.trading_manager.start_monitoring(),
                 self._trading_decision_task(),
                 self._system_monitoring_task(),
-                self._telegram_task()
+                self._telegram_task(),
+                self._rebalancing_task()  # 🆕 리밸런싱 태스크 추가 (9단계)
             ]
             
             # 모든 태스크 실행
@@ -552,6 +564,215 @@ class DayTradingBot:
         except Exception as e:
             self.logger.error(f"❌ 텔레그램 태스크 오류: {e}")
     
+    async def _rebalancing_task(self):
+        """리밸런싱 태스크 (9단계: 익일 09:05 시장가 매도/매수)"""
+        try:
+            self.logger.info("🔄 리밸런싱 태스크 시작")
+            
+            while self.is_running:
+                try:
+                    current_time = now_kst()
+                    
+                    # 장이 열려있지 않으면 대기
+                    if not is_market_open(current_time):
+                        await asyncio.sleep(60)
+                        continue
+                    
+                    # 09:05 시점 체크 (시초가 형성 후)
+                    if current_time.hour == 9 and current_time.minute == 5:
+                        # 하루에 한 번만 실행
+                        today_str = current_time.strftime('%Y%m%d')
+                        if self._last_rebalancing_date != today_str:
+                            # 리밸런싱 필요 여부 확인
+                            if self.rebalancing_service.should_rebalance(today_str):
+                                self.logger.info(f"🔄 리밸런싱 시작: {today_str}")
+                                
+                                # 리밸런싱 계획 계산
+                                plan = self.rebalancing_service.calculate_rebalancing_plan(today_str)
+                                
+                                if plan and (plan.get('sell_list') or plan.get('buy_list')):
+                                    # 리밸런싱 실행 (비동기로 변환 필요)
+                                    await self._execute_rebalancing_async(plan)
+                                    self._last_rebalancing_date = today_str
+                                    self.logger.info(f"✅ 리밸런싱 완료: {today_str}")
+                                else:
+                                    self.logger.info(f"ℹ️ 리밸런싱 불필요: 목표 포트와 동일")
+                                    self._last_rebalancing_date = today_str
+                            else:
+                                self.logger.debug(f"⏭️ 리밸런싱 스킵: 주기 조건 미충족")
+                                self._last_rebalancing_date = today_str
+                    
+                    # 1분마다 체크
+                    await asyncio.sleep(10)
+                    
+                except Exception as e:
+                    self.logger.error(f"❌ 리밸런싱 태스크 루프 오류: {e}")
+                    await asyncio.sleep(60)
+                    
+        except Exception as e:
+            self.logger.error(f"❌ 리밸런싱 태스크 오류: {e}")
+    
+    async def _execute_rebalancing_async(self, plan):
+        """리밸런싱 실행 (비동기 버전)"""
+        try:
+            
+            sell_list = plan.get('sell_list', [])
+            buy_list = plan.get('buy_list', [])
+            
+            self.logger.info(f"🔄 리밸런싱 실행: 매도 {len(sell_list)}개, 매수 {len(buy_list)}개")
+            
+            # 1단계: 매도 주문 (시장가 전량)
+            sell_results = []
+            for sell_item in sell_list:
+                stock_code = sell_item['stock_code']
+                quantity = sell_item['quantity']
+                stock_name = sell_item.get('stock_name', stock_code)
+                
+                try:
+                    # 현재가 조회 (시장가 매도용)
+                    current_price_data = self.api_manager.get_current_price(stock_code)
+                    if not current_price_data:
+                        self.logger.error(f"❌ {stock_code} 현재가 조회 실패")
+                        continue
+                    
+                    current_price = current_price_data.current_price
+                    
+                    # 시장가 매도 주문
+                    order_id = await self.order_manager.place_sell_order(
+                        stock_code=stock_code,
+                        quantity=quantity,
+                        price=current_price,  # 시장가는 가격 0으로 주문하지만, 여기서는 현재가 사용
+                        market=True  # 시장가 주문
+                    )
+                    
+                    if order_id:
+                        sell_results.append({
+                            'stock_code': stock_code,
+                            'stock_name': stock_name,
+                            'quantity': quantity,
+                            'success': True,
+                            'order_id': order_id
+                        })
+                        self.logger.info(f"✅ 리밸런싱 매도 주문: {stock_code}({stock_name}) {quantity}주 시장가")
+                    else:
+                        sell_results.append({
+                            'stock_code': stock_code,
+                            'stock_name': stock_name,
+                            'quantity': quantity,
+                            'success': False
+                        })
+                        self.logger.error(f"❌ 리밸런싱 매도 주문 실패: {stock_code}")
+                    
+                    # API 호출 간격 조절
+                    await asyncio.sleep(0.1)
+                    
+                except Exception as e:
+                    self.logger.error(f"❌ 리밸런싱 매도 오류 {stock_code}: {e}")
+                    sell_results.append({
+                        'stock_code': stock_code,
+                        'stock_name': stock_name,
+                        'quantity': quantity,
+                        'success': False
+                    })
+            
+            # 매도 완료 대기 (최대 5분)
+            if sell_results:
+                self.logger.info(f"⏳ 매도 주문 체결 대기 중... (최대 5분)")
+                await asyncio.sleep(300)  # 5분 대기
+            
+            # 2단계: 매수 주문 (동등 비중, 시장가)
+            buy_results = []
+            for buy_item in buy_list:
+                stock_code = buy_item['stock_code']
+                target_amount = buy_item['target_amount']
+                stock_name = buy_item.get('stock_name', stock_code)
+                
+                try:
+                    # 현재가 조회
+                    current_price_data = self.api_manager.get_current_price(stock_code)
+                    if not current_price_data:
+                        self.logger.error(f"❌ {stock_code} 현재가 조회 실패")
+                        continue
+                    
+                    current_price = current_price_data.current_price
+                    
+                    # 목표 수량 계산
+                    target_quantity = int(target_amount / current_price)
+                    if target_quantity <= 0:
+                        self.logger.warning(f"⚠️ {stock_code} 목표 수량 0 (금액 부족)")
+                        continue
+                    
+                    # 시장가 매수 주문
+                    order_id = await self.order_manager.place_buy_order(
+                        stock_code=stock_code,
+                        quantity=target_quantity,
+                        price=current_price,  # 시장가는 가격 0으로 주문하지만, 여기서는 현재가 사용
+                        timeout_seconds=300
+                    )
+                    
+                    if order_id:
+                        buy_results.append({
+                            'stock_code': stock_code,
+                            'stock_name': stock_name,
+                            'target_amount': target_amount,
+                            'quantity': target_quantity,
+                            'success': True,
+                            'order_id': order_id
+                        })
+                        self.logger.info(f"✅ 리밸런싱 매수 주문: {stock_code}({stock_name}) {target_quantity}주 시장가 (목표: {target_amount:,.0f}원)")
+                    else:
+                        buy_results.append({
+                            'stock_code': stock_code,
+                            'stock_name': stock_name,
+                            'target_amount': target_amount,
+                            'quantity': target_quantity,
+                            'success': False
+                        })
+                        self.logger.error(f"❌ 리밸런싱 매수 주문 실패: {stock_code}")
+                    
+                    # API 호출 간격 조절
+                    await asyncio.sleep(0.1)
+                    
+                except Exception as e:
+                    self.logger.error(f"❌ 리밸런싱 매수 오류 {stock_code}: {e}")
+                    buy_results.append({
+                        'stock_code': stock_code,
+                        'stock_name': stock_name,
+                        'target_amount': target_amount,
+                        'success': False
+                    })
+            
+            # 결과 로깅
+            success_sell = sum(1 for r in sell_results if r.get('success'))
+            success_buy = sum(1 for r in buy_results if r.get('success'))
+            
+            self.logger.info(
+                f"✅ 리밸런싱 실행 완료: "
+                f"매도 {success_sell}/{len(sell_results)}건 성공, "
+                f"매수 {success_buy}/{len(buy_results)}건 성공"
+            )
+            
+            # 텔레그램 알림
+            if self.telegram:
+                message = f"🔄 리밸런싱 완료\n\n"
+                message += f"매도: {success_sell}/{len(sell_results)}건 성공\n"
+                message += f"매수: {success_buy}/{len(buy_results)}건 성공\n"
+                if sell_results:
+                    message += f"\n매도 종목:\n"
+                    for r in sell_results[:5]:
+                        status = "✅" if r.get('success') else "❌"
+                        message += f"{status} {r['stock_code']}({r.get('stock_name', '')}) {r['quantity']}주\n"
+                if buy_results:
+                    message += f"\n매수 종목:\n"
+                    for r in buy_results[:5]:
+                        status = "✅" if r.get('success') else "❌"
+                        message += f"{status} {r['stock_code']}({r.get('stock_name', '')}) {r.get('quantity', 0)}주\n"
+                await self.telegram.notify_system_status(message)
+            
+        except Exception as e:
+            self.logger.error(f"❌ 리밸런싱 실행 오류: {e}")
+            await self.telegram.notify_error("Rebalancing Execution", e)
+    
     async def _system_monitoring_task(self):
         """시스템 모니터링 태스크"""
         try:
@@ -743,13 +964,36 @@ class DayTradingBot:
             candidate_stocks = self.data_collector.get_candidate_stocks()
             data_counts = {stock.code: len(stock.ohlcv_data) for stock in candidate_stocks}
             
-            self.logger.info(
-                f"📊 시스템 상태 [{current_time.strftime('%H:%M:%S')}]\n"
-                f"  - 시장 상태: {market_status}\n"
-                f"  - 미체결 주문: {order_summary['pending_count']}건\n"
-                f"  - 완료 주문: {order_summary['completed_count']}건\n"
-                f"  - 데이터 수집: {data_counts}"
-            )
+            # API 통계 수집
+            from api import kis_auth
+            api_stats = kis_auth.get_api_statistics()
+            
+            # API 매니저 통계
+            api_manager_stats = self.api_manager.get_api_statistics() if hasattr(self.api_manager, 'get_api_statistics') else {}
+            
+            # 후보 선정 통계
+            selection_stats = {}
+            if hasattr(self, 'candidate_selector') and hasattr(self.candidate_selector, 'get_selection_statistics'):
+                selection_stats = self.candidate_selector.get_selection_statistics()
+            
+            status_lines = [
+                f"📊 시스템 상태 [{current_time.strftime('%H:%M:%S')}]",
+                f"  - 시장 상태: {market_status}",
+                f"  - 미체결 주문: {order_summary['pending_count']}건",
+                f"  - 완료 주문: {order_summary['completed_count']}건",
+                f"  - 데이터 수집: {data_counts}",
+                f"  - API 통계: 총 {api_stats['total_calls']}회 호출, 성공률 {api_stats['success_rate']}%, 속도제한 {api_stats['rate_limit_errors']}회 ({api_stats['rate_limit_rate']}%)"
+            ]
+            
+            # 후보 선정 통계 추가
+            if selection_stats and selection_stats.get('total_analyzed', 0) > 0:
+                status_lines.append(
+                    f"  - 후보 선정: 전체 {selection_stats['total_analyzed']}개 분석, "
+                    f"1차 통과 {selection_stats['passed_basic_filter']}개 ({selection_stats.get('basic_filter_rate', 0)}%), "
+                    f"최종 선정 {selection_stats['final_selected']}개 ({selection_stats.get('final_selection_rate', 0)}%)"
+                )
+            
+            self.logger.info("\n".join(status_lines))
             
         except Exception as e:
             self.logger.error(f"❌ 시스템 상태 로깅 오류: {e}")

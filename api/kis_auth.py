@@ -4,6 +4,7 @@ KIS API 인증/토큰 관리 모듈 (공식 문서 기반)
 import os
 import json
 import time
+import threading
 import yaml
 import requests
 from datetime import datetime
@@ -38,10 +39,21 @@ _autoReAuth = True
 _DEBUG = False
 
 # API 호출 속도 제어를 위한 전역 변수들 추가
+_api_lock = threading.Lock()  # 🆕 API 호출 동기화를 위한 락
 _last_api_call_time = None
-_min_api_interval = 0.06  # 최소 60ms 간격 (초당 16-17회로 안전하게 설정, KIS 제한: 1초당 20건)
+_min_api_interval = 0.06  # 최소 60ms 간격 (초당 약 16-17회, KIS 제한: 1초당 20건)
 _max_retries = 3  # 최대 재시도 횟수
-_retry_delay_base = 1.0  # 기본 재시도 지연 시간(초) - 줄임
+_retry_delay_base = 1.5  # 기본 재시도 지연 시간(초) - 속도 제한 오류 대응 강화
+
+# API 호출 통계 수집
+_api_stats = {
+    'total_calls': 0,
+    'success_calls': 0,
+    'rate_limit_errors': 0,
+    'other_errors': 0,
+    'total_wait_time': 0.0,  # 총 대기 시간
+    'last_rate_limit_time': None  # 마지막 속도 제한 오류 발생 시간
+}
 
 # 기본 헤더
 _base_headers = {
@@ -342,19 +354,32 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
             if res.status_code == 200:
                 ar = APIResp(res)
                 if ar.isOK():
+                    _api_stats['success_calls'] += 1
                     if _DEBUG:
                         logger.debug(f"API 응답 성공: {tr_id}")
                     return ar
                 else:
                     # API 응답은 200이지만 비즈니스 오류
                     if ar.getErrorCode() == 'EGW00201':  # 속도 제한 오류
+                        # 속도 제한 오류 통계 수집
+                        global _api_stats
+                        _api_stats['rate_limit_errors'] += 1
+                        _api_stats['last_rate_limit_time'] = now_kst()
+                        
                         if attempt < _max_retries:
-                            wait_time = _retry_delay_base * (2 ** attempt)  # 지수 백오프
-                            logger.warning(f"속도 제한 오류 발생. {wait_time}초 후 재시도 ({attempt + 1}/{_max_retries + 1})")
+                            # 동적 재시도 지연: 연속 오류 시 지연 시간 증가
+                            base_delay = _retry_delay_base
+                            if _api_stats['rate_limit_errors'] > 10:
+                                base_delay = _retry_delay_base * 1.5
+                            
+                            wait_time = base_delay * (2 ** attempt)  # 지수 백오프
+                            _api_stats['total_wait_time'] += wait_time
+                            logger.warning(f"속도 제한 오류 발생 (누적 {_api_stats['rate_limit_errors']}회). {wait_time:.1f}초 후 재시도 ({attempt + 1}/{_max_retries + 1})")
                             time.sleep(wait_time)
                             continue
                         else:
                             logger.error(f"API 오류: {res.status_code} - {ar.getErrorMessage()}")
+                            _api_stats['other_errors'] += 1
                             return ar
                     # 🆕 토큰 만료 오류 처리
                     elif ar.getErrorCode() == 'EGW00123':  # 토큰 만료 오류
@@ -421,13 +446,26 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
                                 logger.error(f"❌ 토큰 재발급 중 오류 발생: {e}")
                                 return None
                         elif _is_rate_limit_error(res.text):
+                            # 속도 제한 오류 통계 수집
+                            global _api_stats
+                            _api_stats['rate_limit_errors'] += 1
+                            _api_stats['last_rate_limit_time'] = now_kst()
+                            
                             if attempt < _max_retries:
-                                wait_time = _retry_delay_base * (2 ** attempt)  # 지수 백오프
-                                logger.warning(f"HTTP 500 속도 제한 오류. {wait_time}초 후 재시도 ({attempt + 1}/{_max_retries + 1})")
+                                # 동적 재시도 지연: 연속 오류 시 지연 시간 증가
+                                base_delay = _retry_delay_base
+                                if _api_stats['rate_limit_errors'] > 10:
+                                    # 속도 제한 오류가 10회 이상 발생하면 더 긴 대기
+                                    base_delay = _retry_delay_base * 1.5
+                                
+                                wait_time = base_delay * (2 ** attempt)  # 지수 백오프
+                                _api_stats['total_wait_time'] += wait_time
+                                logger.warning(f"HTTP 500 속도 제한 오류 (누적 {_api_stats['rate_limit_errors']}회). {wait_time:.1f}초 후 재시도 ({attempt + 1}/{_max_retries + 1})")
                                 time.sleep(wait_time)
                                 continue
                             else:
                                 logger.error(f"API 오류: {res.status_code} - {res.text}")
+                                _api_stats['other_errors'] += 1
                                 return None
                         else:
                             logger.error(f"API 오류: {res.status_code} - {res.text}")
@@ -454,20 +492,24 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
 
 
 def _wait_for_api_limit():
-    """API 호출 속도 제한을 위한 대기"""
-    global _last_api_call_time
+    """API 호출 속도 제한을 위한 대기 (스레드 안전)"""
+    global _last_api_call_time, _api_stats
+    
+    # 🆕 락을 사용하여 동시 호출 방지
+    with _api_lock:
+        current_time = now_kst().timestamp()
 
-    current_time = now_kst().timestamp()
+        if _last_api_call_time is not None:
+            elapsed = current_time - _last_api_call_time
+            if elapsed < _min_api_interval:
+                wait_time = _min_api_interval - elapsed
+                _api_stats['total_wait_time'] += wait_time
+                if _DEBUG:
+                    logger.debug(f"API 속도 제한: {wait_time:.3f}초 대기 (이전 호출로부터 {elapsed:.3f}초 경과)")
+                time.sleep(wait_time)
 
-    if _last_api_call_time is not None:
-        elapsed = current_time - _last_api_call_time
-        if elapsed < _min_api_interval:
-            wait_time = _min_api_interval - elapsed
-            if _DEBUG:
-                logger.debug(f"API 속도 제한: {wait_time:.3f}초 대기 (이전 호출로부터 {elapsed:.3f}초 경과)")
-            time.sleep(wait_time)
-
-    _last_api_call_time = now_kst().timestamp()
+        _last_api_call_time = now_kst().timestamp()
+        _api_stats['total_calls'] += 1
 
 
 def _is_rate_limit_error(response_text: str) -> bool:
@@ -497,6 +539,38 @@ def get_api_rate_limit_info():
         'min_interval': _min_api_interval,
         'max_retries': _max_retries,
         'retry_delay_base': _retry_delay_base
+    }
+
+
+def get_api_statistics():
+    """API 호출 통계 정보 반환"""
+    global _api_stats
+    total_calls = _api_stats['total_calls']
+    success_rate = (_api_stats['success_calls'] / max(total_calls, 1)) * 100
+    rate_limit_rate = (_api_stats['rate_limit_errors'] / max(total_calls, 1)) * 100
+    
+    return {
+        'total_calls': total_calls,
+        'success_calls': _api_stats['success_calls'],
+        'rate_limit_errors': _api_stats['rate_limit_errors'],
+        'other_errors': _api_stats['other_errors'],
+        'success_rate': round(success_rate, 2),
+        'rate_limit_rate': round(rate_limit_rate, 2),
+        'total_wait_time': round(_api_stats['total_wait_time'], 2),
+        'last_rate_limit_time': _api_stats['last_rate_limit_time'].isoformat() if _api_stats['last_rate_limit_time'] else None
+    }
+
+
+def reset_api_statistics():
+    """API 통계 초기화"""
+    global _api_stats
+    _api_stats = {
+        'total_calls': 0,
+        'success_calls': 0,
+        'rate_limit_errors': 0,
+        'other_errors': 0,
+        'total_wait_time': 0.0,
+        'last_rate_limit_time': None
     }
 
 
