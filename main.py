@@ -48,6 +48,12 @@ class DayTradingBot:
         # 설정 초기화
         self.config = self._load_config()
         
+        # 리밸런싱 모드 상태 로깅
+        if getattr(self.config, 'rebalancing_mode', False):
+            self.logger.info("🔄 순수 리밸런싱 모드 활성화: 09:05 리밸런싱으로만 포지션 구성, 장중 매수 판단 비활성화")
+        else:
+            self.logger.info("🔄 하이브리드 모드: 리밸런싱 + 실시간 매수 판단 병행")
+        
         # 핵심 모듈 초기화 (의존 순서 주의)
         self.api_manager = KISAPIManager()
         self.db_manager = DatabaseManager()  # 먼저 생성 (후속 모듈에서 필요)
@@ -272,7 +278,9 @@ class DayTradingBot:
                     continue
                 
                 # 🆕 장중 조건검색 체크 (장 시작 ~ 청산 시간 전까지) - 동적 시간 적용
-                if (is_market_open(current_time) and
+                # 리밸런싱 모드일 때는 스킵 (순수 리밸런싱 방식: 09:05 리밸런싱으로만 포지션 구성)
+                if (not getattr(self.config, 'rebalancing_mode', False) and
+                    is_market_open(current_time) and
                     not MarketHours.is_eod_liquidation_time('KRX', current_time) and
                     (current_time - last_condition_check).total_seconds() >= 60):  # 60초
                     await self._check_condition_search()
@@ -1135,6 +1143,11 @@ class DayTradingBot:
     async def _check_condition_search(self):
         """장중 퀀트 후보 스크리닝 결과 반영"""
         try:
+            # 리밸런싱 모드일 때는 실행하지 않음 (순수 리밸런싱 방식)
+            if getattr(self.config, 'rebalancing_mode', False):
+                self.logger.debug("ℹ️ 리밸런싱 모드: 장중 조건검색 체크 스킵 (09:05 리밸런싱으로만 포지션 구성)")
+                return
+            
             quant_candidates = await self.candidate_selector.get_quant_candidates(limit=50)
 
             if not quant_candidates:
@@ -1258,6 +1271,13 @@ class DayTradingBot:
             # 매수 중단 시간 전이고 SELECTED/COMPLETED 상태 종목만 매수 판단 - 동적 시간 적용
             should_stop_buy = MarketHours.should_stop_buying('KRX', current_time)
 
+            # 리밸런싱 모드일 때는 장중 매수 판단 스킵 (순수 리밸런싱 방식: 09:05 리밸런싱으로만 포지션 구성)
+            if getattr(self.config, 'rebalancing_mode', False):
+                # 리밸런싱 모드: 장중 매수 판단 스킵 (보유 종목 모니터링만 수행)
+                if minute_in_3min_cycle == 0 and current_second >= 10:
+                    self.logger.debug(f"ℹ️ 리밸런싱 모드: 장중 매수 판단 스킵 (09:05 리밸런싱으로만 포지션 구성) - {current_time.strftime('%H:%M:%S')}")
+                return
+            
             if not should_stop_buy:
                 # 가용 자금 계산
                 balance_info = self.api_manager.get_account_balance()

@@ -102,8 +102,9 @@
 2. `_analyze_buy_decision()` 호출 조건 수정 (리밸런싱 종목만)
 3. 또는 리밸런싱 모드 설정 추가 (`config/trading_config.json`)
 
-## 현재 상태 (2025-11-18)
+## 현재 상태
 
+### 2025-11-18: 리밸런싱 시스템 통합 완료
 ✅ 리밸런싱 시스템 통합 완료
 - `QuantRebalancingService` 초기화
 - `_rebalancing_task()` 태스크 추가
@@ -113,9 +114,40 @@
 - `_check_condition_search()` 60초마다 실행
 - `_analyze_buy_decision()` 3분봉 완성 후 실행
 
+### 2025-01-XX: 순수 리밸런싱 모드 전환 구현 완료 ✅
+
+**구현 내용:**
+1. ✅ `_trading_decision_task()`에서 리밸런싱 모드일 때 `_check_condition_search()` 호출 스킵
+2. ✅ `_update_intraday_data()`에서 리밸런싱 모드일 때 `_analyze_buy_decision()` 호출 스킵
+3. ✅ `_check_condition_search()` 함수에 리밸런싱 모드 체크 추가 (안전장치)
+4. ✅ 초기화 시점 및 장중 실행 시점에 리밸런싱 모드 상태 로그 메시지 추가
+
+**동작 방식:**
+- **순수 리밸런싱 모드** (`rebalancing_mode: true`):
+  - 15:40 퀀트 스크리닝 → 상위 50개 선정
+  - 익일 09:05 리밸런싱 → 포지션 구성
+  - 장중: 보유 종목만 모니터링 (손절/익절 판단만 수행)
+  - 장중 매수 판단 비활성화 ✅
+  - 조건검색 체크 비활성화 ✅
+
+- **하이브리드 모드** (`rebalancing_mode: false`):
+  - 리밸런싱 + 실시간 매수 판단 병행 (기존 방식 유지)
+
+**설정 방법:**
+```json
+{
+  "rebalancing_mode": true,  // 순수 리밸런싱 모드 활성화
+  "paper_trading": true      // 가상 매매 모드
+}
+```
+
+**코드 변경 위치:**
+- `main.py`: `_trading_decision_task()`, `_update_intraday_data()`, `_check_condition_search()`, `__init__()`
+
 ## 다음 단계
 
-1. 사용자 확인: 순수 리밸런싱 vs 하이브리드 방식 선택
-2. 선택에 따라 코드 수정
-3. 테스트 및 검증
+1. ✅ 순수 리밸런싱 모드 전환 구현 완료
+2. 테스트 및 검증
+3. 팩터 계산 정밀화 (PCR, EV/EBITDA 추가)
+4. 리밸런싱 실행 개선 (매도 완료 대기 로직 개선)
 
