@@ -7,6 +7,7 @@ import sys
 import os
 from datetime import datetime
 from pathlib import Path
+from typing import List, Dict
 import pandas as pd
 
 # 프로젝트 경로 추가
@@ -683,10 +684,10 @@ class DayTradingBot:
                         'success': False
                     })
             
-            # 매도 완료 대기 (최대 5분)
+            # 매도 완료 대기 (주문 체결 확인)
             if sell_results:
-                self.logger.info(f"⏳ 매도 주문 체결 대기 중... (최대 5분)")
-                await asyncio.sleep(300)  # 5분 대기
+                self.logger.info(f"⏳ 매도 주문 체결 확인 중... (최대 5분)")
+                await self._wait_for_sell_orders_completion(sell_results, max_wait_seconds=300)
             
             # 2단계: 매수 주문 (동등 비중, 시장가)
             buy_results = []
@@ -760,22 +761,8 @@ class DayTradingBot:
                 f"매수 {success_buy}/{len(buy_results)}건 성공"
             )
             
-            # 텔레그램 알림
-            if self.telegram:
-                message = f"🔄 리밸런싱 완료\n\n"
-                message += f"매도: {success_sell}/{len(sell_results)}건 성공\n"
-                message += f"매수: {success_buy}/{len(buy_results)}건 성공\n"
-                if sell_results:
-                    message += f"\n매도 종목:\n"
-                    for r in sell_results[:5]:
-                        status = "✅" if r.get('success') else "❌"
-                        message += f"{status} {r['stock_code']}({r.get('stock_name', '')}) {r['quantity']}주\n"
-                if buy_results:
-                    message += f"\n매수 종목:\n"
-                    for r in buy_results[:5]:
-                        status = "✅" if r.get('success') else "❌"
-                        message += f"{status} {r['stock_code']}({r.get('stock_name', '')}) {r.get('quantity', 0)}주\n"
-                await self.telegram.notify_system_status(message)
+            # 텔레그램 상세 알림
+            await self._send_rebalancing_result_notification(plan, sell_results, buy_results)
             
         except Exception as e:
             self.logger.error(f"❌ 리밸런싱 실행 오류: {e}")
@@ -1063,6 +1050,108 @@ class DayTradingBot:
             self.logger.error(f"❌ API 재초기화 오류: {e}")
             await self.telegram.notify_error("API Refresh", e)
             return False
+    
+    async def _wait_for_sell_orders_completion(self, sell_results: List[Dict], max_wait_seconds: int = 300):
+        """매도 주문 체결 완료 대기"""
+        try:
+            from utils.korean_time import now_kst
+            
+            start_time = now_kst()
+            check_interval = 5  # 5초마다 체크
+            pending_orders = [r for r in sell_results if r.get('success') and r.get('order_id')]
+            
+            if not pending_orders:
+                return
+            
+            self.logger.info(f"⏳ 매도 주문 체결 확인: {len(pending_orders)}건 대기 중...")
+            
+            while (now_kst() - start_time).total_seconds() < max_wait_seconds:
+                all_filled = True
+                
+                for result in pending_orders:
+                    order_id = result.get('order_id')
+                    if not order_id:
+                        continue
+                    
+                    # 주문 상태 확인
+                    status_data = self.api_manager.get_order_status(order_id)
+                    if status_data:
+                        filled_qty = int(str(status_data.get('tot_ccld_qty', 0)).replace(',', '').strip() or 0)
+                        remaining_qty = int(str(status_data.get('rmn_qty', 0)).replace(',', '').strip() or 0)
+                        order_qty = result.get('quantity', 0)
+                        
+                        if remaining_qty > 0:
+                            all_filled = False
+                            self.logger.debug(f"⏳ {result['stock_code']} 매도 주문 대기 중: {filled_qty}/{order_qty}주 체결, {remaining_qty}주 잔여")
+                        else:
+                            result['filled_quantity'] = filled_qty
+                            self.logger.info(f"✅ {result['stock_code']} 매도 주문 체결 완료: {filled_qty}주")
+                
+                if all_filled:
+                    self.logger.info(f"✅ 모든 매도 주문 체결 완료")
+                    return
+                
+                await asyncio.sleep(check_interval)
+            
+            # 타임아웃
+            self.logger.warning(f"⚠️ 매도 주문 체결 대기 타임아웃 ({max_wait_seconds}초)")
+            for result in pending_orders:
+                if not result.get('filled_quantity'):
+                    self.logger.warning(f"⚠️ {result['stock_code']} 매도 주문 미체결 상태로 진행")
+            
+        except Exception as e:
+            self.logger.error(f"❌ 매도 주문 체결 확인 오류: {e}")
+    
+    async def _send_rebalancing_result_notification(self, plan: Dict, sell_results: List[Dict], buy_results: List[Dict]):
+        """리밸런싱 결과 상세 알림"""
+        try:
+            if not self.telegram:
+                return
+            
+            calc_date = plan.get('calc_date', '')
+            keep_list = plan.get('keep_list', [])
+            
+            success_sell = sum(1 for r in sell_results if r.get('success'))
+            success_buy = sum(1 for r in buy_results if r.get('success'))
+            
+            message = f"🔄 리밸런싱 완료 ({calc_date})\n\n"
+            message += f"📊 요약:\n"
+            message += f"  • 매도: {success_sell}/{len(sell_results)}건 성공\n"
+            message += f"  • 매수: {success_buy}/{len(buy_results)}건 성공\n"
+            message += f"  • 유지: {len(keep_list)}건\n\n"
+            
+            if sell_results:
+                message += f"📤 매도 종목 ({len(sell_results)}건):\n"
+                for r in sell_results[:10]:  # 최대 10개
+                    status = "✅" if r.get('success') else "❌"
+                    filled = r.get('filled_quantity', r.get('quantity', 0))
+                    message += f"  {status} {r['stock_code']}({r.get('stock_name', '')}) {filled}주\n"
+                if len(sell_results) > 10:
+                    message += f"  ... 외 {len(sell_results) - 10}건\n"
+                message += "\n"
+            
+            if buy_results:
+                message += f"📥 매수 종목 ({len(buy_results)}건):\n"
+                for r in buy_results[:10]:  # 최대 10개
+                    status = "✅" if r.get('success') else "❌"
+                    qty = r.get('quantity', 0)
+                    amount = r.get('target_amount', 0)
+                    message += f"  {status} {r['stock_code']}({r.get('stock_name', '')}) {qty}주 ({amount:,.0f}원)\n"
+                if len(buy_results) > 10:
+                    message += f"  ... 외 {len(buy_results) - 10}건\n"
+                message += "\n"
+            
+            if keep_list:
+                message += f"📌 유지 종목 ({len(keep_list)}건):\n"
+                for k in keep_list[:5]:  # 최대 5개
+                    message += f"  • {k['stock_code']}({k.get('stock_name', '')}) - {k.get('rank', 'N/A')}위\n"
+                if len(keep_list) > 5:
+                    message += f"  ... 외 {len(keep_list) - 5}건\n"
+            
+            await self.telegram.notify_system_status(message)
+            
+        except Exception as e:
+            self.logger.error(f"❌ 리밸런싱 결과 알림 오류: {e}")
     
     async def _restore_todays_candidates(self):
         """DB에서 오늘 날짜의 후보 종목 복원"""
