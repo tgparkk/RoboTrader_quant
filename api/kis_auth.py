@@ -314,6 +314,8 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
                appendHeaders: Optional[Dict] = None, postFlag: bool = False,
                hashFlag: bool = True) -> Optional[APIResp]:
     """API 호출 공통 함수 (속도 제한 및 재시도 로직 포함)"""
+    global _api_stats
+    
     if not _TRENV:
         logger.error("인증되지 않음. auth() 호출 필요")
         return None
@@ -362,7 +364,6 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
                     # API 응답은 200이지만 비즈니스 오류
                     if ar.getErrorCode() == 'EGW00201':  # 속도 제한 오류
                         # 속도 제한 오류 통계 수집
-                        global _api_stats
                         _api_stats['rate_limit_errors'] += 1
                         _api_stats['last_rate_limit_time'] = now_kst()
                         
@@ -447,7 +448,6 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
                                 return None
                         elif _is_rate_limit_error(res.text):
                             # 속도 제한 오류 통계 수집
-                            global _api_stats
                             _api_stats['rate_limit_errors'] += 1
                             _api_stats['last_rate_limit_time'] = now_kst()
                             
