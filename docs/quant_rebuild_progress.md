@@ -51,6 +51,102 @@
 - `config/trading_config.json`: `"paper_trading": true` (기본값)로 가상 매매 모드 지원  
   - 실제 매매 전환은 `"paper_trading": false`로 설정
 
+## 11. ML 멀티팩터 시스템 구현 (2025-11-19)
+
+### 11.1 데이터베이스 스키마 확장
+- `db/database_manager.py`에 ML 멀티팩터 시스템용 테이블 추가:
+  - **`daily_prices`**: 일별 가격 데이터 (ML용 확장 버전)
+    - 기본 OHLCV 데이터 + 수익률(1일/5일/20일), 변동성(20일), 시가총액
+  - **`financial_statements`**: 재무제표 데이터 (ML용 확장 버전)
+    - Value 팩터용: PER, PBR, PCR, PSR, 배당수익률, 배당성장률, 배당여력, NAV 할인율, 청산마진, 이익안정성
+    - Quality 팩터용: ROE, ROA, ROIC, 부채비율, 이자보상배수, 유동비율, 당좌비율, 영업마진, 순이익마진, FCF 수익률, OCF/순이익, CAPEX 비율, 현금비율
+    - Growth 팩터용: 매출/이익/영업이익 성장률
+  - **`daily_factor_scores`**: 일별 팩터 점수 (0-100 스케일)
+    - Value, Momentum, Quality, Growth 점수 및 총점, 순위 정보
+  - **`ml_features`**: ML 학습용 45개 상세 지표
+    - Value 지표 10개, Momentum 지표 10개, Quality 지표 15개, Growth 지표 10개
+    - 라벨: 5일/20일 목표 수익률
+  - **`trading_history`**: 거래 이력 (ML용 확장 버전)
+    - 진입/청산 점수, 보유일수, 수익률 등
+
+### 11.2 ML 데이터 수집 모듈
+- `core/ml_data_collector.py`: `MLDataCollector` 클래스 구현
+  - `save_daily_price_data()`: 일별 가격 데이터 수집 및 저장
+    - KIS API를 통해 최소 3년치 과거 데이터 수집
+    - 수익률 및 변동성 자동 계산
+  - `save_financial_data()`: 재무비율 및 손익계산서 데이터 수집 및 저장
+    - 연간/분기 데이터 수집 및 업데이트
+
+### 11.3 팩터 계산 모듈 (45개 지표)
+- `core/factors/` 디렉토리에 4개 팩터 모듈 구현:
+  - **`value_factor.py`**: Value 팩터 (10개 지표, 30% 가중치)
+    - 밸류에이션 점수: PER, PBR, PCR, PSR
+    - 배당 점수: 배당수익률, 배당성장률, 배당여력
+    - 자산 가치 점수: NAV 할인율, 청산마진
+    - 이익 안정성 점수
+  - **`momentum_factor.py`**: Momentum 팩터 (10개 지표, 30% 가중치)
+    - 가격 모멘텀: 1개월/3개월/6개월/12개월 수익률
+    - 거래량 모멘텀: 1개월/3개월 거래량 추세
+    - 상대 강도: 시장/섹터 대비 상대 수익률
+    - 지속성: 상승일 비율, 52주 신고가 근접도
+  - **`quality_factor.py`**: Quality 팩터 (15개 지표, 20% 가중치)
+    - 수익성: ROE, ROA, ROIC, 영업마진, 순이익마진
+    - 안정성: 부채비율, 이자보상배수, 유동비율, 당좌비율, 순부채비율
+    - 현금흐름 품질: FCF 수익률, OCF/순이익, CAPEX 비율, 현금비율
+    - 이익 품질 점수
+  - **`growth_factor.py`**: Growth 팩터 (10개 지표, 20% 가중치)
+    - 매출 성장: 1년/3년/5년 CAGR
+    - 이익 성장: 1년/3년 CAGR, 영업이익 성장률
+    - 성장 효율성: 이익 레버리지, 마진 개선도, ROE 개선도
+    - 성장 지속성 점수
+
+### 11.4 ML 팩터 계산기
+- `core/ml_factor_calculator.py`: `MLFactorCalculator` 클래스 구현
+  - `calculate_total_score()`: 4개 팩터 점수를 가중 평균하여 총점 계산 (0-100 스케일)
+  - `save_factor_scores()`: 일별 팩터 점수 및 순위를 `daily_factor_scores` 테이블에 저장
+  - `save_ml_features()`: 45개 상세 지표를 `ml_features` 테이블에 저장
+    - 각 팩터 모듈에서 계산된 지표 수집
+    - 재무 데이터 및 가격 데이터 통합
+    - 목표 수익률(5일/20일) 계산 및 저장
+
+### 11.5 ML 포트폴리오 빌더
+- `core/ml_portfolio_builder.py`: `MLPortfolioBuilder` 클래스 구현
+  - `build_portfolio()`: 총점 기준 상위 N개 종목 선정 및 가중치 할당
+    - 기본 상위 10개 종목 선정
+    - 동등 가중 또는 점수 기반 가중치 할당
+
+### 11.6 ML 스크리닝 서비스
+- `core/ml_screening_service.py`: `MLScreeningService` 클래스 구현
+  - 일일 자동 스크리닝 워크플로우 관리
+  - 데이터 수집 → 팩터 계산 → 포트폴리오 구성 → DB 저장
+
+### 11.7 통합 데이터 로더
+- `utils/unified_data_loader.py`: `UnifiedDataLoader` 클래스 구현
+  - DB 우선, 파일 캐시 폴백 지원
+  - 일봉/분봉 데이터 통합 로드 인터페이스
+  - 기존 파일 기반 캐시 시스템과의 호환성 유지
+
+### 11.8 개발 환경 개선
+- 커밋 메시지 가이드라인 추가:
+  - `docs/COMMIT_GUIDELINES.md`: 커밋 메시지 작성 가이드
+  - `.gitconfig_commit_template`: 커밋 메시지 템플릿
+  - `.gitattributes`: 파일 인코딩 설정
+  - Git 설정: UTF-8 인코딩, 커밋 템플릿 적용
+  - 한글 인코딩 문제 방지를 위해 영어 커밋 메시지 사용 권장
+
+### 11.9 구현 상태
+- ✅ 데이터베이스 스키마 설계 및 구현
+- ✅ ML 데이터 수집 모듈 구현
+- ✅ 4개 팩터 계산 모듈 구현 (45개 지표)
+- ✅ ML 팩터 계산기 및 피처 저장 구현
+- ✅ ML 포트폴리오 빌더 구현
+- ✅ ML 스크리닝 서비스 구현
+- ✅ 통합 데이터 로더 구현
+- ⚠️ KOSPI/섹터 데이터 수집 (상대 강도 계산용) - TODO
+- ⚠️ 초기 데이터 수집 스크립트 (3년치 과거 데이터) - TODO
+- ⚠️ 백테스트 시스템 통합 - TODO
+- ⚠️ main.py 통합 - TODO
+
 ## 다음 단계
 1. **팩터 계산 정밀화**  
    - Value/Momentum/Quality/Growth 점수식을 사용자 정의 기준(문서 3~6단계)에 맞게 세분화  

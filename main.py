@@ -30,6 +30,8 @@ from utils.korean_time import now_kst, get_market_status, is_market_open, KST
 from config.market_hours import MarketHours
 from post_market_chart_generator import PostMarketChartGenerator
 from core.quant.quant_screening_service import QuantScreeningService
+from core.ml_screening_service import MLScreeningService
+from core.ml_data_collector import MLDataCollector
 from core.quant.quant_rebalancing_service import QuantRebalancingService, RebalancingPeriod
 
 
@@ -84,6 +86,15 @@ class DayTradingBot:
         )
         self._last_quant_screening_date = None
         self._quant_screening_task = None
+        
+        # 🆕 ML 멀티팩터 시스템 초기화
+        self.ml_data_collector = MLDataCollector(db_path=self.db_manager.db_path, api_manager=self.api_manager)
+        self.ml_screening_service = MLScreeningService(db_path=self.db_manager.db_path)
+        self._last_ml_data_collection_date = None
+        self._last_ml_screening_date = None
+        self._ml_data_collection_task = None
+        self._ml_screening_task = None
+        self._ml_data_collection_completed = False
         
         # 🆕 리밸런싱 서비스 초기화 (9단계)
         self.rebalancing_service = QuantRebalancingService(
@@ -808,10 +819,25 @@ class DayTradingBot:
                         last_intraday_update = current_time
                 
                 # 장마감 청산 로직 제거: 15:00 시장가 매도로 대체됨
-                # 15:40 퀀트 스크리닝 실행
-                if (current_time.hour > 15 or (current_time.hour == 15 and current_time.minute >= 40)):
-                    if self._last_quant_screening_date != current_time.date() and self._quant_screening_task is None:
-                        self._quant_screening_task = asyncio.create_task(self._run_quant_screening())
+                # 15:30 ML 데이터 수집 및 15:40 퀀트 스크리닝 실행
+                if (current_time.hour > 15 or (current_time.hour == 15 and current_time.minute >= 30)):
+                    # 15:30 ML 데이터 수집 (스크리닝 전 데이터 준비)
+                    if (current_time.hour == 15 and current_time.minute >= 30 and current_time.minute < 40):
+                        if (self._last_ml_data_collection_date != current_time.date() and 
+                            self._ml_data_collection_task is None):
+                            self._ml_data_collection_task = asyncio.create_task(self._run_ml_data_collection())
+                    
+                    # 15:40 퀀트 스크리닝 실행
+                    if (current_time.hour == 15 and current_time.minute >= 40):
+                        if self._last_quant_screening_date != current_time.date() and self._quant_screening_task is None:
+                            self._quant_screening_task = asyncio.create_task(self._run_quant_screening())
+                        
+                        # 15:40 ML 스크리닝 실행 (ML 데이터 수집 완료 후)
+                        if (self._last_ml_data_collection_date == current_time.date() and 
+                            self._ml_data_collection_completed and
+                            self._last_ml_screening_date != current_time.date() and 
+                            self._ml_screening_task is None):
+                            self._ml_screening_task = asyncio.create_task(self._run_ml_screening())
                 
                 # 🆕 차트 생성 카운터 매일 리셋 (주석처리)
                 # current_date = current_time.date()
@@ -1031,6 +1057,115 @@ class DayTradingBot:
                 await self.telegram.notify_error("Quant Screening", e)
         finally:
             self._quant_screening_task = None
+    
+    async def _run_ml_data_collection(self):
+        """ML 데이터 수집 실행 (15:30)"""
+        try:
+            self.logger.info("📊 15:30 ML 데이터 수집 시작")
+            self._ml_data_collection_completed = False
+            
+            # 퀀트 포트폴리오 상위 종목들 가져오기 (오늘 또는 최근)
+            today = now_kst().strftime('%Y%m%d')
+            portfolio = self.db_manager.get_quant_portfolio(today, limit=50)
+            
+            if not portfolio:
+                # 포트폴리오가 없으면 후보 종목들 사용
+                candidates = self.candidate_selector.get_quant_candidates()
+                stock_codes = [c['stock_code'] for c in candidates[:50]] if candidates else []
+            else:
+                stock_codes = [row['stock_code'] for row in portfolio]
+            
+            if not stock_codes:
+                self.logger.warning("⚠️ ML 데이터 수집할 종목이 없습니다")
+                return
+            
+            self.logger.info(f"📊 ML 데이터 수집 대상: {len(stock_codes)}개 종목")
+            
+            # 데이터 수집 실행 (비동기로 실행)
+            loop = asyncio.get_event_loop()
+            
+            # 가격 데이터 수집
+            price_results = await loop.run_in_executor(
+                None,
+                self.ml_data_collector.collect_all_candidates,
+                stock_codes,
+                True,  # collect_price
+                False  # collect_financial (별도 실행)
+            )
+            
+            # 재무 데이터 수집
+            financial_results = await loop.run_in_executor(
+                None,
+                self.ml_data_collector.collect_all_candidates,
+                stock_codes,
+                False,  # collect_price
+                True   # collect_financial
+            )
+            
+            # 결과 요약
+            price_success = sum(1 for v in price_results.values() if v)
+            financial_success = sum(1 for v in financial_results.values() if v)
+            
+            self.logger.info(f"✅ ML 데이터 수집 완료: 가격 {price_success}/{len(stock_codes)}개, 재무 {financial_success}/{len(stock_codes)}개")
+            
+            # 데이터 수집 완료 플래그 설정
+            self._last_ml_data_collection_date = now_kst().date()
+            self._ml_data_collection_completed = True
+            
+            if self.telegram:
+                await self.telegram.notify_system_status(
+                    f"📊 ML 데이터 수집 완료\n"
+                    f"가격 데이터: {price_success}/{len(stock_codes)}개\n"
+                    f"재무 데이터: {financial_success}/{len(stock_codes)}개"
+                )
+            
+        except Exception as e:
+            self.logger.error(f"❌ ML 데이터 수집 예외 발생: {e}")
+            import traceback
+            traceback.print_exc()
+            if self.telegram:
+                await self.telegram.notify_error("ML Data Collection", e)
+        finally:
+            self._ml_data_collection_task = None
+    
+    async def _run_ml_screening(self):
+        """ML 멀티팩터 스크리닝 실행 (15:40)"""
+        try:
+            self.logger.info("🔍 15:40 ML 멀티팩터 스크리닝 시작")
+            loop = asyncio.get_event_loop()
+            
+            # ML 스크리닝 실행
+            result = await self.ml_screening_service.run_daily_screening(
+                date=None,  # 오늘
+                top_n=10   # 상위 10개
+            )
+            
+            if result and result.get('success'):
+                self._last_ml_screening_date = now_kst().date()
+                self.logger.info("✅ ML 스크리닝 완료")
+                
+                if self.telegram:
+                    portfolio = result.get('portfolio', [])
+                    if portfolio:
+                        message = "🔍 ML 멀티팩터 스크리닝 완료\n\n상위 10개 종목:\n"
+                        for i, stock in enumerate(portfolio[:10], 1):
+                            message += f"{i}. {stock.get('stock_name', 'N/A')} ({stock.get('stock_code', 'N/A')}) - {stock.get('total_score', 0):.1f}점\n"
+                        await self.telegram.notify_system_status(message)
+                    else:
+                        await self.telegram.notify_system_status("ML 스크리닝 완료")
+            else:
+                self.logger.error("❌ ML 스크리닝 실패")
+                if self.telegram:
+                    await self.telegram.notify_error("ML Screening", "스크리닝 실패")
+                    
+        except Exception as e:
+            self.logger.error(f"❌ ML 스크리닝 예외 발생: {e}")
+            import traceback
+            traceback.print_exc()
+            if self.telegram:
+                await self.telegram.notify_error("ML Screening", e)
+        finally:
+            self._ml_screening_task = None
     async def _refresh_api(self):
         """API 재초기화"""
         try:
