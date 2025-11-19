@@ -192,10 +192,10 @@ class MLFactorCalculator:
             financial_data = self._get_financial_data(stock_code, date)
             price_data = self._get_price_data(stock_code, date)
             
-            # ML 피처 구성
+            # ML 피처 구성 (stock_code와 date 전달)
             ml_features = self._build_ml_features(
                 value_result, momentum_result, quality_result, growth_result,
-                financial_data, price_data
+                financial_data, price_data, stock_code, date
             )
             
             # DB 저장
@@ -279,39 +279,183 @@ class MLFactorCalculator:
     
     def _build_ml_features(self, value_result: Dict, momentum_result: Dict,
                           quality_result: Dict, growth_result: Dict,
-                          financial_data: Optional[Dict], price_data: Optional[Dict]) -> Dict:
-        """ML 피처 구성"""
+                          financial_data: Optional[Dict], price_data: Optional[Dict],
+                          stock_code: str, date: str) -> Dict:
+        """ML 피처 구성 (45개 지표 전체)"""
         features = {}
         
-        # Value 지표 (10개)
+        # ===== Value 지표 (10개) =====
         value_details = value_result.get('details', {})
         features['per'] = value_details.get('per')
         features['pbr'] = value_details.get('pbr')
         features['pcr'] = value_details.get('pcr')
         features['psr'] = value_details.get('psr')
         features['dividend_yield'] = value_details.get('dividend_yield')
-        # TODO: 나머지 Value 지표 추가
         
-        # Momentum 지표 (10개)
+        # 재무 데이터에서 직접 조회
+        if financial_data:
+            features['dividend_growth_3yr'] = financial_data.get('dividend_growth_3yr')
+            features['dividend_capacity'] = financial_data.get('dividend_capacity')
+            features['discount_to_nav'] = financial_data.get('discount_to_nav')
+            features['liquidation_margin'] = financial_data.get('liquidation_margin')
+        
+        # 이익 안정성 (Value 팩터에서 계산된 stability_score를 사용)
+        # stability_score는 0-100 스케일이므로 0-1로 정규화
+        stability_score = value_result.get('stability_score', 0)
+        features['earnings_stability'] = stability_score / 100.0 if stability_score else None
+        
+        # ===== Momentum 지표 (10개) =====
         momentum_details = momentum_result.get('details', {})
         features['returns_1m'] = momentum_details.get('returns_1m')
         features['returns_3m'] = momentum_details.get('returns_3m')
         features['returns_6m'] = momentum_details.get('returns_6m')
         features['returns_12m'] = momentum_details.get('returns_12m')
-        # TODO: 나머지 Momentum 지표 추가
         
-        # Quality 지표 (15개)
+        # 거래량 추세는 가격 데이터에서 계산
+        if price_data:
+            price_history = self.momentum_factor._get_price_history(stock_code, date)
+            if price_history is not None and len(price_history) >= 60:
+                # 1개월 거래량 추세
+                ma20 = price_history['volume'].tail(20).mean()
+                ma60 = price_history['volume'].tail(60).mean()
+                if ma60 > 0:
+                    features['volume_trend_1m'] = ((ma20 / ma60) - 1) * 100
+                else:
+                    features['volume_trend_1m'] = None
+                
+                # 3개월 거래량 추세
+                if len(price_history) >= 120:
+                    ma120 = price_history['volume'].tail(120).mean()
+                    if ma120 > 0:
+                        features['volume_trend_3m'] = ((ma60 / ma120) - 1) * 100
+                    else:
+                        features['volume_trend_3m'] = None
+                else:
+                    features['volume_trend_3m'] = None
+            else:
+                features['volume_trend_1m'] = None
+                features['volume_trend_3m'] = None
+        
+        # 상대 강도 (시장/섹터 대비) - 임시로 None
+        features['relative_to_market'] = None  # TODO: KOSPI 데이터 필요
+        features['relative_to_sector'] = None  # TODO: 섹터 데이터 필요
+        
+        # 상승일 비율 및 신고가 근접도
+        if price_data:
+            price_history = self.momentum_factor._get_price_history(stock_code, date)
+            if price_history is not None and len(price_history) >= 20:
+                # 상승일 비율
+                recent_20 = price_history.tail(20)
+                if 'returns_1d' in recent_20.columns:
+                    up_days = (recent_20['returns_1d'] > 0).sum()
+                    features['up_days_ratio'] = (up_days / 20) * 100
+                else:
+                    up_days = 0
+                    for i in range(1, len(recent_20)):
+                        if recent_20.iloc[i]['close'] > recent_20.iloc[i-1]['close']:
+                            up_days += 1
+                    features['up_days_ratio'] = (up_days / (len(recent_20) - 1)) * 100 if len(recent_20) > 1 else 0
+                
+                # 52주 신고가 근접도
+                if len(price_history) >= 252:
+                    current_price = price_history.iloc[-1]['close']
+                    high_52w = price_history.tail(252)['high'].max()
+                    if high_52w > 0:
+                        features['proximity_to_high'] = (current_price / high_52w) * 100
+                    else:
+                        features['proximity_to_high'] = None
+                else:
+                    features['proximity_to_high'] = None
+            else:
+                features['up_days_ratio'] = None
+                features['proximity_to_high'] = None
+        
+        # ===== Quality 지표 (15개) =====
         quality_details = quality_result.get('details', {})
         features['roe'] = quality_details.get('roe')
         features['roa'] = quality_details.get('roa')
         features['roic'] = quality_details.get('roic')
-        # TODO: 나머지 Quality 지표 추가
         
-        # Growth 지표 (10개)
+        # 재무 데이터에서 직접 조회
+        if financial_data:
+            features['operating_margin'] = financial_data.get('operating_margin')
+            features['net_margin'] = financial_data.get('net_margin')
+            features['debt_ratio'] = financial_data.get('debt_ratio')
+            features['interest_coverage'] = financial_data.get('interest_coverage')
+            features['current_ratio'] = financial_data.get('current_ratio')
+            features['quick_ratio'] = financial_data.get('quick_ratio')
+            features['net_debt_ratio'] = financial_data.get('net_debt_ratio')
+            features['fcf_yield'] = financial_data.get('fcf_yield')
+            features['ocf_to_ni'] = financial_data.get('ocf_to_ni')
+            features['capex_ratio'] = financial_data.get('capex_ratio')
+            features['cash_ratio'] = financial_data.get('cash_ratio')
+        
+        # 수익 품질 (Quality 팩터에서 계산된 값)
+        features['earnings_quality'] = quality_result.get('earnings_quality_score', 0) / 100.0 if quality_result.get('earnings_quality_score') else None
+        
+        # ===== Growth 지표 (10개) =====
         growth_details = growth_result.get('details', {})
         features['revenue_growth_1yr'] = growth_details.get('revenue_growth_1yr')
         features['earnings_growth_1yr'] = growth_details.get('earnings_growth_1yr')
-        # TODO: 나머지 Growth 지표 추가
+        
+        # Growth 팩터에서 추가 계산
+        if financial_data:
+            # 재무 이력 조회
+            financial_history = self.growth_factor._get_financial_history(stock_code, date, years=5)
+            
+            if financial_history and len(financial_history) >= 2:
+                # 매출 성장률
+                features['revenue_growth_3yr'] = self.growth_factor._calculate_cagr(financial_history, 'revenue', 3)
+                features['revenue_growth_5yr'] = self.growth_factor._calculate_cagr(financial_history, 'revenue', 5)
+                
+                # 이익 성장률
+                features['earnings_growth_3yr'] = self.growth_factor._calculate_cagr(financial_history, 'net_income', 3)
+                
+                # 영업이익 성장률
+                features['op_income_growth'] = self.growth_factor._calculate_growth_rate(financial_history, 'operating_profit', 1)
+                
+                # 성장 효율성
+                revenue_growth = self.growth_factor._calculate_growth_rate(financial_history, 'revenue', 1)
+                earnings_growth = self.growth_factor._calculate_growth_rate(financial_history, 'net_income', 1)
+                if revenue_growth != 0:
+                    features['earnings_leverage'] = earnings_growth / revenue_growth
+                else:
+                    features['earnings_leverage'] = None
+                
+                # 마진 개선도
+                if len(financial_history) >= 2:
+                    current_margin = financial_history[-1].get('operating_margin', 0)
+                    prev_margin = financial_history[-2].get('operating_margin', 0)
+                    features['margin_expansion'] = current_margin - prev_margin
+                else:
+                    features['margin_expansion'] = None
+                
+                # ROE 개선도
+                if len(financial_history) >= 2:
+                    current_roe = financial_history[-1].get('roe', 0)
+                    prev_roe = financial_history[-2].get('roe', 0)
+                    features['roe_improvement'] = current_roe - prev_roe
+                else:
+                    features['roe_improvement'] = None
+                
+                # 성장 지속성
+                growth_quarters = 0
+                for i in range(1, min(5, len(financial_history))):
+                    current_revenue = financial_history[-i].get('revenue', 0)
+                    prev_revenue = financial_history[-i-1].get('revenue', 0) if len(financial_history) > i else 0
+                    if prev_revenue > 0 and current_revenue > prev_revenue:
+                        growth_quarters += 1
+                features['growth_consistency'] = growth_quarters
+            else:
+                # 데이터 부족 시 None
+                features['revenue_growth_3yr'] = None
+                features['revenue_growth_5yr'] = None
+                features['earnings_growth_3yr'] = None
+                features['op_income_growth'] = None
+                features['earnings_leverage'] = None
+                features['margin_expansion'] = None
+                features['roe_improvement'] = None
+                features['growth_consistency'] = None
         
         return features
     
