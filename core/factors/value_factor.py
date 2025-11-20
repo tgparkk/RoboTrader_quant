@@ -4,7 +4,7 @@ Value 팩터 계산 모듈 (30% 비중)
 """
 import pandas as pd
 import numpy as np
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 from datetime import datetime, timedelta
 import sqlite3
 
