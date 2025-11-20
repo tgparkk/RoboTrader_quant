@@ -964,8 +964,8 @@ class DayTradingBot:
             
             if not portfolio:
                 # 포트폴리오가 없으면 후보 종목들 사용
-                candidates = self.candidate_selector.get_quant_candidates()
-                stock_codes = [c['stock_code'] for c in candidates[:50]] if candidates else []
+                candidates = await self.candidate_selector.get_quant_candidates(limit=50)
+                stock_codes = [c.code for c in candidates[:50]] if candidates else []
             else:
                 stock_codes = [row['stock_code'] for row in portfolio]
             
