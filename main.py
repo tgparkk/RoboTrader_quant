@@ -231,7 +231,6 @@ class DayTradingBot:
                 self._data_collection_task(),
                 self._order_monitoring_task(),
                 self.trading_manager.start_monitoring(),
-                self._trading_decision_task(),
                 self._system_monitoring_task(),
                 self._telegram_task(),
                 self._rebalancing_task()  # 🆕 리밸런싱 태스크 추가 (9단계)
@@ -261,112 +260,7 @@ class DayTradingBot:
         except Exception as e:
             self.logger.error(f"❌ 주문 모니터링 태스크 오류: {e}")
     
-    async def _trading_decision_task(self):
-        """매매 의사결정 태스크"""
-        try:
-
-            #await self._check_condition_search()
-
-            self.logger.info("🤖 매매 의사결정 태스크 시작")
-            
-            last_condition_check = datetime(2000, 1, 1, tzinfo=KST)  # 초기값
-            
-            while self.is_running:
-                if not is_market_open():
-                    await asyncio.sleep(60)  # 장 마감 시 1분 대기
-                    continue
-                
-                current_time = now_kst()
-
-                # 🚨 장마감 시간 시장가 일괄매도 체크 (한 번만 실행) - 동적 시간 적용
-                if MarketHours.is_eod_liquidation_time('KRX', current_time):
-                    if not hasattr(self, '_eod_liquidation_done'):
-                        await self._execute_end_of_day_liquidation()
-                        self._eod_liquidation_done = True
-
-                    # 청산 시간 이후에는 매매 판단 건너뛰고 모니터링만 계속
-                    # (장마감 후 데이터 저장을 위해 루프 계속 실행)
-                    await asyncio.sleep(5)
-                    continue
-                
-                # 🆕 장중 조건검색 체크 (장 시작 ~ 청산 시간 전까지) - 동적 시간 적용
-                # 리밸런싱 모드일 때는 스킵 (순수 리밸런싱 방식: 09:05 리밸런싱으로만 포지션 구성)
-                if (not getattr(self.config, 'rebalancing_mode', False) and
-                    is_market_open(current_time) and
-                    not MarketHours.is_eod_liquidation_time('KRX', current_time) and
-                    (current_time - last_condition_check).total_seconds() >= 60):  # 60초
-                    await self._check_condition_search()
-                    last_condition_check = current_time
-                
-                # 매매 판단 시스템 실행 (5초 주기)
-                # 실시간 잔고 조회 후 자금 관리자 업데이트
-                balance_info = self.api_manager.get_account_balance()
-                if balance_info:
-                    self.fund_manager.update_total_funds(float(balance_info.account_balance))
-
-                # 현재 가용 자금 계산 (총 자금의 10% 기준)
-                fund_status = self.fund_manager.get_status()
-                current_available_funds = fund_status['available_funds']
-                max_investment_per_stock = fund_status['total_funds'] * 0.1  # 종목당 최대 10%
-
-                self.logger.debug(f"💰 현재 자금 상황: 가용={current_available_funds:,.0f}원, 종목당최대={max_investment_per_stock:,.0f}원")
-
-                await self._execute_trading_decision(current_available_funds)
-                await asyncio.sleep(5)  # 5초 주기
-                
-        except Exception as e:
-            self.logger.error(f"❌ 매매 의사결정 태스크 오류: {e}")
-    
-    async def _execute_trading_decision(self, available_funds: float = None):
-        """매매 판단 시스템 실행 (매도 판단 + 포지션 동기화)
-
-        Args:
-            available_funds: 사용 가능한 자금 (미리 계산된 값) - 현재 미사용
-        """
-        try:
-            # TradingStockManager에서 관리 중인 종목들 확인
-            from core.models import StockState
-
-            selected_stocks = self.trading_manager.get_stocks_by_state(StockState.SELECTED)
-            positioned_stocks = self.trading_manager.get_stocks_by_state(StockState.POSITIONED)
-            buy_pending_stocks = self.trading_manager.get_stocks_by_state(StockState.BUY_PENDING)
-            sell_pending_stocks = self.trading_manager.get_stocks_by_state(StockState.SELL_PENDING)
-            completed_stocks = self.trading_manager.get_stocks_by_state(StockState.COMPLETED)
-
-            self.logger.info(
-                f"📦 종목 상태 현황:\n"
-                f"  - SELECTED: {len(selected_stocks)}개 (매수 대기)\n"
-                f"  - COMPLETED: {len(completed_stocks)}개 (재거래 가능)\n"
-                f"  - BUY_PENDING: {len(buy_pending_stocks)}개 (매수 주문 중)\n"
-                f"  - POSITIONED: {len(positioned_stocks)}개 (보유중)\n"
-                f"  - SELL_PENDING: {len(sell_pending_stocks)}개 (매도 주문 중)"
-            )
-
-            # 매수 주문 중인 종목 상세 정보
-            if buy_pending_stocks:
-                for stock in buy_pending_stocks:
-                    self.logger.info(f"  📊 매수 체결 대기: {stock.stock_code}({stock.stock_name}) - 주문ID: {stock.current_order_id}")
-
-            # 🆕 매수 판단은 _update_intraday_data()에서 데이터 업데이트 직후 실행됨 (3분봉 + 10초 타이밍)
-            # 이 함수에서는 매도 판단과 포지션 동기화만 수행
-
-            # 🔧 긴급 포지션 동기화 (주석 처리됨 - 필요시 활성화)
-            await self.emergency_sync_positions()
-
-            # 실제 거래 모드: 실제 포지션만 매도 판단
-            if positioned_stocks:
-                self.logger.debug(f"💰 매도 판단 대상 {len(positioned_stocks)}개 종목: {[f'{s.stock_code}({s.stock_name})' for s in positioned_stocks]}")
-                for trading_stock in positioned_stocks:
-                    # 실제 포지션인지 확인
-                    if trading_stock.position and trading_stock.position.quantity > 0:
-                        await self._analyze_sell_decision(trading_stock)
-                    else:
-                        self.logger.warning(f"⚠️ {trading_stock.stock_code} 포지션 정보 없음 (매도 판단 건너뜀)")
-            else:
-                self.logger.debug("📊 매도 판단 대상 종목 없음 (POSITIONED 상태 종목 없음)")
-
-        except Exception as e:
-            self.logger.error(f"❌ 매매 판단 시스템 오류: {e}")
+    # 🗑️ 이전 전략의 흔적 제거: 매매 의사결정 태스크 및 관련 함수들 제거됨
     
     async def _analyze_buy_decision(self, trading_stock, available_funds: float = None):
         """매수 판단 분석 (완성된 3분봉만 사용)
@@ -1491,36 +1385,13 @@ class DayTradingBot:
                 self.logger.debug(f"⏱️ 3분봉 미완성 또는 10초 미경과: {current_time.strftime('%H:%M:%S')} - 매수 판단 건너뜀")
                 return
 
-            # 🆕 데이터 업데이트 직후 매수 판단 실행 (3분봉 완성 + 10초 후)
-            # 매수 중단 시간 전이고 SELECTED/COMPLETED 상태 종목만 매수 판단 - 동적 시간 적용
-            should_stop_buy = MarketHours.should_stop_buying('KRX', current_time)
-
+            # 🗑️ 이전 전략의 흔적 제거: 매수/매도 조건 검사 로직 제거됨
             # 리밸런싱 모드일 때는 장중 매수 판단 스킵 (순수 리밸런싱 방식: 09:05 리밸런싱으로만 포지션 구성)
             if getattr(self.config, 'rebalancing_mode', False):
                 # 리밸런싱 모드: 장중 매수 판단 스킵 (보유 종목 모니터링만 수행)
                 if minute_in_3min_cycle == 0 and current_second >= 10:
                     self.logger.debug(f"ℹ️ 리밸런싱 모드: 장중 매수 판단 스킵 (09:05 리밸런싱으로만 포지션 구성) - {current_time.strftime('%H:%M:%S')}")
                 return
-            
-            if not should_stop_buy:
-                # 가용 자금 계산
-                balance_info = self.api_manager.get_account_balance()
-                if balance_info:
-                    self.fund_manager.update_total_funds(float(balance_info.account_balance))
-
-                fund_status = self.fund_manager.get_status()
-                available_funds = fund_status['available_funds']
-
-                # SELECTED + COMPLETED 상태 종목 가져오기
-                selected_stocks = self.trading_manager.get_stocks_by_state(StockState.SELECTED)
-                completed_stocks = self.trading_manager.get_stocks_by_state(StockState.COMPLETED)
-                buy_candidates = selected_stocks + completed_stocks
-
-                if buy_candidates:
-                    self.logger.info(f"🎯 3분봉 완성 후 매수 판단 실행: {current_time.strftime('%H:%M:%S')} - {len(buy_candidates)}개 종목")
-
-                    for trading_stock in buy_candidates:
-                        await self._analyze_buy_decision(trading_stock, available_funds)
 
         except Exception as e:
             self.logger.error(f"❌ 장중 종목 실시간 데이터 업데이트 오류: {e}")
