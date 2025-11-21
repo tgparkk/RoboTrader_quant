@@ -962,10 +962,19 @@ class DayTradingBot:
             today = now_kst().strftime('%Y%m%d')
             portfolio = self.db_manager.get_quant_portfolio(today, limit=50)
             
+            candidates = None
             if not portfolio:
                 # 포트폴리오가 없으면 후보 종목들 사용
                 candidates = await self.candidate_selector.get_quant_candidates(limit=50)
                 stock_codes = [c.code for c in candidates[:50]] if candidates else []
+                
+                # 후보 종목이 선정되었으면 데이터베이스에 저장
+                if candidates:
+                    try:
+                        self.db_manager.save_candidate_stocks(candidates)
+                        self.logger.info(f"✅ 후보 종목 {len(candidates)}개 데이터베이스 저장 완료")
+                    except Exception as db_err:
+                        self.logger.error(f"❌ 후보 종목 DB 저장 오류: {db_err}")
             else:
                 stock_codes = [row['stock_code'] for row in portfolio]
             

@@ -64,11 +64,12 @@ class MLDataCollector:
             
             # 일봉 데이터 조회
             daily_data = get_inquire_daily_itemchartprice(
-                stock_code=stock_code,
-                period_code="D",
-                adj_price="1",  # 수정주가
-                start_date=start_date,
-                end_date=end_date
+                div_code="J",  # J:주식/ETF/ETN
+                itm_no=stock_code,  # 종목번호
+                period_code="D",  # D:일
+                adj_prc="1",  # 1:수정주가
+                inqr_strt_dt=start_date,  # 시작일
+                inqr_end_dt=end_date  # 종료일
             )
             
             if daily_data is None or daily_data.empty:
