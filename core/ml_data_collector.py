@@ -64,10 +64,11 @@ class MLDataCollector:
             
             # 일봉 데이터 조회
             daily_data = get_inquire_daily_itemchartprice(
+                output_dv="2",  # 2: 차트 데이터 (output2)
                 div_code="J",  # J:주식/ETF/ETN
                 itm_no=stock_code,  # 종목번호
                 period_code="D",  # D:일
-                adj_prc="1",  # 1:수정주가
+                adj_prc="0",  # 0:수정주가 (ML 데이터는 수정주가 사용)
                 inqr_strt_dt=start_date,  # 시작일
                 inqr_end_dt=end_date  # 종료일
             )
@@ -75,6 +76,13 @@ class MLDataCollector:
             if daily_data is None or daily_data.empty:
                 self.logger.warning(f"⚠️ [{stock_code}] 일봉 데이터 없음")
                 return False
+            
+            # 데이터가 있는지 확인
+            if len(daily_data) == 0:
+                self.logger.warning(f"⚠️ [{stock_code}] 일봉 데이터가 비어있음")
+                return False
+            
+            self.logger.debug(f"📊 [{stock_code}] API 응답 데이터: {len(daily_data)}건, 컬럼: {list(daily_data.columns)}")
             
             # 시가총액 조회 (최신 데이터만)
             market_cap_info = get_stock_market_cap(stock_code)
@@ -84,7 +92,14 @@ class MLDataCollector:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
+                # daily_prices 테이블이 있는지 확인
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='daily_prices'")
+                if not cursor.fetchone():
+                    self.logger.error(f"❌ [{stock_code}] daily_prices 테이블이 없습니다. 시스템을 재시작해주세요.")
+                    return False
+                
                 saved_count = 0
+                skipped_count = 0
                 for _, row in daily_data.iterrows():
                     try:
                         # 날짜 파싱
@@ -177,12 +192,18 @@ class MLDataCollector:
                         saved_count += 1
                         
                     except Exception as e:
-                        self.logger.warning(f"⚠️ [{stock_code}] {date} 데이터 저장 오류 (건너뜀): {e}")
+                        skipped_count += 1
+                        self.logger.warning(f"⚠️ [{stock_code}] 데이터 저장 오류 (건너뜀): {e}")
+                        if skipped_count <= 3:  # 처음 3개만 상세 로그
+                            self.logger.debug(f"   행 데이터: {dict(row)}")
                         continue
                 
                 conn.commit()
-                self.logger.info(f"✅ [{stock_code}] 일별 가격 데이터 저장 완료: {saved_count}건")
-                return True
+                if saved_count > 0:
+                    self.logger.info(f"✅ [{stock_code}] 일별 가격 데이터 저장 완료: {saved_count}건 (건너뜀: {skipped_count}건)")
+                else:
+                    self.logger.warning(f"⚠️ [{stock_code}] 일별 가격 데이터 저장 실패: 모든 데이터가 건너뜀 (총 {len(daily_data)}건)")
+                return saved_count > 0
                 
         except Exception as e:
             self.logger.error(f"❌ [{stock_code}] 일별 가격 데이터 수집 오류: {e}")
@@ -217,6 +238,12 @@ class MLDataCollector:
             
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+                
+                # financial_statements 테이블이 있는지 확인
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='financial_statements'")
+                if not cursor.fetchone():
+                    self.logger.error(f"❌ [{stock_code}] financial_statements 테이블이 없습니다. 시스템을 재시작해주세요.")
+                    return False
                 
                 # 재무비율 데이터 저장
                 if financial_ratios:

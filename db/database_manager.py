@@ -259,6 +259,52 @@ class DatabaseManager:
                     )
                 ''')
                 
+                # ML용 일별 가격 데이터 테이블
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS daily_prices (
+                        stock_code VARCHAR(10) NOT NULL,
+                        date TEXT NOT NULL,
+                        open REAL,
+                        high REAL,
+                        low REAL,
+                        close REAL,
+                        volume INTEGER,
+                        trading_value INTEGER,
+                        market_cap REAL,
+                        returns_1d REAL,
+                        returns_5d REAL,
+                        returns_20d REAL,
+                        volatility_20d REAL,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (stock_code, date)
+                    )
+                ''')
+                
+                # ML용 재무제표 데이터 테이블
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS financial_statements (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        stock_code VARCHAR(10) NOT NULL,
+                        report_date TEXT NOT NULL,
+                        fiscal_quarter TEXT,
+                        per REAL,
+                        pbr REAL,
+                        psr REAL,
+                        dividend_yield REAL,
+                        roe REAL,
+                        debt_ratio REAL,
+                        operating_margin REAL,
+                        net_margin REAL,
+                        revenue REAL,
+                        operating_profit REAL,
+                        net_income REAL,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(stock_code, report_date)
+                    )
+                ''')
+                
                 # 인덱스 생성
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_candidate_date ON candidate_stocks(selection_date)')
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_candidate_code ON candidate_stocks(stock_code)')
@@ -275,6 +321,8 @@ class DatabaseManager:
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_quant_factors_rank ON quant_factors(calc_date, factor_rank)')
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_quant_portfolio_date ON quant_portfolio(calc_date)')
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_quant_portfolio_rank ON quant_portfolio(calc_date, rank)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_daily_prices_code_date ON daily_prices(stock_code, date)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_financial_statements_code_date ON financial_statements(stock_code, report_date)')
                 
                 conn.commit()
                 self.logger.info("데이터베이스 테이블 생성 완료")
