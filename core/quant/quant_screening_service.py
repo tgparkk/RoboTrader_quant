@@ -46,7 +46,7 @@ class QuantScreeningService:
         self.logger = setup_logger(__name__)
         
         # 필터 기준값
-        self.min_market_cap = 1_000_000_000_000  # 1,000억원
+        self.min_market_cap = 100_000_000_000  # 1,000억원
         self.min_avg_trading_value = 1_000_000_000  # 10억원 (일평균)
         self.min_price = 1_000  # 최소 주가 1,000원
         self.max_price = 500_000  # 최대 주가 500,000원
@@ -172,11 +172,16 @@ class QuantScreeningService:
             self.logger.warning("⚠️ 전체 종목 리스트를 불러올 수 없습니다.")
             return False
 
+        self.logger.info(f"📊 전체 종목 수: {len(stock_list)}개, 스크리닝 시작...")
+
         rows = []
         factor_rows = []
         filter_stats = {
             'total': 0,
             'filtered': 0,
+            'passed_filter': 0,
+            'no_financial': 0,
+            'score_failed': 0,
             'reasons': {}
         }
 
@@ -197,8 +202,11 @@ class QuantScreeningService:
                         filter_stats['reasons'][reason] = filter_stats['reasons'].get(reason, 0) + 1
                     continue
 
+                filter_stats['passed_filter'] += 1
+
                 ratio_entries = get_financial_ratio(stock_code, div_cls="0")
                 if not ratio_entries:
+                    filter_stats['no_financial'] += 1
                     continue
                 ratio = ratio_entries[0]
 
@@ -209,6 +217,7 @@ class QuantScreeningService:
 
                 scores = self._calculate_scores(ratio, income, price_data, stock_code)
                 if not scores:
+                    filter_stats['score_failed'] += 1
                     continue
 
                 factor_rows.append({
@@ -234,16 +243,19 @@ class QuantScreeningService:
                 continue
 
             if idx % 50 == 0:
-                self.logger.info(f"📊 스크리닝 진행 중... {idx}개 종목 처리")
+                self.logger.info(f"📊 스크리닝 진행 중... {idx}/{len(stock_list)}개 종목 처리 (통과: {len(rows)}개)")
+
+        # 필터링 통계 로깅 (결과 유무와 관계없이 출력)
+        self.logger.info(f"📊 1차 필터링 통계: 전체 {filter_stats['total']}개, 통과 {filter_stats['passed_filter']}개, 제외 {filter_stats['filtered']}개")
+        self.logger.info(f"   - 재무데이터 없음: {filter_stats['no_financial']}개, 스코어 계산 실패: {filter_stats['score_failed']}개")
+        if filter_stats['reasons']:
+            self.logger.info("   - 제외 사유 TOP 5:")
+            for reason, count in sorted(filter_stats['reasons'].items(), key=lambda x: x[1], reverse=True)[:5]:
+                self.logger.info(f"     · {reason}: {count}개")
 
         if not rows:
-            self.logger.warning("⚠️ 스크리닝 결과가 없습니다.")
+            self.logger.warning("⚠️ 스크리닝 결과가 없습니다. (필터 통과 종목 없음)")
             return False
-
-        # 필터링 통계 로깅
-        self.logger.info(f"📊 1차 필터링 통계: 전체 {filter_stats['total']}개, 통과 {filter_stats['total'] - filter_stats['filtered']}개, 제외 {filter_stats['filtered']}개")
-        for reason, count in sorted(filter_stats['reasons'].items(), key=lambda x: x[1], reverse=True)[:5]:
-            self.logger.info(f"  - {reason}: {count}개")
 
         # 종합 스코어링 (7단계 기준)
         # 정렬: total_score 내림차순, 동점 시 momentum_score 내림차순
