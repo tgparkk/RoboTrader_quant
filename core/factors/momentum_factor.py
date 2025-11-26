@@ -327,3 +327,5 @@ class MomentumFactor:
         else:
             return ((value - min_val) / (max_val - min_val)) * 100.0
 
+
+

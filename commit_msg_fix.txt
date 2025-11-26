@@ -1,0 +1,6 @@
+fix: value_factor.py에서 List 타입 import 추가
+
+- typing 모듈에서 List import 누락으로 인한 NameError 수정
+- _get_earnings_history 메서드의 반환 타입 Optional[List[Dict]] 사용을 위해 필요
+
+

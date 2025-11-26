@@ -118,6 +118,102 @@ def get_inquire_daily_itemchartprice(output_dv: str = "1", div_code: str = "J", 
         return None
 
 
+def get_inquire_daily_itemchartprice_extended(div_code: str = "J", itm_no: str = "",
+                                              inqr_strt_dt: Optional[str] = None, 
+                                              inqr_end_dt: Optional[str] = None,
+                                              period_code: str = "D", adj_prc: str = "1",
+                                              max_count: int = 300) -> Optional[pd.DataFrame]:
+    """
+    국내주식기간별시세 연속조회 (최대 max_count건까지 수집)
+    
+    KIS API는 한 번에 최대 100건만 반환하므로, 연속조회를 통해 더 많은 데이터를 수집합니다.
+    
+    Args:
+        div_code: 시장 구분 코드 (J:주식/ETF/ETN)
+        itm_no: 종목코드 (6자리)
+        inqr_strt_dt: 조회 시작일자 (YYYYMMDD)
+        inqr_end_dt: 조회 종료일자 (YYYYMMDD)
+        period_code: 기간 구분 (D:일봉, W:주봉, M:월봉, Y:년봉)
+        adj_prc: 수정주가 여부 (0:수정주가, 1:원주가)
+        max_count: 최대 수집 건수 (기본 300건, 최대 3회 호출)
+        
+    Returns:
+        pd.DataFrame: 일봉 데이터 (최대 max_count건)
+    """
+    url = '/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice'
+    tr_id = "FHKST03010100"
+    
+    if inqr_strt_dt is None:
+        inqr_strt_dt = (now_kst() - timedelta(days=400)).strftime("%Y%m%d")
+    if inqr_end_dt is None:
+        inqr_end_dt = now_kst().strftime("%Y%m%d")
+    
+    all_data = []
+    tr_cont = ""  # 첫 조회는 빈 문자열
+    call_count = 0
+    max_calls = (max_count // 100) + 1  # 최대 호출 횟수
+    
+    while call_count < max_calls:
+        params = {
+            "FID_COND_MRKT_DIV_CODE": div_code,
+            "FID_INPUT_ISCD": itm_no,
+            "FID_INPUT_DATE_1": inqr_strt_dt,
+            "FID_INPUT_DATE_2": inqr_end_dt,
+            "FID_PERIOD_DIV_CODE": period_code,
+            "FID_ORG_ADJ_PRC": adj_prc
+        }
+        
+        res = kis._url_fetch(url, tr_id, tr_cont, params)
+        
+        if res is None or not res.isOK():
+            if call_count == 0:
+                logger.error(f"국내주식기간별시세 조회 실패: {itm_no}")
+                return None
+            break
+        
+        body = res.getBody()
+        output2 = getattr(body, 'output2', [])
+        
+        if not output2:
+            break
+        
+        all_data.extend(output2)
+        call_count += 1
+        
+        # 충분한 데이터를 수집했으면 종료
+        if len(all_data) >= max_count:
+            break
+        
+        # 연속조회 여부 확인
+        # KIS API 응답 헤더에서 tr_cont 값 확인
+        next_tr_cont = getattr(res, 'tr_cont', None)
+        if next_tr_cont is None:
+            # 응답 객체에서 직접 확인
+            try:
+                next_tr_cont = res.getHeader().get('tr_cont', '')
+            except:
+                next_tr_cont = ''
+        
+        # M: 다음 데이터 있음, D/E/F: 마지막 데이터
+        if next_tr_cont not in ['M', 'F', 'N']:
+            break
+        
+        tr_cont = "N"  # 다음 조회
+        time.sleep(0.1)  # API 호출 간격
+    
+    if not all_data:
+        return None
+    
+    df = pd.DataFrame(all_data)
+    
+    # max_count 이상이면 잘라내기
+    if len(df) > max_count:
+        df = df.head(max_count)
+    
+    logger.debug(f"✅ {itm_no} 일봉 연속조회 완료: {len(df)}건 ({call_count}회 호출)")
+    return df
+
+
 def get_inquire_daily_price_2(div_code: str = "J", itm_no: str = "", tr_cont: str = "",
                                FK100: str = "", NK100: str = "") -> Optional[pd.DataFrame]:
     """주식현재가 시세2"""

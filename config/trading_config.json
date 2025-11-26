@@ -38,5 +38,5 @@
     "file_retention_days": 30
   },
   "paper_trading": true,
-  "rebalancing_mode": false
+  "rebalancing_mode": true
 }

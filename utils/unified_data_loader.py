@@ -241,3 +241,5 @@ class UnifiedDataLoader:
             self.logger.error(f"파일→DB 동기화 오류 ({stock_code}, {date_str}): {e}")
             return False
 
+
+

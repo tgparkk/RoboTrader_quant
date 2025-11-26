@@ -351,3 +351,5 @@ class QualityFactor:
         else:
             return ((max_val - value) / (max_val - min_val)) * 100.0
 
+
+

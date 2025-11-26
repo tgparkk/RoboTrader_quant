@@ -327,15 +327,38 @@ class KISAPIManager:
         return prices
     
     def get_ohlcv_data(self, stock_code: str, period: str = "D", days: int = 30) -> Optional[pd.DataFrame]:
-        """OHLCV 데이터 조회"""
+        """
+        OHLCV 데이터 조회 (연속조회 지원)
+        
+        Args:
+            stock_code: 종목코드
+            period: 기간 구분 (D:일봉, W:주봉, M:월봉)
+            days: 조회 일수 (캘린더 기준, 250일 이상 요청 시 연속조회 사용)
+        """
         try:
             end_date = now_kst().strftime("%Y%m%d")
             start_date = (now_kst() - timedelta(days=days)).strftime("%Y%m%d")
             
-            result = self._call_api_with_retry(
-                kis_market_api.get_inquire_daily_itemchartprice,
-                "2", "J", stock_code, start_date, end_date, period
-            )
+            # 250거래일 이상 필요 시 연속조회 사용
+            # 캘린더 기준 days를 거래일로 환산 (약 70%)
+            estimated_trading_days = int(days * 0.7)
+            
+            if estimated_trading_days > 100:
+                # 연속조회 함수 사용 (최대 300건)
+                result = kis_market_api.get_inquire_daily_itemchartprice_extended(
+                    div_code="J",
+                    itm_no=stock_code,
+                    inqr_strt_dt=start_date,
+                    inqr_end_dt=end_date,
+                    period_code=period,
+                    max_count=min(estimated_trading_days + 50, 300)  # 여유분 추가
+                )
+            else:
+                # 기존 단일 조회
+                result = self._call_api_with_retry(
+                    kis_market_api.get_inquire_daily_itemchartprice,
+                    "2", "J", stock_code, start_date, end_date, period
+                )
             
             if result is None or result.empty:
                 return None
