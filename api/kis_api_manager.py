@@ -333,25 +333,28 @@ class KISAPIManager:
         Args:
             stock_code: 종목코드
             period: 기간 구분 (D:일봉, W:주봉, M:월봉)
-            days: 조회 일수 (캘린더 기준, 250일 이상 요청 시 연속조회 사용)
+            days: 조회 일수 (캘린더 기준)
+                  - 250 거래일 필요 시 약 360 캘린더 일 필요
         """
         try:
             end_date = now_kst().strftime("%Y%m%d")
             start_date = (now_kst() - timedelta(days=days)).strftime("%Y%m%d")
             
-            # 250거래일 이상 필요 시 연속조회 사용
             # 캘린더 기준 days를 거래일로 환산 (약 70%)
             estimated_trading_days = int(days * 0.7)
             
+            # 100건 이상 필요 시 연속조회 사용
             if estimated_trading_days > 100:
-                # 연속조회 함수 사용 (최대 300건)
+                # 연속조회 함수 사용
+                # 요청된 거래일 수에 여유분(50) 추가하여 조회
+                target_count = estimated_trading_days + 50
                 result = kis_market_api.get_inquire_daily_itemchartprice_extended(
                     div_code="J",
                     itm_no=stock_code,
                     inqr_strt_dt=start_date,
                     inqr_end_dt=end_date,
                     period_code=period,
-                    max_count=min(estimated_trading_days + 50, 300)  # 여유분 추가
+                    max_count=target_count  # 300건 제한 제거 (필요한 만큼 조회)
                 )
             else:
                 # 기존 단일 조회

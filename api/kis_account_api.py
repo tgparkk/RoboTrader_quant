@@ -11,21 +11,70 @@ from . import kis_auth as kis
 logger = setup_logger(__name__)
 
 
+def get_inquire_balance(tr_cont: str = "", FK100: str = "", NK100: str = "") -> Optional[pd.DataFrame]:
+    """
+    주식잔고조회 - 보유 종목 목록 (output1 반환)
+    
+    Returns:
+        pd.DataFrame: 보유 종목 리스트 (pdno, prdt_name, hldg_qty, pchs_avg_pric 등)
+    """
+    url = '/uapi/domestic-stock/v1/trading/inquire-balance'
+    tr_id = "TTTC8434R"
+
+    tr_env = kis.getTREnv()
+    if tr_env is None:
+        logger.error("❌ KIS 환경 정보 없음 - 인증이 필요합니다")
+        return None
+
+    params = {
+        "CANO": tr_env.my_acct,              # 계좌번호 8자리
+        "ACNT_PRDT_CD": tr_env.my_prod,      # 계좌상품코드 2자리
+        "AFHR_FLPR_YN": "N",                 # 시간외단일가여부
+        "OFL_YN": "",                        # 오프라인여부
+        "INQR_DVSN": "02",                   # 조회구분 02:종목별
+        "UNPR_DVSN": "01",                   # 단가구분 01:기본값
+        "FUND_STTL_ICLD_YN": "N",            # 펀드결제분포함여부
+        "FNCG_AMT_AUTO_RDPT_YN": "N",
+        "PRCS_DVSN": "00",                   # 00:전일매매포함
+        "CTX_AREA_FK100": FK100,
+        "CTX_AREA_NK100": NK100
+    }
+
+    res = kis._url_fetch(url, tr_id, tr_cont, params)
+
+    if res and res.isOK():
+        body = res.getBody()
+        output1_data = getattr(body, 'output1', [])
+        if output1_data:
+            return pd.DataFrame(output1_data)
+        else:
+            logger.debug("보유 종목 없음")
+            return pd.DataFrame()
+    else:
+        logger.error("주식잔고조회 실패")
+        return None
+
+
 def get_inquire_balance_obj(tr_cont: str = "", FK100: str = "", NK100: str = "") -> Optional[pd.DataFrame]:
     """주식잔고조회 - 계좌 요약 정보"""
     url = '/uapi/domestic-stock/v1/trading/inquire-balance'
     tr_id = "TTTC8434R"
 
+    tr_env = kis.getTREnv()
+    if tr_env is None:
+        logger.error("❌ KIS 환경 정보 없음 - 인증이 필요합니다")
+        return None
+
     params = {
-        "CANO": kis.getTREnv().my_acct,         # 계좌번호 8자리
-        "ACNT_PRDT_CD": kis.getTREnv().my_prod, # 계좌상품코드 2자리
-        "AFHR_FLPR_YN": "N",                    # 시간외단일가여부
-        "OFL_YN": "",                           # 오프라인여부
-        "INQR_DVSN": "00",                      # 조회구분 00:전체
-        "UNPR_DVSN": "01",                      # 단가구분 01:기본값
-        "FUND_STTL_ICLD_YN": "N",               # 펀드결제분포함여부
+        "CANO": tr_env.my_acct,              # 계좌번호 8자리
+        "ACNT_PRDT_CD": tr_env.my_prod,      # 계좌상품코드 2자리
+        "AFHR_FLPR_YN": "N",                 # 시간외단일가여부
+        "OFL_YN": "",                        # 오프라인여부
+        "INQR_DVSN": "00",                   # 조회구분 00:전체
+        "UNPR_DVSN": "01",                   # 단가구분 01:기본값
+        "FUND_STTL_ICLD_YN": "N",            # 펀드결제분포함여부
         "FNCG_AMT_AUTO_RDPT_YN": "N",
-        "PRCS_DVSN": "00",                      # 00:전일매매포함, 01:전일매매미포함
+        "PRCS_DVSN": "00",                   # 00:전일매매포함, 01:전일매매미포함
         "CTX_AREA_FK100": FK100,
         "CTX_AREA_NK100": NK100
     }

@@ -931,9 +931,32 @@ class DayTradingBot:
             if result:
                 self._last_quant_screening_date = now_kst().date()
                 self.logger.info("✅ 퀀트 스크리닝 완료")
+                
+                # 🆕 선정된 종목을 intraday_manager에 추가 (장 마감 후 데이터 저장용)
+                portfolio = self.db_manager.get_quant_portfolio(now_kst().strftime('%Y%m%d'), limit=50)
+                if portfolio and hasattr(self, 'intraday_manager') and self.intraday_manager:
+                    added_count = 0
+                    for row in portfolio:
+                        try:
+                            stock_code = row['stock_code']
+                            stock_name = row['stock_name']
+                            reason = f"퀀트 스크리닝 {row['rank']}위 ({row['total_score']:.1f}점)"
+                            
+                            success = await self.intraday_manager.add_selected_stock(
+                                stock_code=stock_code,
+                                stock_name=stock_name,
+                                selection_reason=reason
+                            )
+                            if success:
+                                added_count += 1
+                        except Exception as add_err:
+                            self.logger.warning(f"⚠️ {row.get('stock_code', '?')} intraday_manager 추가 실패: {add_err}")
+                    
+                    self.logger.info(f"📌 스크리닝 종목 {added_count}/{len(portfolio)}개 intraday_manager에 추가 완료")
+                
+                # 텔레그램 알림
                 if self.telegram:
                     # 상위 종목 정보 포함하여 알림
-                    portfolio = self.db_manager.get_quant_portfolio(now_kst().strftime('%Y%m%d'), limit=5)
                     if portfolio:
                         message = "📊 퀀트 스크리닝 완료\n\n상위 5개 종목:\n"
                         for row in portfolio[:5]:

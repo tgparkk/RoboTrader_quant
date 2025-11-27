@@ -85,7 +85,8 @@ class QuantScreeningService:
                 return False, f"시가총액 부족: {market_cap_info.get('market_cap_billion', 0) if market_cap_info else 0:,.0f}억원"
             
             # 4. 일봉 데이터 조회 (상장일 체크 + 거래대금 계산용)
-            price_data = self.api_manager.get_ohlcv_data(stock_code, "D", 260)
+            # 250 거래일 필요 → 캘린더 기준 약 400일 조회
+            price_data = self.api_manager.get_ohlcv_data(stock_code, "D", 400)
             if price_data is None or price_data.empty:
                 return False, "일봉 데이터 없음"
             
@@ -213,7 +214,8 @@ class QuantScreeningService:
                 income_entries = get_income_statement(stock_code, div_cls="0")
                 income = income_entries[0] if income_entries else None
 
-                price_data = self.api_manager.get_ohlcv_data(stock_code, "D", 260)
+                # 모멘텀 계산용: 12개월(250거래일) 필요 → 캘린더 400일
+                price_data = self.api_manager.get_ohlcv_data(stock_code, "D", 400)
 
                 scores = self._calculate_scores(ratio, income, price_data, stock_code)
                 if not scores:

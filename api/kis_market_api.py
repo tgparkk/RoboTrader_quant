@@ -127,6 +127,7 @@ def get_inquire_daily_itemchartprice_extended(div_code: str = "J", itm_no: str =
     국내주식기간별시세 연속조회 (최대 max_count건까지 수집)
     
     KIS API는 한 번에 최대 100건만 반환하므로, 연속조회를 통해 더 많은 데이터를 수집합니다.
+    연속조회 시 이전 응답의 마지막 날짜 -1일을 다음 조회의 종료일자로 설정합니다.
     
     Args:
         div_code: 시장 구분 코드 (J:주식/ETF/ETN)
@@ -135,7 +136,7 @@ def get_inquire_daily_itemchartprice_extended(div_code: str = "J", itm_no: str =
         inqr_end_dt: 조회 종료일자 (YYYYMMDD)
         period_code: 기간 구분 (D:일봉, W:주봉, M:월봉, Y:년봉)
         adj_prc: 수정주가 여부 (0:수정주가, 1:원주가)
-        max_count: 최대 수집 건수 (기본 300건, 최대 3회 호출)
+        max_count: 최대 수집 건수 (기본 300건)
         
     Returns:
         pd.DataFrame: 일봉 데이터 (최대 max_count건)
@@ -144,26 +145,26 @@ def get_inquire_daily_itemchartprice_extended(div_code: str = "J", itm_no: str =
     tr_id = "FHKST03010100"
     
     if inqr_strt_dt is None:
-        inqr_strt_dt = (now_kst() - timedelta(days=400)).strftime("%Y%m%d")
+        inqr_strt_dt = (now_kst() - timedelta(days=500)).strftime("%Y%m%d")
     if inqr_end_dt is None:
         inqr_end_dt = now_kst().strftime("%Y%m%d")
     
     all_data = []
-    tr_cont = ""  # 첫 조회는 빈 문자열
     call_count = 0
-    max_calls = (max_count // 100) + 1  # 최대 호출 횟수
+    max_calls = (max_count // 100) + 2  # 최대 호출 횟수 (여유분 추가)
+    current_end_dt = inqr_end_dt  # 현재 조회 종료일자
     
     while call_count < max_calls:
         params = {
             "FID_COND_MRKT_DIV_CODE": div_code,
             "FID_INPUT_ISCD": itm_no,
             "FID_INPUT_DATE_1": inqr_strt_dt,
-            "FID_INPUT_DATE_2": inqr_end_dt,
+            "FID_INPUT_DATE_2": current_end_dt,
             "FID_PERIOD_DIV_CODE": period_code,
             "FID_ORG_ADJ_PRC": adj_prc
         }
         
-        res = kis._url_fetch(url, tr_id, tr_cont, params)
+        res = kis._url_fetch(url, tr_id, "", params)
         
         if res is None or not res.isOK():
             if call_count == 0:
@@ -177,28 +178,61 @@ def get_inquire_daily_itemchartprice_extended(div_code: str = "J", itm_no: str =
         if not output2:
             break
         
-        all_data.extend(output2)
+        # 데이터 추가 (중복 방지를 위해 날짜 체크)
+        for item in output2:
+            item_date = item.get('stck_bsop_date', '')
+            # 중복 체크: 이미 있는 날짜는 추가하지 않음
+            if not any(d.get('stck_bsop_date') == item_date for d in all_data):
+                all_data.append(item)
+        
         call_count += 1
         
         # 충분한 데이터를 수집했으면 종료
         if len(all_data) >= max_count:
             break
         
-        # 연속조회 여부 확인
-        # KIS API 응답 헤더에서 tr_cont 값 확인
-        next_tr_cont = getattr(res, 'tr_cont', None)
-        if next_tr_cont is None:
-            # 응답 객체에서 직접 확인
-            try:
-                next_tr_cont = res.getHeader().get('tr_cont', '')
-            except:
-                next_tr_cont = ''
+        # 연속조회 여부 확인 - 응답 헤더에서 tr_cont 값 확인
+        try:
+            header = res.getHeader()
+            next_tr_cont = getattr(header, 'tr_cont', '')
+            logger.debug(f"🔄 {itm_no} 연속조회 헤더 tr_cont: '{next_tr_cont}'")
+        except Exception as header_e:
+            logger.debug(f"⚠️ 헤더 파싱 오류: {header_e}")
+            next_tr_cont = ''
         
-        # M: 다음 데이터 있음, D/E/F: 마지막 데이터
-        if next_tr_cont not in ['M', 'F', 'N']:
+        # 데이터가 100건 미만이면 더 이상 데이터 없음
+        if len(output2) < 100:
+            logger.debug(f"📊 {itm_no} 데이터 {len(output2)}건 < 100건, 연속조회 종료")
             break
         
-        tr_cont = "N"  # 다음 조회
+        # M: 다음 데이터 있음, D/E/F: 마지막 데이터
+        # 헤더 값이 없거나 공백이면 날짜 기반 연속조회 진행
+        if next_tr_cont in ['D', 'E']:
+            logger.debug(f"📊 {itm_no} 마지막 페이지 (tr_cont={next_tr_cont})")
+            break
+        
+        # 연속조회를 위해 마지막 날짜 -1일을 다음 종료일자로 설정
+        if output2:
+            # output2는 최신 날짜부터 정렬되어 있으므로 마지막 항목이 가장 오래된 날짜
+            last_item = output2[-1]
+            last_date_str = last_item.get('stck_bsop_date', '')
+            if last_date_str:
+                try:
+                    last_date = datetime.strptime(last_date_str, "%Y%m%d")
+                    # 하루 전 날짜를 다음 조회의 종료일자로 설정
+                    next_end_date = last_date - timedelta(days=1)
+                    current_end_dt = next_end_date.strftime("%Y%m%d")
+                    
+                    # 시작일자보다 종료일자가 이전이면 종료
+                    if current_end_dt < inqr_strt_dt:
+                        break
+                except:
+                    break
+            else:
+                break
+        else:
+            break
+        
         time.sleep(0.1)  # API 호출 간격
     
     if not all_data:
@@ -206,9 +240,13 @@ def get_inquire_daily_itemchartprice_extended(div_code: str = "J", itm_no: str =
     
     df = pd.DataFrame(all_data)
     
-    # max_count 이상이면 잘라내기
+    # 날짜 기준 정렬 (오래된 것부터)
+    if 'stck_bsop_date' in df.columns:
+        df = df.sort_values('stck_bsop_date').reset_index(drop=True)
+    
+    # max_count 이상이면 최신 데이터 유지
     if len(df) > max_count:
-        df = df.head(max_count)
+        df = df.tail(max_count).reset_index(drop=True)
     
     logger.debug(f"✅ {itm_no} 일봉 연속조회 완료: {len(df)}건 ({call_count}회 호출)")
     return df
