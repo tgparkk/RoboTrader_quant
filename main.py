@@ -194,14 +194,20 @@ class DayTradingBot:
             self.logger.info("✅ API 매니저 초기화 완료")
 
             # 1.5. 자금 관리자 초기화 (API 초기화 후)
-            balance_info = self.api_manager.get_account_balance()
-            if balance_info:
-                total_funds = float(balance_info.account_balance) if hasattr(balance_info, 'account_balance') else 10000000
+            # 🎯 테스트 기간: 가상매매 모드로 항상 1000만원 설정
+            if self.decision_engine.is_virtual_mode:
+                total_funds = 10000000  # 가상매매 모드: 1천만원
                 self.fund_manager.update_total_funds(total_funds)
-                self.logger.info(f"💰 자금 관리자 초기화 완료: {total_funds:,.0f}원")
+                self.logger.info(f"💰 자금 관리자 초기화 완료 (가상매매 모드): {total_funds:,.0f}원")
             else:
-                self.logger.warning("⚠️ 잔고 조회 실패 - 기본값 1천만원으로 설정")
-                self.fund_manager.update_total_funds(10000000)
+                balance_info = self.api_manager.get_account_balance()
+                if balance_info:
+                    total_funds = float(balance_info.account_balance) if hasattr(balance_info, 'account_balance') else 10000000
+                    self.fund_manager.update_total_funds(total_funds)
+                    self.logger.info(f"💰 자금 관리자 초기화 완료: {total_funds:,.0f}원")
+                else:
+                    self.logger.warning("⚠️ 잔고 조회 실패 - 기본값 1천만원으로 설정")
+                    self.fund_manager.update_total_funds(10000000)
 
             # 2. 시장 상태 확인
             market_status = get_market_status()

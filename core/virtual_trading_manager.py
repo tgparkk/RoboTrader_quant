@@ -31,24 +31,13 @@ class VirtualTradingManager:
         self._initialize_virtual_balance()
     
     def _initialize_virtual_balance(self):
-        """실제 계좌 잔고로 가상 잔고 초기화"""
+        """가상 잔고 초기화 (테스트 모드: 항상 1000만원)"""
         try:
-            if self.api_manager:
-                account_info = self.api_manager.get_account_balance()
-                if account_info and hasattr(account_info, 'total_balance'):
-                    # 실제 계좌 잔고의 10%를 가상 매매 자금으로 사용
-                    self.virtual_balance = float(account_info.total_balance) * 0.1
-                    self.initial_balance = self.virtual_balance
-                    # 종목당 투자 금액도 잔고에 맞춰 조정
-                    self.virtual_investment_amount = min(1000000, self.virtual_balance * 0.1)  # 잔고의 10% 또는 최대 100만원
-                    self.logger.info(f"💰 가상 잔고 초기화: {self.virtual_balance:,.0f}원 (종목당: {self.virtual_investment_amount:,.0f}원)")
-                    return
-            
-            # API 조회 실패 시 기본값 사용
+            # 🎯 테스트 기간: 실제 계좌 잔고와 무관하게 항상 1000만원으로 설정
             self.virtual_balance = 10000000  # 1천만원
             self.initial_balance = self.virtual_balance
-            self.virtual_investment_amount = 1000000  # 100만원
-            self.logger.info(f"💰 가상 잔고 기본값 설정: {self.virtual_balance:,.0f}원 (종목당: {self.virtual_investment_amount:,.0f}원)")
+            self.virtual_investment_amount = 1000000  # 종목당 100만원
+            self.logger.info(f"💰 가상 잔고 설정 (테스트 모드): {self.virtual_balance:,.0f}원 (종목당: {self.virtual_investment_amount:,.0f}원)")
             
         except Exception as e:
             self.logger.error(f"❌ 가상 잔고 초기화 오류: {e}")

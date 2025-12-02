@@ -46,7 +46,7 @@ class TradingDecisionEngine:
         self.intraday_manager = intraday_manager
         
         # 가상 매매 설정
-        self.is_virtual_mode = False  # 🆕 가상매매 모드 여부 (False: 실제매매, True: 가상매매)
+        self.is_virtual_mode = True  # 🆕 가상매매 모드 여부 (False: 실제매매, True: 가상매매) - 테스트 기간
         
         # 🆕 가상매매 관리자 초기화
         from core.virtual_trading_manager import VirtualTradingManager
