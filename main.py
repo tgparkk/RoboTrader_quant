@@ -62,7 +62,7 @@ class DayTradingBot:
         self.db_manager = DatabaseManager()  # 먼저 생성 (후속 모듈에서 필요)
         self.telegram = TelegramIntegration(trading_bot=self)
         self.data_collector = RealTimeDataCollector(self.config, self.api_manager)
-        self.order_manager = OrderManager(self.config, self.api_manager, self.telegram)
+        self.order_manager = OrderManager(self.config, self.api_manager, self.telegram, self.db_manager)
         self.intraday_manager = IntradayStockManager(self.api_manager, self.config)  # 🆕 장중 종목 관리자
         self.trading_manager = TradingStockManager(
             self.intraday_manager, self.data_collector, self.order_manager, self.telegram

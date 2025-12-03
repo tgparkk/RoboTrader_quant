@@ -15,10 +15,11 @@ from utils.korean_time import now_kst, is_market_open
 class OrderManager:
     """주문 관리자"""
     
-    def __init__(self, config: TradingConfig, api_manager: KISAPIManager, telegram_integration=None):
+    def __init__(self, config: TradingConfig, api_manager: KISAPIManager, telegram_integration=None, db_manager=None):
         self.config = config
         self.api_manager = api_manager
         self.telegram = telegram_integration
+        self.db_manager = db_manager  # 🆕 DB 매니저 추가
         self.logger = setup_logger(__name__)
         self.trading_manager = None  # TradingStockManager (선택 연결)
         
@@ -106,6 +107,32 @@ class OrderManager:
                 )
                 self.completed_orders.append(order)
                 self.logger.info(f"🧪(가상) 매수 체결: {fake_order_id} - {stock_code} {quantity}주 @{price:,.0f}원")
+                
+                # 🆕 DB에 가상매매 기록 저장
+                if self.db_manager:
+                    try:
+                        # 종목명 조회 (없으면 종목코드 사용)
+                        stock_name = f'Stock_{stock_code}'
+                        if self.trading_manager:
+                            trading_stock = self.trading_manager.get_stock(stock_code)
+                            if trading_stock:
+                                stock_name = trading_stock.stock_name
+                        
+                        buy_record_id = self.db_manager.save_virtual_buy(
+                            stock_code=stock_code,
+                            stock_name=stock_name,
+                            price=price,
+                            quantity=quantity,
+                            strategy="리밸런싱",
+                            reason="퀀트 포트폴리오"
+                        )
+                        if buy_record_id:
+                            self.logger.info(f"💾 가상매매 기록 저장 완료: {stock_code} (ID: {buy_record_id})")
+                        else:
+                            self.logger.warning(f"⚠️ 가상매매 기록 저장 실패: {stock_code}")
+                    except Exception as db_err:
+                        self.logger.error(f"❌ 가상매매 DB 저장 오류: {db_err}")
+                
                 if self.telegram:
                     await self.telegram.notify_order_filled({
                         'stock_code': stock_code,
@@ -193,6 +220,40 @@ class OrderManager:
                 )
                 self.completed_orders.append(order)
                 self.logger.info(f"🧪(가상) 매도 체결: {fake_order_id} - {stock_code} {quantity}주 @{price:,.0f}원 ({'시장가' if market else '지정가'})")
+                
+                # 🆕 DB에 가상매매 기록 저장 (매도)
+                if self.db_manager:
+                    try:
+                        # 종목명 조회 (없으면 종목코드 사용)
+                        stock_name = f'Stock_{stock_code}'
+                        if self.trading_manager:
+                            trading_stock = self.trading_manager.get_stock(stock_code)
+                            if trading_stock:
+                                stock_name = trading_stock.stock_name
+                        
+                        # 매수 기록 ID 조회 (손익 계산용)
+                        buy_record_id = None
+                        if self.trading_manager:
+                            trading_stock = self.trading_manager.get_stock(stock_code)
+                            if trading_stock and hasattr(trading_stock, '_virtual_buy_record_id'):
+                                buy_record_id = trading_stock._virtual_buy_record_id
+                        
+                        success = self.db_manager.save_virtual_sell(
+                            stock_code=stock_code,
+                            stock_name=stock_name,
+                            price=price,
+                            quantity=quantity,
+                            strategy="리밸런싱",
+                            reason="포트폴리오 조정",
+                            buy_record_id=buy_record_id
+                        )
+                        if success:
+                            self.logger.info(f"💾 가상매도 기록 저장 완료: {stock_code}")
+                        else:
+                            self.logger.warning(f"⚠️ 가상매도 기록 저장 실패: {stock_code}")
+                    except Exception as db_err:
+                        self.logger.error(f"❌ 가상매도 DB 저장 오류: {db_err}")
+                
                 if self.telegram:
                     await self.telegram.notify_order_filled({
                         'stock_code': stock_code,
