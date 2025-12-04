@@ -114,7 +114,7 @@ class OrderManager:
                         # 종목명 조회 (없으면 종목코드 사용)
                         stock_name = f'Stock_{stock_code}'
                         if self.trading_manager:
-                            trading_stock = self.trading_manager.get_stock(stock_code)
+                            trading_stock = self.trading_manager.get_trading_stock(stock_code)
                             if trading_stock:
                                 stock_name = trading_stock.stock_name
                         
@@ -227,14 +227,14 @@ class OrderManager:
                         # 종목명 조회 (없으면 종목코드 사용)
                         stock_name = f'Stock_{stock_code}'
                         if self.trading_manager:
-                            trading_stock = self.trading_manager.get_stock(stock_code)
+                            trading_stock = self.trading_manager.get_trading_stock(stock_code)
                             if trading_stock:
                                 stock_name = trading_stock.stock_name
                         
                         # 매수 기록 ID 조회 (손익 계산용)
                         buy_record_id = None
                         if self.trading_manager:
-                            trading_stock = self.trading_manager.get_stock(stock_code)
+                            trading_stock = self.trading_manager.get_trading_stock(stock_code)
                             if trading_stock and hasattr(trading_stock, '_virtual_buy_record_id'):
                                 buy_record_id = trading_stock._virtual_buy_record_id
                         
