@@ -239,6 +239,10 @@ class IntradayStockManager:
                     self.selected_stocks[stock_code].last_update = now_kst()
             
             self.logger.info(f"✅ {stock_code} 일봉 데이터 수집 완료: {len(daily_data)}개")
+            
+            # ✅ DB에도 저장 (수익률 계산을 위해)
+            await self._save_daily_to_db(stock_code, daily_data)
+            
             return True
             
         except Exception as e:
@@ -251,6 +255,43 @@ class IntradayStockManager:
                     self.selected_stocks[stock_code].data_complete = True
                     self.selected_stocks[stock_code].last_update = now_kst()
             return True
+    
+    async def _save_daily_to_db(self, stock_code: str, daily_data: pd.DataFrame) -> bool:
+        """
+        일봉 데이터를 DB에 저장
+        
+        Args:
+            stock_code: 종목코드
+            daily_data: 일봉 DataFrame
+            
+        Returns:
+            bool: 저장 성공 여부
+        """
+        try:
+            from core.ml_data_collector import MLDataCollector
+            from pathlib import Path
+            
+            # DB 경로
+            db_path = Path(__file__).parent.parent / "data" / "robotrader.db"
+            collector = MLDataCollector(str(db_path))
+            
+            # daily_data를 daily_prices 테이블에 저장
+            success = await asyncio.to_thread(
+                collector._save_daily_prices_to_db,
+                stock_code,
+                daily_data
+            )
+            
+            if success:
+                self.logger.info(f"💾 {stock_code} 일봉 데이터 DB 저장 완료")
+            else:
+                self.logger.debug(f"⚠️ {stock_code} 일봉 데이터 DB 저장 실패")
+            
+            return success
+            
+        except Exception as e:
+            self.logger.error(f"❌ {stock_code} 일봉 데이터 DB 저장 오류: {e}")
+            return False
     
     async def _collect_historical_data(self, stock_code: str) -> bool:
         """

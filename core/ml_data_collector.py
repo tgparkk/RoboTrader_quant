@@ -40,6 +40,85 @@ class MLDataCollector:
         
         self.logger.info(f"ML 데이터 수집기 초기화 완료: {self.db_path}")
     
+    def _save_daily_prices_to_db(self, stock_code: str, daily_data: pd.DataFrame) -> bool:
+        """
+        일봉 데이터를 daily_prices 테이블에 저장 (리밸런싱용)
+        
+        Args:
+            stock_code: 종목코드
+            daily_data: KIS API에서 받은 일봉 DataFrame (stck_bsop_date, stck_clpr 등)
+            
+        Returns:
+            bool: 저장 성공 여부
+        """
+        try:
+            if daily_data is None or daily_data.empty:
+                return False
+            
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            saved_count = 0
+            
+            for idx, row in daily_data.iterrows():
+                try:
+                    # 날짜 변환
+                    if 'stck_bsop_date' in row:
+                        date = str(row['stck_bsop_date'])
+                        date_formatted = f"{date[:4]}-{date[4:6]}-{date[6:8]}"
+                    elif 'date' in row:
+                        date_formatted = str(row['date'])
+                    else:
+                        continue
+                    
+                    # 가격 데이터 추출
+                    close_price = float(row.get('stck_clpr', 0) or row.get('close', 0) or 0)
+                    open_price = float(row.get('stck_oprc', 0) or row.get('open', 0) or 0)
+                    high_price = float(row.get('stck_hgpr', 0) or row.get('high', 0) or 0)
+                    low_price = float(row.get('stck_lwpr', 0) or row.get('low', 0) or 0)
+                    volume = int(row.get('acml_vol', 0) or row.get('volume', 0) or 0)
+                    
+                    if close_price <= 0:
+                        continue
+                    
+                    # 거래대금 계산
+                    trading_value = close_price * volume if volume > 0 else 0
+                    
+                    # DB에 저장 (INSERT OR REPLACE)
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO daily_prices
+                        (stock_code, date, open, high, low, close, volume, trading_value)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        stock_code,
+                        date_formatted,
+                        open_price,
+                        high_price,
+                        low_price,
+                        close_price,
+                        volume,
+                        trading_value
+                    ))
+                    
+                    saved_count += 1
+                    
+                except Exception as e:
+                    self.logger.debug(f"⚠️ [{stock_code}] 행 저장 오류 (건너뜀): {e}")
+                    continue
+            
+            conn.commit()
+            conn.close()
+            
+            if saved_count > 0:
+                self.logger.debug(f"✅ [{stock_code}] 일봉 데이터 DB 저장: {saved_count}건")
+                return True
+            else:
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"❌ [{stock_code}] 일봉 데이터 DB 저장 오류: {e}")
+            return False
+    
     def save_daily_price_data(self, stock_code: str, start_date: str = None, end_date: str = None) -> bool:
         """
         일별 가격 데이터 수집 및 daily_prices 테이블에 저장
