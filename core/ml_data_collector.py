@@ -51,10 +51,11 @@ class MLDataCollector:
         Returns:
             bool: 저장 성공 여부
         """
+        if daily_data is None or daily_data.empty:
+            return False
+        
+        conn = None
         try:
-            if daily_data is None or daily_data.empty:
-                return False
-            
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
@@ -107,7 +108,6 @@ class MLDataCollector:
                     continue
             
             conn.commit()
-            conn.close()
             
             if saved_count > 0:
                 self.logger.debug(f"✅ [{stock_code}] 일봉 데이터 DB 저장: {saved_count}건")
@@ -118,6 +118,13 @@ class MLDataCollector:
         except Exception as e:
             self.logger.error(f"❌ [{stock_code}] 일봉 데이터 DB 저장 오류: {e}")
             return False
+        finally:
+            # 연결이 열려있으면 항상 닫기 (리소스 누수 방지)
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass  # close 실패는 무시
     
     def save_daily_price_data(self, stock_code: str, start_date: str = None, end_date: str = None) -> bool:
         """
