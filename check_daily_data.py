@@ -1,87 +1,69 @@
-"""
-일봉 데이터 확인 도구
-"""
-
-import pickle
+"""일봉 데이터 수집 현황 확인"""
+import sqlite3
 import pandas as pd
+from datetime import datetime
 from pathlib import Path
 
-def check_daily_data():
-    """일봉 데이터 확인"""
-    daily_dir = Path("cache/daily")
+today = datetime.now().strftime('%Y-%m-%d')
+print(f"=== {today} 일봉 데이터 수집 현황 ===\n")
 
-    # 파일 개수 확인
-    daily_files = list(daily_dir.glob("*.pkl"))
-    print(f"보유 일봉 데이터 파일: {len(daily_files)}개")
+db_path = Path("data/robotrader.db")
+conn = sqlite3.connect(str(db_path))
 
-    if len(daily_files) > 0:
-        # 첫 번째 파일 샘플 확인
-        sample_file = daily_files[0]
-        print(f"\n샘플 파일: {sample_file.name}")
+# 1. 후보 종목 확인
+print("1️⃣ 후보 종목")
+print("-" * 60)
+cursor = conn.cursor()
+cursor.execute('SELECT stock_code, stock_name FROM candidate_stocks WHERE DATE(selection_date) = ?', (today,))
+candidates = cursor.fetchall()
+print(f"선정된 후보 종목: {len(candidates)}개")
+for code, name in candidates:
+    print(f"  - {code} ({name})")
 
-        try:
-            with open(sample_file, 'rb') as f:
-                df = pickle.load(f)
-
-            print(f"데이터 형태: {df.shape}")
-            print(f"컬럼: {list(df.columns)}")
-            print(f"기간: {df['stck_bsop_date'].min()} ~ {df['stck_bsop_date'].max()}")
-
-            print("\n최근 5일 데이터:")
-            recent_data = df.tail(5)[['stck_bsop_date', 'stck_clpr', 'acml_vol']]
-            recent_data.columns = ['날짜', '종가', '거래량']
-            print(recent_data.to_string(index=False))
-
-            return df
-
-        except Exception as e:
-            print(f"데이터 로드 오류: {e}")
-            return None
+# 2. 일봉 데이터 확인
+print("\n2️⃣ 일봉 데이터 수집 현황")
+print("-" * 60)
+if candidates:
+    candidate_codes = [c[0] for c in candidates]
+    placeholders = ','.join(['?'] * len(candidate_codes))
+    query = f'''
+    SELECT stock_code, COUNT(*) as count, MIN(date) as first_date, MAX(date) as last_date
+    FROM daily_prices
+    WHERE stock_code IN ({placeholders})
+    GROUP BY stock_code
+    '''
+    df = pd.read_sql_query(query, conn, params=candidate_codes)
+    
+    if len(df) > 0:
+        print(f"일봉 데이터가 있는 종목: {len(df)}개")
+        for _, row in df.iterrows():
+            print(f"  - {row['stock_code']}: {row['count']}건 (기간: {row['first_date']} ~ {row['last_date']})")
     else:
-        print("일봉 데이터 파일이 없습니다.")
-        return None
+        print("일봉 데이터가 있는 종목: 0개")
+    
+    # 오늘 날짜 일봉 데이터 확인
+    query_today = f'''
+    SELECT stock_code, COUNT(*) as count
+    FROM daily_prices
+    WHERE stock_code IN ({placeholders}) AND date = ?
+    GROUP BY stock_code
+    '''
+    df_today = pd.read_sql_query(query_today, conn, params=candidate_codes + [today])
+    print(f"\n오늘({today}) 일봉 데이터:")
+    if len(df_today) > 0:
+        for _, row in df_today.iterrows():
+            print(f"  - {row['stock_code']}: {row['count']}건")
+    else:
+        print("  오늘 일봉 데이터 없음")
+else:
+    print("후보 종목이 없어 확인 불가")
 
-def check_data_coverage():
-    """데이터 커버리지 확인"""
-    daily_dir = Path("cache/daily")
-    daily_files = list(daily_dir.glob("*.pkl"))
+# 3. 매매 판단에 필요한 데이터 확인
+print("\n3️⃣ 매매 판단에 필요한 데이터")
+print("-" * 60)
+print("매매 판단은 주로 1분봉 데이터를 사용합니다:")
+print("  - 최소 15개의 1분봉 데이터 필요")
+print("  - 3분봉 변환 후 최소 5개 필요")
+print("  - 일봉 데이터는 후보 선정 시에만 사용")
 
-    # 종목별 데이터 개수
-    stock_counts = {}
-    date_ranges = {}
-
-    for file_path in daily_files[:10]:  # 처음 10개만 확인
-        try:
-            # 파일명에서 종목코드와 날짜 추출
-            filename = file_path.name
-            parts = filename.replace('.pkl', '').split('_')
-            if len(parts) >= 2:
-                stock_code = parts[0]
-                file_date = parts[1]
-
-                with open(file_path, 'rb') as f:
-                    df = pickle.load(f)
-
-                stock_counts[stock_code] = len(df)
-                date_ranges[stock_code] = {
-                    'start': df['stck_bsop_date'].min(),
-                    'end': df['stck_bsop_date'].max(),
-                    'file_date': file_date
-                }
-        except Exception as e:
-            print(f"오류 {file_path.name}: {e}")
-
-    print(f"\n종목별 일봉 데이터 보유 현황:")
-    for stock_code, count in stock_counts.items():
-        date_info = date_ranges[stock_code]
-        print(f"{stock_code}: {count}일치 ({date_info['start']} ~ {date_info['end']}) 매매일: {date_info['file_date']}")
-
-if __name__ == "__main__":
-    print("="*50)
-    print("일봉 데이터 확인")
-    print("="*50)
-
-    df = check_daily_data()
-    check_data_coverage()
-
-    print(f"\n✅ 결론: 매매 기록별로 과거 100일치 일봉 데이터를 보유하고 있습니다!")
+conn.close()
