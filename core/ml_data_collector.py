@@ -51,11 +51,10 @@ class MLDataCollector:
         Returns:
             bool: 저장 성공 여부
         """
-        if daily_data is None or daily_data.empty:
-            return False
-        
-        conn = None
         try:
+            if daily_data is None or daily_data.empty:
+                return False
+            
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
@@ -154,15 +153,19 @@ class MLDataCollector:
             )
             
             if daily_data is None or daily_data.empty:
-                self.logger.warning(f"⚠️ [{stock_code}] 일봉 데이터 없음")
+                self.logger.warning(f"⚠️ [{stock_code}] 일봉 데이터 없음 (API 응답: None 또는 empty)")
                 return False
             
             # 데이터가 있는지 확인
             if len(daily_data) == 0:
-                self.logger.warning(f"⚠️ [{stock_code}] 일봉 데이터가 비어있음")
+                self.logger.warning(f"⚠️ [{stock_code}] 일봉 데이터가 비어있음 (길이: 0)")
                 return False
             
-            self.logger.debug(f"📊 [{stock_code}] API 응답 데이터: {len(daily_data)}건, 컬럼: {list(daily_data.columns)}")
+            self.logger.info(f"📊 [{stock_code}] API 응답 데이터: {len(daily_data)}건, 컬럼: {list(daily_data.columns)}")
+            # 첫 번째 행 샘플 로깅
+            if len(daily_data) > 0:
+                first_row = daily_data.iloc[0]
+                self.logger.debug(f"📊 [{stock_code}] 첫 번째 행 샘플: {dict(first_row)}")
             
             # 시가총액 조회 (최신 데이터만)
             market_cap_info = get_stock_market_cap(stock_code)
@@ -319,11 +322,40 @@ class MLDataCollector:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # financial_statements 테이블이 있는지 확인
+                # financial_statements 테이블이 있는지 확인 및 생성
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='financial_statements'")
                 if not cursor.fetchone():
-                    self.logger.error(f"❌ [{stock_code}] financial_statements 테이블이 없습니다. 시스템을 재시작해주세요.")
-                    return False
+                    self.logger.warning(f"⚠️ [{stock_code}] financial_statements 테이블이 없습니다. 생성 시도...")
+                    try:
+                        # 테이블 생성
+                        cursor.execute('''
+                            CREATE TABLE IF NOT EXISTS financial_statements (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                stock_code VARCHAR(10) NOT NULL,
+                                report_date TEXT NOT NULL,
+                                fiscal_quarter TEXT,
+                                per REAL,
+                                pbr REAL,
+                                psr REAL,
+                                dividend_yield REAL,
+                                roe REAL,
+                                debt_ratio REAL,
+                                operating_margin REAL,
+                                net_margin REAL,
+                                revenue REAL,
+                                operating_profit REAL,
+                                net_income REAL,
+                                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                                UNIQUE(stock_code, report_date)
+                            )
+                        ''')
+                        cursor.execute('CREATE INDEX IF NOT EXISTS idx_financial_statements_code_date ON financial_statements(stock_code, report_date)')
+                        conn.commit()
+                        self.logger.info(f"✅ [{stock_code}] financial_statements 테이블 생성 완료")
+                    except Exception as create_err:
+                        self.logger.error(f"❌ [{stock_code}] financial_statements 테이블 생성 실패: {create_err}")
+                        return False
                 
                 # 재무비율 데이터 저장
                 if financial_ratios:

@@ -250,6 +250,11 @@ class QuantRebalancingService:
         """현재 보유 종목 조회"""
         try:
             # API에서 보유 종목 조회
+            # get_inquire_balance 함수가 있는지 확인
+            if not hasattr(kis_account_api, 'get_inquire_balance'):
+                self.logger.error("❌ kis_account_api.get_inquire_balance 함수가 없습니다")
+                return []
+            
             holdings_data = kis_account_api.get_inquire_balance()
             if holdings_data is None or holdings_data.empty:
                 return []
@@ -269,8 +274,13 @@ class QuantRebalancingService:
             
             return holdings
             
+        except AttributeError as e:
+            self.logger.error(f"❌ API 함수 없음: {e}")
+            return []
         except Exception as e:
             self.logger.error(f"❌ 보유 종목 조회 오류: {e}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
             return []
     
     def _estimate_total_portfolio_value(self, holdings: List[Dict[str, Any]]) -> float:

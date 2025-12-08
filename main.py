@@ -1078,8 +1078,31 @@ class DayTradingBot:
                 self._last_ml_screening_date = now_kst().date()
                 self.logger.info("✅ ML 스크리닝 완료")
                 
+                # 🆕 선정된 종목을 intraday_manager에 추가 (장 마감 후 데이터 저장용)
+                portfolio = result.get('portfolio', [])
+                if portfolio and hasattr(self, 'intraday_manager') and self.intraday_manager:
+                    added_count = 0
+                    for stock in portfolio:
+                        try:
+                            stock_code = stock.get('stock_code')
+                            stock_name = stock.get('stock_name', '')
+                            total_score = stock.get('total_score', 0)
+                            reason = f"ML 스크리닝 ({total_score:.1f}점)"
+                            
+                            if stock_code:
+                                success = await self.intraday_manager.add_selected_stock(
+                                    stock_code=stock_code,
+                                    stock_name=stock_name,
+                                    selection_reason=reason
+                                )
+                                if success:
+                                    added_count += 1
+                        except Exception as add_err:
+                            self.logger.warning(f"⚠️ {stock.get('stock_code', '?')} intraday_manager 추가 실패: {add_err}")
+                    
+                    self.logger.info(f"📌 ML 스크리닝 종목 {added_count}/{len(portfolio)}개 intraday_manager에 추가 완료")
+                
                 if self.telegram:
-                    portfolio = result.get('portfolio', [])
                     if portfolio:
                         message = "🔍 ML 멀티팩터 스크리닝 완료\n\n상위 10개 종목:\n"
                         for i, stock in enumerate(portfolio[:10], 1):
