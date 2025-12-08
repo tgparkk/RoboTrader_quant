@@ -79,23 +79,120 @@ class TradingDecisionEngine:
         except (ValueError, TypeError):
             return 0.0
     
-    async def analyze_buy_decision(self, trading_stock, combined_data) -> Tuple[bool, str, dict]:
+    async def analyze_buy_decision(self, trading_stock, daily_data) -> Tuple[bool, str, dict]:
         """
-        매수 판단 분석 (퀀트 리밸런싱 전용)
-        
-        Note: 순수 리밸런싱 모드에서는 이 메소드가 호출되지 않음.
-              09:05 리밸런싱 서비스에서 직접 매수 주문 실행.
+        매수 판단 분석 (점수 기반 - 일봉 데이터 사용)
         
         Args:
             trading_stock: 거래 종목 객체
-            combined_data: 분봉 데이터
+            daily_data: 일봉 데이터 (daily_prices 테이블에서 조회)
             
         Returns:
             Tuple[매수신호여부, 매수사유, 매수정보딕셔너리]
         """
-        # 리밸런싱 모드에서는 장중 매수 판단 비활성화
-        buy_info = {'buy_price': 0, 'quantity': 0, 'max_buy_amount': 0}
-        return False, "리밸런싱 모드: 장중 매수 판단 비활성화 (09:05 리밸런싱으로만 포지션 구성)", buy_info
+        try:
+            stock_code = trading_stock.stock_code
+            stock_name = trading_stock.stock_name
+            
+            # 1. DB에서 점수 조회 (우선)
+            score_result = None
+            if self.db_manager:
+                from utils.korean_time import now_kst
+                calc_date = now_kst().strftime('%Y%m%d')
+                portfolio = self.db_manager.get_quant_portfolio(calc_date, limit=100)
+                
+                # 해당 종목의 점수 찾기
+                for item in portfolio:
+                    if item['stock_code'] == stock_code:
+                        score_result = {
+                            'total_score': item.get('total_score', 0),
+                            'rank': item.get('rank', 999),
+                            'reason': item.get('reason', '퀀트 스크리닝')
+                        }
+                        break
+            
+            # 2. DB에 점수가 없으면 실시간 계산 (fallback)
+            if score_result is None:
+                try:
+                    from core.ml_factor_calculator import MLFactorCalculator
+                    from pathlib import Path
+                    
+                    if self.db_manager:
+                        db_path = self.db_manager.db_path
+                    else:
+                        db_path = Path("data/robotrader.db")
+                    
+                    calculator = MLFactorCalculator(str(db_path))
+                    score_data = calculator.calculate_total_score(stock_code)
+                    
+                    if score_data and score_data.get('total_score', 0) > 0:
+                        score_result = {
+                            'total_score': score_data.get('total_score', 0),
+                            'rank': 999,  # 실시간 계산은 순위 없음
+                            'reason': f"Value {score_data.get('value', 0):.1f}, "
+                                     f"Momentum {score_data.get('momentum', 0):.1f}, "
+                                     f"Quality {score_data.get('quality', 0):.1f}, "
+                                     f"Growth {score_data.get('growth', 0):.1f}"
+                        }
+                except Exception as calc_err:
+                    self.logger.warning(f"⚠️ {stock_code} 점수 계산 실패: {calc_err}")
+                    score_result = None
+            
+            # 3. 점수 기반 매수 판단
+            if score_result is None:
+                buy_info = {'buy_price': 0, 'quantity': 0, 'max_buy_amount': 0}
+                return False, f"{stock_code} 점수 정보 없음", buy_info
+            
+            total_score = score_result['total_score']
+            rank = score_result.get('rank', 999)
+            reason = score_result.get('reason', '점수 기반 판단')
+            
+            # 매수 기준: 점수 50점 이상 또는 상위 50위 이내
+            min_score_threshold = 50.0  # 최소 점수 기준
+            max_rank_threshold = 50      # 최대 순위 기준
+            
+            should_buy = (total_score >= min_score_threshold) or (rank <= max_rank_threshold)
+            
+            if not should_buy:
+                buy_info = {'buy_price': 0, 'quantity': 0, 'max_buy_amount': 0}
+                return False, f"{stock_code} 점수 부족 (점수: {total_score:.1f}, 순위: {rank})", buy_info
+            
+            # 4. 매수가 및 수량 계산
+            if daily_data is None or daily_data.empty:
+                buy_info = {'buy_price': 0, 'quantity': 0, 'max_buy_amount': 0}
+                return False, f"{stock_code} 일봉 데이터 없음", buy_info
+            
+            # 최신 종가를 매수가로 사용
+            latest_close = float(daily_data['close'].iloc[-1])
+            buy_price = latest_close
+            
+            # 최대 매수 금액 조회
+            max_buy_amount = self._get_max_buy_amount(stock_code)
+            
+            # 수량 계산
+            quantity = int(max_buy_amount / buy_price) if buy_price > 0 else 0
+            
+            if quantity <= 0:
+                buy_info = {'buy_price': buy_price, 'quantity': 0, 'max_buy_amount': max_buy_amount}
+                return False, f"{stock_code} 매수 수량 부족 (가용금액: {max_buy_amount:,.0f}원)", buy_info
+            
+            buy_info = {
+                'buy_price': buy_price,
+                'quantity': quantity,
+                'max_buy_amount': max_buy_amount
+            }
+            
+            buy_reason = f"점수 기반 매수 (점수: {total_score:.1f}, 순위: {rank}, {reason})"
+            
+            self.logger.info(f"✅ {stock_code} 매수 신호: {buy_reason}")
+            return True, buy_reason, buy_info
+            
+        except Exception as e:
+            self.logger.error(f"❌ {trading_stock.stock_code} 매수 판단 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            buy_info = {'buy_price': 0, 'quantity': 0, 'max_buy_amount': 0}
+            return False, f"매수 판단 오류: {e}", buy_info
     
     # set_buy_cooldown 메서드 제거: TradingStock 모델에서 last_buy_time으로 관리
     

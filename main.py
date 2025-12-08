@@ -269,7 +269,7 @@ class DayTradingBot:
     # 🗑️ 이전 전략의 흔적 제거: 매매 의사결정 태스크 및 관련 함수들 제거됨
     
     async def _analyze_buy_decision(self, trading_stock, available_funds: float = None):
-        """매수 판단 분석 (완성된 3분봉만 사용)
+        """매수 판단 분석 (일봉 데이터 사용)
 
         Args:
             trading_stock: 거래 대상 주식
@@ -293,58 +293,23 @@ class DayTradingBot:
                 self.logger.debug(f"⚠️ {stock_code}: 매수 쿨다운 활성화 (남은 시간: {remaining_minutes}분)")
                 return
 
-            # 🆕 타이밍 체크는 _update_intraday_data()에서 이미 수행됨 (3분봉 완성 + 10초 후)
-            # 여기서는 종목별 매수 판단만 수행
-
-            # 분봉 데이터 가져오기
-            combined_data = self.intraday_manager.get_combined_chart_data(stock_code)
-            if combined_data is None:
-                self.logger.debug(f"❌ {stock_code} 1분봉 데이터 없음 (None)")
-                return
-            if len(combined_data) < 15:
-                self.logger.debug(f"❌ {stock_code} 1분봉 데이터 부족: {len(combined_data)}개 (최소 15개 필요) - 실시간 데이터 대기 중")
-                # 실시간 환경에서는 메모리에 있는 데이터만 사용 (캐시 파일 체크 불필요)
+            # 🆕 일봉 데이터 가져오기 (daily_prices 테이블에서)
+            from utils.unified_data_loader import UnifiedDataLoader
+            data_loader = UnifiedDataLoader(db_path=self.db_manager.db_path)
+            
+            daily_data = data_loader.load_daily_history(stock_code, days=100)
+            if daily_data is None or daily_data.empty:
+                self.logger.debug(f"❌ {stock_code} 일봉 데이터 없음 (daily_prices 테이블)")
                 return
             
-            # 🆕 3분봉 변환 시 완성된 봉만 자동 필터링됨 (TimeFrameConverter에서 처리)
-            from core.timeframe_converter import TimeFrameConverter
-
-            data_3min = TimeFrameConverter.convert_to_3min_data(combined_data)
-
-            if data_3min is None or len(data_3min) < 5:
-                self.logger.debug(f"❌ {stock_code} 3분봉 데이터 부족: {len(data_3min) if data_3min is not None else 0}개 (최소 5개 필요)")
+            if len(daily_data) < 20:
+                self.logger.debug(f"❌ {stock_code} 일봉 데이터 부족: {len(daily_data)}개 (최소 20개 필요)")
                 return
+            
+            self.logger.debug(f"✅ {stock_code} 일봉 데이터 조회 완료: {len(daily_data)}건")
 
-            # 🆕 3분봉 품질 검증: 경고만 표시 (시뮬레이션과 동일하게 차단하지 않음)
-            if not data_3min.empty and len(data_3min) >= 2:
-                data_3min_copy = data_3min.copy()
-                data_3min_copy['datetime'] = pd.to_datetime(data_3min_copy['datetime'])
-
-                # 1. 시간 간격 검증 (3분봉 연속성)
-                time_diffs = data_3min_copy['datetime'].diff().dt.total_seconds().fillna(0) / 60
-                invalid_gaps = time_diffs[1:][(time_diffs[1:] != 3.0) & (time_diffs[1:] != 0.0)]
-
-                if len(invalid_gaps) > 0:
-                    gap_indices = invalid_gaps.index.tolist()
-                    gap_times = [data_3min_copy.loc[idx, 'datetime'].strftime('%H:%M') for idx in gap_indices]
-                    self.logger.warning(f"⚠️ {stock_code} 3분봉 불연속 구간 발견: {', '.join(gap_times)} (간격: {invalid_gaps.values} 분) - 경고만, 진행")
-
-                # 2. 🆕 각 3분봉의 구성 분봉 개수 검증 (HTS 분봉 누락 감지)
-                if 'candle_count' in data_3min_copy.columns:
-                    incomplete_candles = data_3min_copy[data_3min_copy['candle_count'] < 3]
-                    if not incomplete_candles.empty:
-                        for idx, row in incomplete_candles.iterrows():
-                            candle_time = row['datetime'].strftime('%H:%M')
-                            count = int(row['candle_count'])
-                            self.logger.warning(f"⚠️ {stock_code} 3분봉 내부 누락: {candle_time} ({count}/3개 분봉) - HTS 분봉 누락 가능성")
-
-                # 3. 09:00 시작 확인
-                first_time = data_3min_copy['datetime'].iloc[0]
-                if first_time.hour == 9 and first_time.minute not in [0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30]:
-                    self.logger.warning(f"⚠️ {stock_code} 첫 3분봉이 정규 시간이 아님: {first_time.strftime('%H:%M')} (09:00, 09:03, 09:06... 중 하나여야 함) - 경고만, 진행")
-
-            # 매매 판단 엔진으로 매수 신호 확인 (완성된 3분봉 데이터 사용)
-            buy_signal, buy_reason, buy_info = await self.decision_engine.analyze_buy_decision(trading_stock, data_3min)
+            # 매매 판단 엔진으로 매수 신호 확인 (일봉 데이터 사용)
+            buy_signal, buy_reason, buy_info = await self.decision_engine.analyze_buy_decision(trading_stock, daily_data)
             
             self.logger.debug(f"💡 {stock_code} 매수 판단 결과: signal={buy_signal}, reason='{buy_reason}'")
             if buy_signal and buy_info:
