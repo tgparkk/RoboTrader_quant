@@ -1,6 +1,5 @@
 """
 분봉 데이터 수집 전용 스크립트
-signal_replay.py와 동일한 방식으로 분봉 데이터만 수집
 """
 import sys
 import os
@@ -37,7 +36,7 @@ def collect_minute_data(stock_code: str, target_date: str = None, end_time: str 
     print("=" * 80)
     
     try:
-        # signal_replay.py와 동일한 함수 사용
+        # 분봉 데이터 수집 함수 사용
         df_1min = get_full_trading_day_data(
             stock_code=stock_code,
             target_date=target_date,

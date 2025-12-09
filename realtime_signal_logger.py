@@ -121,9 +121,10 @@ class RealtimeSignalLogger:
             # 오늘 날짜의 후보 종목 조회
             today_str = now_kst().strftime("%Y%m%d")
             
-            # utils.signal_replay.py와 동일한 방식으로 DB에서 조회
-            from utils.signal_replay import get_stocks_from_candidate_table
-            stock_codes = get_stocks_from_candidate_table(today_str)
+            # candidate_stocks 테이블에서 오늘 날짜의 종목 조회
+            from utils.signal_replay_utils import get_stocks_with_selection_date
+            stock_selection_map = get_stocks_with_selection_date(today_str)
+            stock_codes = list(stock_selection_map.keys())
             
             if stock_codes:
                 self.logger.info(f"📅 오늘 날짜 후보 종목 {len(stock_codes)}개 발견")
@@ -166,7 +167,7 @@ class RealtimeSignalLogger:
                     # main.py와 동일한 매매 판단 엔진 사용
                     buy_signal, buy_reason, buy_info = await self.decision_engine.analyze_buy_decision(trading_stock, combined_data)
                     
-                    # 3분봉 데이터로 변환하여 신호 분석 (signal_replay.py와 동일)
+                    # 3분봉 데이터로 변환하여 신호 분석
                     data_3min = TimeFrameConverter.convert_to_3min_data(combined_data)
                     if data_3min is not None and not data_3min.empty:
                         # PullbackCandlePattern으로 상세 신호 분석

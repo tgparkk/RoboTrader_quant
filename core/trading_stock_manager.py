@@ -410,6 +410,26 @@ class TradingStockManager:
                             # 🆕 매수 시간 기록
                             from utils.korean_time import now_kst
                             trading_stock.set_buy_time(now_kst())
+                            
+                            # 🆕 가상매매 모드일 때 가상매매 기록 ID 설정
+                            from config.settings import load_config
+                            config = load_config()
+                            if getattr(config, 'paper_trading', False):
+                                try:
+                                    from db.database_manager import DatabaseManager
+                                    db = DatabaseManager()
+                                    # 최근 가상매매 매수 기록 조회
+                                    open_positions = db.get_virtual_open_positions()
+                                    stock_positions = open_positions[open_positions['stock_code'] == trading_stock.stock_code]
+                                    if not stock_positions.empty:
+                                        latest_position = stock_positions.iloc[0]
+                                        buy_record_id = latest_position['id']
+                                        buy_price = latest_position['buy_price']
+                                        quantity = latest_position['quantity']
+                                        trading_stock.set_virtual_buy_info(buy_record_id, buy_price, quantity)
+                                        self.logger.debug(f"🔄 가상매매 포지션 정보 설정: {trading_stock.stock_code} ID={buy_record_id}")
+                                except Exception as virtual_err:
+                                    self.logger.warning(f"⚠️ 가상매매 포지션 정보 설정 실패: {virtual_err}")
 
                             self._change_stock_state(
                                 trading_stock.stock_code,
@@ -685,6 +705,26 @@ class TradingStockManager:
                         # 🆕 매수 시간 기록 (콜백)
                         from utils.korean_time import now_kst
                         trading_stock.set_buy_time(now_kst())
+                        
+                        # 🆕 가상매매 모드일 때 가상매매 기록 ID 설정
+                        from config.settings import load_config
+                        config = load_config()
+                        if getattr(config, 'paper_trading', False):
+                            try:
+                                from db.database_manager import DatabaseManager
+                                db = DatabaseManager()
+                                # 최근 가상매매 매수 기록 조회
+                                open_positions = db.get_virtual_open_positions()
+                                stock_positions = open_positions[open_positions['stock_code'] == trading_stock.stock_code]
+                                if not stock_positions.empty:
+                                    latest_position = stock_positions.iloc[0]
+                                    buy_record_id = latest_position['id']
+                                    buy_price = latest_position['buy_price']
+                                    quantity = latest_position['quantity']
+                                    trading_stock.set_virtual_buy_info(buy_record_id, buy_price, quantity)
+                                    self.logger.debug(f"🔄 가상매매 포지션 정보 설정 (콜백): {trading_stock.stock_code} ID={buy_record_id}")
+                            except Exception as virtual_err:
+                                self.logger.warning(f"⚠️ 가상매매 포지션 정보 설정 실패 (콜백): {virtual_err}")
 
                         self._change_stock_state(
                             trading_stock.stock_code,

@@ -15,8 +15,8 @@
   "risk_management": {
     "max_position_count": 20,
     "max_position_ratio": 0.3,
-    "stop_loss_ratio": 0.025,
-    "take_profit_ratio": 0.035,
+    "stop_loss_ratio": 0.10,
+    "take_profit_ratio": 0.15,
     "max_daily_loss": 0.1
   },
   "strategy": {

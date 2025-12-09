@@ -78,7 +78,7 @@ class TimeFrameConverter:
     def convert_to_3min_data(data: pd.DataFrame) -> Optional[pd.DataFrame]:
         """
         1분봉 데이터를 3분봉으로 변환 (floor 방식, 완성된 봉만)
-        signal_replay와 동일한 방식으로 처리하여 일관성 확보
+        완성된 봉만 변환하여 일관성 확보
         
         Args:
             data: 1분봉 DataFrame

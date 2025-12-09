@@ -4,7 +4,6 @@
 
 사용처:
 - 실시간 거래: trading_decision_engine.py
-- 시뮬레이션: signal_replay.py
 """
 
 from dataclasses import dataclass

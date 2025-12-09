@@ -29,7 +29,7 @@ class PriceCalculator:
             if data_3min is None or data_3min.empty:
                 return None, None
                 
-            # 신호 계산 (main.py, signal_replay.py와 동일한 설정)
+            # 신호 계산 (main.py와 동일한 설정)
             signals_3m = PullbackCandlePattern.generate_trading_signals(
                 data_3min,
                 enable_candle_shrink_expand=False,

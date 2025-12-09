@@ -53,7 +53,7 @@ class DayTradingBot:
         
         # 리밸런싱 모드 상태 로깅
         if getattr(self.config, 'rebalancing_mode', False):
-            self.logger.info("🔄 순수 리밸런싱 모드 활성화: 09:05 리밸런싱으로만 포지션 구성, 장중 매수 판단 비활성화")
+            self.logger.info("🔄 리밸런싱 모드 활성화: 09:05 리밸런싱으로 매수, 장중 손절/익절 매도 판단 활성화")
         else:
             self.logger.info("🔄 하이브리드 모드: 리밸런싱 + 실시간 매수 판단 병행")
         
@@ -392,18 +392,16 @@ class DayTradingBot:
             self.logger.error(f"상세 오류 정보: {traceback.format_exc()}")
     
     async def _analyze_sell_decision(self, trading_stock):
-        """매도 판단 분석 (간단한 손절/익절 로직)"""
+        """매도 판단 분석 (1분봉 고가/저가 기준 익절/손절 + 3분봉 기술적 분석)"""
         try:
             stock_code = trading_stock.stock_code
             stock_name = trading_stock.stock_name
             
-            # 실시간 현재가 정보만 확인 (간단한 손절/익절 로직)
-            current_price_info = self.intraday_manager.get_cached_current_price(stock_code)
-            if current_price_info is None:
-                return
+            # 🆕 1분봉 데이터 조회 (백테스팅과 동일한 방식)
+            combined_data = self.intraday_manager.get_combined_chart_data(stock_code)
             
-            # 매매 판단 엔진으로 매도 신호 확인 (combined_data 불필요)
-            sell_signal, sell_reason = await self.decision_engine.analyze_sell_decision(trading_stock, None)
+            # 매매 판단 엔진으로 매도 신호 확인 (1분봉 데이터 전달)
+            sell_signal, sell_reason = await self.decision_engine.analyze_sell_decision(trading_stock, combined_data)
             
             if sell_signal:
                 # 🆕 매도 전 종목 상태 확인
@@ -1413,12 +1411,25 @@ class DayTradingBot:
                 self.logger.debug(f"⏱️ 3분봉 미완성 또는 10초 미경과: {current_time.strftime('%H:%M:%S')} - 매수 판단 건너뜀")
                 return
 
-            # 🗑️ 이전 전략의 흔적 제거: 매수/매도 조건 검사 로직 제거됨
-            # 리밸런싱 모드일 때는 장중 매수 판단 스킵 (순수 리밸런싱 방식: 09:05 리밸런싱으로만 포지션 구성)
+            # 리밸런싱 모드일 때는 장중 매수 판단만 스킵 (매도 판단은 손절/익절을 위해 활성화)
             if getattr(self.config, 'rebalancing_mode', False):
-                # 리밸런싱 모드: 장중 매수 판단 스킵 (보유 종목 모니터링만 수행)
+                # 리밸런싱 모드: 장중 매수 판단 스킵 (09:05 리밸런싱으로만 매수)
                 if minute_in_3min_cycle == 0 and current_second >= 10:
-                    self.logger.debug(f"ℹ️ 리밸런싱 모드: 장중 매수 판단 스킵 (09:05 리밸런싱으로만 포지션 구성) - {current_time.strftime('%H:%M:%S')}")
+                    self.logger.debug(f"ℹ️ 리밸런싱 모드: 장중 매수 판단 스킵 (09:05 리밸런싱으로만 매수) - {current_time.strftime('%H:%M:%S')}")
+                
+                # 🆕 리밸런싱 모드에서도 보유 종목(POSITIONED)에 대해 손절/익절 매도 판단 실행
+                # 리밸런싱 매도와 손절/익절이 병행됨
+                from core.models import StockState
+                positioned_stocks = self.trading_manager.get_stocks_by_state(StockState.POSITIONED)
+                
+                if positioned_stocks:
+                    self.logger.debug(f"📊 보유 종목 손절/익절 판단 시작: {len(positioned_stocks)}개 종목")
+                    for trading_stock in positioned_stocks:
+                        try:
+                            await self._analyze_sell_decision(trading_stock)
+                        except Exception as e:
+                            self.logger.error(f"❌ {trading_stock.stock_code} 매도 판단 오류: {e}")
+                
                 return
 
         except Exception as e:

@@ -1,10 +1,10 @@
 """
 매매 판단 엔진 - 퀀트 리밸런싱 기반 매수/매도 의사결정
 
-순수 리밸런싱 모드:
-- 09:05 리밸런싱으로만 포지션 구성
+리밸런싱 모드:
+- 09:05 리밸런싱으로 매수 (목표 포트폴리오 기준)
 - 장중 매수 판단 비활성화
-- 보유 종목 손절/익절 판단만 수행
+- 장중 손절/익절 매도 판단 활성화 (리밸런싱 매도와 병행)
 """
 from typing import Tuple, Optional, Dict, Any
 import pandas as pd
@@ -20,11 +20,11 @@ class TradingDecisionEngine:
     매매 판단 엔진 (퀀트 리밸런싱 전용)
     
     주요 기능:
-    1. 리밸런싱 기반 매수/매도 (09:05 실행)
-    2. 보유 종목 손절/익절 조건 검증
+    1. 리밸런싱 기반 매수 (09:05 실행)
+    2. 장중 손절/익절 매도 판단 (1분봉 고가/저가 기준)
     3. 가상 매매 실행
     
-    Note: 순수 리밸런싱 모드에서는 장중 매수 판단 비활성화
+    Note: 리밸런싱 모드에서는 장중 매수 판단만 비활성화, 손절/익절 매도는 활성화
     """
     
     def __init__(self, db_manager=None, telegram_integration=None, trading_manager=None, api_manager=None, intraday_manager=None):
@@ -253,56 +253,108 @@ class TradingDecisionEngine:
     
     async def analyze_sell_decision(self, trading_stock, combined_data=None) -> Tuple[bool, str]:
         """
-        매도 판단 분석 (간단한 손절/익절 로직)
+        매도 판단 분석 (백테스팅과 동일: 1분봉 고가/저가 기준 익절/손절 + 3분봉 기술적 분석)
         
         Args:
             trading_stock: 거래 종목 객체
-            combined_data: 분봉 데이터 (사용하지 않음, 호환성을 위해 유지)
+            combined_data: 분봉 데이터 (1분봉 데이터 사용)
             
         Returns:
             Tuple[매도신호여부, 매도사유]
         """
         try:
-            # 실시간 현재가 정보만 사용 (간단한 손절/익절 로직)
             stock_code = trading_stock.stock_code
-            current_price_info = self.intraday_manager.get_cached_current_price(stock_code)
             
-            if current_price_info is None:
-                return False, "실시간 현재가 정보 없음"
+            # 포지션 정보 확인
+            if not trading_stock.position:
+                return False, "포지션 없음"
             
-            current_price = current_price_info['current_price']
+            buy_price = trading_stock.position.avg_price
+            if buy_price <= 0:
+                return False, "매수가 정보 없음"
             
-            # 가상 포지션 정보 복원 (DB에서 미체결 포지션 조회) - 주석 처리
-            # if not trading_stock.position and self.db_manager:
-            #     open_positions = self.db_manager.get_virtual_open_positions()
-            #     stock_positions = open_positions[open_positions['stock_code'] == trading_stock.stock_code]
-            #     
-            #     if not stock_positions.empty:
-            #         latest_position = stock_positions.iloc[0]
-            #         buy_record_id = latest_position['id']
-            #         buy_price = latest_position['buy_price']
-            #         quantity = latest_position['quantity']
-            #         
-            #         # 가상 포지션 정보를 trading_stock에 복원
-            #         trading_stock.set_virtual_buy_info(buy_record_id, buy_price, quantity)
-            #         trading_stock.set_position(quantity, buy_price)
-            #         
-            #         self.logger.debug(f"🔄 가상 포지션 복원: {trading_stock.stock_code} {quantity}주 @{buy_price:,.0f}원")
+            # 🆕 1분봉 데이터 조회 (백테스팅과 동일한 방식)
+            if combined_data is None or combined_data.empty:
+                # combined_data가 없으면 intraday_manager에서 최신 1분봉 데이터 조회
+                try:
+                    combined_data = self.intraday_manager.get_combined_chart_data(stock_code)
+                    if combined_data is None or combined_data.empty:
+                        # 폴백: 현재가 정보만 사용
+                        current_price_info = self.intraday_manager.get_cached_current_price(stock_code)
+                        if current_price_info is None:
+                            return False, "데이터 없음"
+                        current_price = current_price_info['current_price']
+                        stop_profit_signal, stop_reason = self._check_simple_stop_profit_conditions(trading_stock, current_price)
+                        if stop_profit_signal:
+                            return True, f"손익절: {stop_reason}"
+                        return False, ""
+                except Exception as e:
+                    self.logger.warning(f"⚠️ {stock_code} 1분봉 데이터 조회 실패: {e}")
+                    # 폴백: 현재가만 사용
+                    current_price_info = self.intraday_manager.get_cached_current_price(stock_code)
+                    if current_price_info:
+                        current_price = current_price_info['current_price']
+                        stop_profit_signal, stop_reason = self._check_simple_stop_profit_conditions(trading_stock, current_price)
+                        if stop_profit_signal:
+                            return True, f"손익절: {stop_reason}"
+                    return False, ""
             
-            # 간단한 손절/익절 조건 확인 (+3% 익절, -2% 손절)
-            stop_profit_signal, stop_reason = self._check_simple_stop_profit_conditions(trading_stock, current_price)
-            if stop_profit_signal:
-                return True, f"손익절: {stop_reason}"
+            # 최신 1분봉 데이터 확인
+            if len(combined_data) == 0:
+                return False, "1분봉 데이터 없음"
             
-            # 기존 복잡한 손절 조건 확인 (백업용)
-            # stop_loss_signal, stop_reason = self._check_stop_loss_conditions(trading_stock, combined_data)
-            # if stop_loss_signal:
-            #     return True, f"손절: {stop_reason}"
+            latest_candle = combined_data.iloc[-1]
+            candle_high = self._safe_float_convert(latest_candle.get('high', latest_candle.get('stck_hgpr', 0)))
+            candle_low = self._safe_float_convert(latest_candle.get('low', latest_candle.get('stck_lwpr', 0)))
+            candle_close = self._safe_float_convert(latest_candle.get('close', latest_candle.get('stck_clpr', 0)))
             
-            # 수익실현 조건 확인 (복잡한 로직 - 주석 처리)
-            # profit_signal, profit_reason = self._check_profit_target(trading_stock, current_price)
-            # if profit_signal:
-            #     return True, profit_reason
+            if candle_high <= 0 or candle_low <= 0:
+                return False, "1분봉 고가/저가 정보 없음"
+            
+            # 🆕 목표 수익률/손절률 조회 (퀀트 투자에 맞는 넓은 범위 설정)
+            # 퀀트 투자는 팩터 기반 장기 관점이므로 단타 트레이딩보다 넓은 범위 사용
+            from config.settings import load_trading_config
+            config = load_trading_config()
+            target_profit_rate = config.risk_management.take_profit_ratio  # 기본 15% (퀀트 투자)
+            stop_loss_rate = config.risk_management.stop_loss_ratio  # 기본 10% (퀀트 투자)
+            
+            # ==================== 1. 1분봉 고가/저가 기준 익절/손절 체크 (백테스팅과 동일) ====================
+            profit_target_price = buy_price * (1.0 + target_profit_rate)
+            stop_loss_target_price = buy_price * (1.0 - stop_loss_rate)
+            
+            # 익절: 1분봉 고가가 익절 목표가 터치 시
+            if candle_high >= profit_target_price:
+                return True, f"익절_{target_profit_rate*100:.1f}pct(1분봉고가)"
+            
+            # 손절: 1분봉 저가가 손절 목표가 터치 시
+            if candle_low <= stop_loss_target_price:
+                return True, f"손절_{stop_loss_rate*100:.1f}pct(1분봉저가)"
+            
+            # ==================== 2. 3분봉 완성 시점에만 기술적 분석 매도 신호 체크 ====================
+            from utils.korean_time import now_kst
+            current_time = now_kst()
+            
+            # 3분봉 완성 시점 체크 (매 3분마다: 09:00, 09:03, 09:06, ...)
+            if current_time.minute % 3 == 0 and current_time.second >= 10:
+                try:
+                    # 1분봉을 3분봉으로 변환
+                    from core.timeframe_converter import TimeFrameConverter
+                    data_3min = TimeFrameConverter.convert_to_3min_data(combined_data)
+                    
+                    if data_3min is not None and len(data_3min) >= 5:
+                        # 진입 저가 조회
+                        entry_low = getattr(trading_stock, '_entry_low', None)
+                        if entry_low is None or entry_low <= 0:
+                            entry_low = candle_low  # 폴백
+                        
+                        # 3분봉 기반 기술적 분석 매도 신호
+                        from core.indicators.pullback_candle_pattern import PullbackCandlePattern
+                        technical_sell, technical_reason = PullbackCandlePattern.check_technical_sell_signals(data_3min, entry_low)
+                        
+                        if technical_sell:
+                            return True, f"기술적매도_{technical_reason}(3분봉)"
+                except Exception as e:
+                    self.logger.debug(f"⚠️ {stock_code} 기술적 분석 매도 신호 체크 오류: {e}")
             
             return False, ""
             

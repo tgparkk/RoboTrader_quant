@@ -966,3 +966,44 @@ class PullbackCandlePattern:
                             stock_code: str = "UNKNOWN", debug: bool = False) -> List[RiskSignal]:
         """매도 신호 생성"""
         return PullbackUtils.detect_risk_signals(data, entry_price, entry_low)
+    
+    @staticmethod
+    def check_technical_sell_signals(data_3min: pd.DataFrame, entry_low: float) -> Tuple[bool, str]:
+        """
+        3분봉 기반 기술적 분석 매도 신호 체크
+        
+        Args:
+            data_3min: 3분봉 데이터
+            entry_low: 진입 저가
+            
+        Returns:
+            Tuple[매도신호여부, 매도사유]
+        """
+        try:
+            from .pullback.types import RiskSignal
+            
+            # 매도 신호 계산
+            risk_signals = PullbackCandlePattern.generate_sell_signals(
+                data_3min,
+                entry_price=0.0,  # entry_price는 사용하지 않음
+                entry_low=entry_low if entry_low > 0 else None,
+                stock_code="UNKNOWN"
+            )
+            
+            if risk_signals is None or len(risk_signals) == 0:
+                return False, ""
+            
+            # RiskSignal Enum 체크
+            if RiskSignal.BISECTOR_BREAK in risk_signals:
+                return True, "bisector_break"
+            
+            if RiskSignal.SUPPORT_BREAK in risk_signals:
+                return True, "support_break"
+            
+            if RiskSignal.ENTRY_LOW_BREAK in risk_signals:
+                return True, "entry_low_technical_break"
+                
+            return False, ""
+            
+        except Exception as e:
+            return False, ""
