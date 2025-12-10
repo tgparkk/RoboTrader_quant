@@ -1677,16 +1677,6 @@ class IntradayStockManager:
         return validate_today_data(data)
 
 
-    def _save_minute_data_to_cache(self):
-        """
-        [DEPRECATED] 이 메서드는 더 이상 사용되지 않습니다.
-        대신 PostMarketDataSaver.save_minute_data_to_cache() 사용
-
-        메모리에 있는 모든 종목의 분봉 데이터를 cache/minute_data에 pickle로 저장
-        시뮬레이션 데이터와 비교용 (15:30 장 마감 시)
-        """
-        self.logger.warning("⚠️ _save_minute_data_to_cache는 deprecated입니다. PostMarketDataSaver를 사용하세요.")
-        return self.data_saver.save_minute_data_to_cache(self)
 
     def _save_minute_data_to_file(self):
         """

@@ -130,46 +130,6 @@ def collect_minute_data_from_api(stock_code: str, date_str: str) -> Optional[pd.
         return None
 
 
-def save_minute_data_to_cache(stock_code: str, date_str: str, data: pd.DataFrame):
-    """분봉 데이터를 캐시에 저장 (당일 데이터만 필터링)"""
-    try:
-        if data is None or data.empty:
-            logger.warning(f"빈 데이터, 저장 건너뜀: {stock_code} {date_str}")
-            return
-        
-        # 🆕 당일 데이터만 필터링
-        filtered_data = data.copy()
-        before_count = len(filtered_data)
-        
-        if 'date' in filtered_data.columns:
-            filtered_data = filtered_data[filtered_data['date'].astype(str) == date_str].copy()
-        elif 'datetime' in filtered_data.columns:
-            filtered_data['date_str'] = pd.to_datetime(filtered_data['datetime']).dt.strftime('%Y%m%d')
-            filtered_data = filtered_data[filtered_data['date_str'] == date_str].copy()
-            if 'date_str' in filtered_data.columns:
-                filtered_data = filtered_data.drop('date_str', axis=1)
-        
-        if before_count != len(filtered_data):
-            removed = before_count - len(filtered_data)
-            logger.warning(f"⚠️ {stock_code} 당일 외 데이터 {removed}건 제외: {before_count} → {len(filtered_data)}건")
-        
-        if filtered_data.empty:
-            logger.error(f"❌ {stock_code} 당일 데이터 없음 (캐시 저장 중단)")
-            return
-        
-        minute_cache_dir = project_root / "cache" / "minute_data"
-        minute_cache_dir.mkdir(parents=True, exist_ok=True)
-        
-        cache_file = minute_cache_dir / f"{stock_code}_{date_str}.pkl"
-        with open(cache_file, 'wb') as f:
-            pickle.dump(filtered_data, f)
-        
-        logger.debug(f"분봉 데이터 캐시 저장: {stock_code} {date_str} ({len(filtered_data)}건)")
-        
-    except Exception as e:
-        logger.error(f"분봉 데이터 캐시 저장 실패 ({stock_code}, {date_str}): {e}")
-
-
 def ensure_sufficient_minute_data(stock_code: str, date_str: str = None, required_count: int = 15, use_api: bool = True) -> bool:
     """
     분봉 데이터 충분성 확인 및 필요시 수집
@@ -197,9 +157,6 @@ def ensure_sufficient_minute_data(stock_code: str, date_str: str = None, require
             minute_data = collect_minute_data_from_api(stock_code, date_str)
             
             if minute_data is not None and not minute_data.empty:
-                # 캐시에 저장
-                save_minute_data_to_cache(stock_code, date_str, minute_data)
-                
                 # 다시 충분성 검사
                 if check_minute_data_sufficiency(stock_code, date_str, required_count):
                     logger.info(f"✅ {stock_code} 분봉 데이터 수집 완료")

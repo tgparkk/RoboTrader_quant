@@ -119,23 +119,17 @@ def generate_comprehensive_report(save_to_file=True):
     
     # 캐시 파일 확인
     if len(df_candidates) > 0:
-        minute_cache_dir = project_root / "cache" / "minute_data"
-        daily_cache_dir = project_root / "daily"
+        daily_cache_dir = project_root / "cache" / "daily"
         
-        minute_count = 0
         daily_file_count = 0
         
         for _, row in df_candidates.iterrows():
             stock_code = row['stock_code']
-            minute_file = minute_cache_dir / f"{stock_code}_{today_str}.pkl"
             daily_file = daily_cache_dir / f"{stock_code}_{today_str}_daily.pkl"
             
-            if minute_file.exists():
-                minute_count += 1
             if daily_file.exists():
                 daily_file_count += 1
         
-        print(f"📁 분봉 캐시 파일: {minute_count}/{len(df_candidates)}개")
         print(f"📁 일봉 캐시 파일: {daily_file_count}/{len(df_candidates)}개")
     
     # 3. 매매 현황 상세

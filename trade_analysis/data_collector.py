@@ -447,8 +447,6 @@ class AnalysisDataCollector:
         if use_api:
             minute_data = self.get_minute_data_from_api(stock_code, date_str)
             if minute_data is not None:
-                # 캐시에 저장
-                self._save_minute_data_to_cache(stock_code, date_str, minute_data)
                 return minute_data
 
         self.logger.warning(f"분봉 데이터 없음: {stock_code} {date_str}")
@@ -496,20 +494,6 @@ class AnalysisDataCollector:
 
         except Exception as e:
             self.logger.error(f"일봉 데이터 캐시 저장 실패 ({stock_code}, {date_str}): {e}")
-
-    def _save_minute_data_to_cache(self, stock_code: str, date_str: str, data: pd.DataFrame):
-        """분봉 데이터를 캐시에 저장"""
-        try:
-            cache_file = self.minute_cache_dir / f"{stock_code}_{date_str}.pkl"
-            cache_file.parent.mkdir(parents=True, exist_ok=True)
-
-            with open(cache_file, 'wb') as f:
-                pickle.dump(data, f)
-
-            self.logger.debug(f"분봉 데이터 캐시 저장: {stock_code} {date_str}")
-
-        except Exception as e:
-            self.logger.error(f"분봉 데이터 캐시 저장 실패 ({stock_code}, {date_str}): {e}")
 
     def collect_analysis_data(self, start_date: str, end_date: str, use_api: bool = True) -> Dict[str, Any]:
         """

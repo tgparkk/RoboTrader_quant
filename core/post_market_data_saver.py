@@ -1,6 +1,5 @@
 """
 장 마감 후 데이터 저장 전담 모듈
-- 분봉 데이터 저장 (cache/minute_data/)
 - 일봉 데이터 저장 (cache/daily/)
 - 텍스트 파일 저장 (디버깅용)
 """
@@ -21,94 +20,12 @@ class PostMarketDataSaver:
     def __init__(self):
         """초기화"""
         self.logger = setup_logger(__name__)
-        self.minute_cache_dir = Path("cache/minute_data")
         self.daily_cache_dir = Path("cache/daily")
 
         # 디렉토리 생성
-        self.minute_cache_dir.mkdir(parents=True, exist_ok=True)
         self.daily_cache_dir.mkdir(parents=True, exist_ok=True)
 
         self.logger.info("장 마감 후 데이터 저장기 초기화 완료")
-
-    def save_minute_data_to_cache(self, intraday_manager) -> Dict[str, int]:
-        """
-        메모리에 있는 모든 종목의 분봉 데이터를 cache/minute_data에 pickle로 저장
-
-        Args:
-            intraday_manager: IntradayStockManager 인스턴스
-
-        Returns:
-            Dict: {'total': 전체 종목 수, 'saved': 저장 성공 수, 'failed': 실패 수}
-        """
-        try:
-            current_time = now_kst()
-            today = current_time.strftime('%Y%m%d')
-
-            # intraday_manager에서 종목 목록 가져오기
-            with intraday_manager._lock:
-                stock_codes = list(intraday_manager.selected_stocks.keys())
-
-            if not stock_codes:
-                self.logger.info("💾 분봉 캐시 저장할 종목 없음")
-                return {'total': 0, 'saved': 0, 'failed': 0}
-
-            saved_count = 0
-            failed_count = 0
-
-            for stock_code in stock_codes:
-                try:
-                    # combined_data (historical + realtime 병합) 가져오기
-                    combined_data = intraday_manager.get_combined_chart_data(stock_code)
-
-                    if combined_data is None or combined_data.empty:
-                        self.logger.warning(f"⚠️ [{stock_code}] 저장할 분봉 데이터 없음")
-                        failed_count += 1
-                        continue
-
-                    # 당일 데이터만 필터링
-                    before_count = len(combined_data)
-                    if 'date' in combined_data.columns:
-                        combined_data = combined_data[combined_data['date'].astype(str) == today].copy()
-                    elif 'datetime' in combined_data.columns:
-                        combined_data['date_str'] = pd.to_datetime(combined_data['datetime']).dt.strftime('%Y%m%d')
-                        combined_data = combined_data[combined_data['date_str'] == today].copy()
-                        if 'date_str' in combined_data.columns:
-                            combined_data = combined_data.drop('date_str', axis=1)
-
-                    if before_count != len(combined_data):
-                        removed = before_count - len(combined_data)
-                        self.logger.warning(f"⚠️ [{stock_code}] 전날 데이터 {removed}건 제외: {before_count} → {len(combined_data)}건")
-
-                    if combined_data.empty:
-                        self.logger.warning(f"⚠️ [{stock_code}] 당일 분봉 데이터 없음")
-                        failed_count += 1
-                        continue
-
-                    # 파일명: 종목코드_날짜.pkl
-                    cache_file = self.minute_cache_dir / f"{stock_code}_{today}.pkl"
-
-                    # pickle로 저장
-                    with open(cache_file, 'wb') as f:
-                        pickle.dump(combined_data, f)
-
-                    saved_count += 1
-                    self.logger.debug(f"💾 [{stock_code}] 분봉 캐시 저장: {len(combined_data)}건 → {cache_file.name}")
-
-                except Exception as e:
-                    self.logger.error(f"❌ [{stock_code}] 분봉 캐시 저장 실패: {e}")
-                    failed_count += 1
-
-            self.logger.info(f"✅ 분봉 데이터 캐시 저장 완료: {saved_count}/{len(stock_codes)}개 종목 성공, {failed_count}개 실패")
-
-            return {
-                'total': len(stock_codes),
-                'saved': saved_count,
-                'failed': failed_count
-            }
-
-        except Exception as e:
-            self.logger.error(f"❌ 분봉 데이터 캐시 저장 중 오류: {e}")
-            return {'total': 0, 'saved': 0, 'failed': 0}
 
     def save_minute_data_to_file(self, intraday_manager) -> Optional[str]:
         """
@@ -259,7 +176,7 @@ class PostMarketDataSaver:
 
     def save_all_data(self, intraday_manager) -> Dict[str, any]:
         """
-        장 마감 후 모든 데이터 저장 (분봉 + 일봉 + 텍스트)
+        장 마감 후 모든 데이터 저장 (일봉 + 텍스트)
 
         Args:
             intraday_manager: IntradayStockManager 인스턴스
@@ -281,7 +198,6 @@ class PostMarketDataSaver:
                 return {
                     'success': False,
                     'message': '저장할 종목 없음',
-                    'minute_data': {'total': 0, 'saved': 0, 'failed': 0},
                     'daily_data': {'total': 0, 'saved': 0, 'failed': 0},
                     'text_file': None
                 }
@@ -289,21 +205,15 @@ class PostMarketDataSaver:
             self.logger.info(f"📋 대상 종목: {len(stock_codes)}개")
             self.logger.info(f"   종목 코드: {', '.join(stock_codes)}")
 
-            # 1. 분봉 데이터 저장 (pkl)
+            # 1. 일봉 데이터 저장 (pkl)
             self.logger.info("\n" + "=" * 80)
-            self.logger.info("1️⃣ 분봉 데이터 pkl 저장")
-            self.logger.info("=" * 80)
-            minute_result = self.save_minute_data_to_cache(intraday_manager)
-
-            # 2. 일봉 데이터 저장 (pkl)
-            self.logger.info("\n" + "=" * 80)
-            self.logger.info("2️⃣ 일봉 데이터 pkl 저장")
+            self.logger.info("1️⃣ 일봉 데이터 pkl 저장")
             self.logger.info("=" * 80)
             daily_result = self.save_daily_data(stock_codes)
 
-            # 3. 분봉 데이터 텍스트 파일 저장 (디버깅용)
+            # 2. 분봉 데이터 텍스트 파일 저장 (디버깅용)
             self.logger.info("\n" + "=" * 80)
-            self.logger.info("3️⃣ 분봉 데이터 텍스트 파일 저장 (디버깅용)")
+            self.logger.info("2️⃣ 분봉 데이터 텍스트 파일 저장 (디버깅용)")
             self.logger.info("=" * 80)
             text_file = self.save_minute_data_to_file(intraday_manager)
 
@@ -311,14 +221,12 @@ class PostMarketDataSaver:
             self.logger.info("\n" + "=" * 80)
             self.logger.info("✅ 장 마감 후 데이터 저장 완료")
             self.logger.info("=" * 80)
-            self.logger.info(f"📊 분봉 데이터: {minute_result['saved']}/{minute_result['total']}개 저장 성공")
             self.logger.info(f"📊 일봉 데이터: {daily_result['saved']}/{daily_result['total']}개 저장 성공")
             self.logger.info(f"📝 텍스트 파일: {text_file if text_file else '저장 실패'}")
             self.logger.info("=" * 80)
 
             return {
                 'success': True,
-                'minute_data': minute_result,
                 'daily_data': daily_result,
                 'text_file': text_file
             }
@@ -328,7 +236,6 @@ class PostMarketDataSaver:
             return {
                 'success': False,
                 'error': str(e),
-                'minute_data': {'total': 0, 'saved': 0, 'failed': 0},
                 'daily_data': {'total': 0, 'saved': 0, 'failed': 0},
                 'text_file': None
             }

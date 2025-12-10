@@ -2,7 +2,7 @@
 """
 오늘 데이터 수집 상태 확인 스크립트
 - candidate_stocks 테이블에서 오늘 날짜의 종목 조회
-- 각 종목별 분봉/일봉 데이터 수집 상태 확인
+- 각 종목별 일봉 데이터 수집 상태 확인
 """
 import sqlite3
 import pickle
@@ -53,35 +53,6 @@ def get_today_candidate_stocks(db_path: str) -> List[Dict[str, str]]:
     except Exception as e:
         logger.error(f"후보 종목 조회 실패: {e}")
         return []
-
-
-def check_minute_data(stock_code: str, date_str: str) -> Tuple[bool, int, str]:
-    """분봉 데이터 확인"""
-    try:
-        minute_cache_dir = project_root / "cache" / "minute_data"
-        cache_file = minute_cache_dir / f"{stock_code}_{date_str}.pkl"
-        
-        if not cache_file.exists():
-            return False, 0, "파일 없음"
-        
-        with open(cache_file, 'rb') as f:
-            df = pickle.load(f)
-        
-        if df is None or df.empty:
-            return False, 0, "빈 데이터"
-        
-        # 날짜 필터링 확인
-        date_count = 0
-        if 'date' in df.columns:
-            date_count = len(df[df['date'].astype(str) == date_str])
-        elif 'datetime' in df.columns:
-            df['date_str'] = pd.to_datetime(df['datetime']).dt.strftime('%Y%m%d')
-            date_count = len(df[df['date_str'] == date_str])
-        
-        return True, date_count, f"{len(df)}건 (당일: {date_count}건)"
-        
-    except Exception as e:
-        return False, 0, f"오류: {e}"
 
 
 def check_daily_data(stock_code: str, date_str: str) -> Tuple[bool, int, str]:
@@ -146,17 +117,11 @@ def check_today_data_collection():
     
     # 각 종목별 데이터 확인
     results = []
-    minute_ok = 0
     daily_ok = 0
     
     for candidate in candidates:
         stock_code = candidate['stock_code']
         stock_name = candidate['stock_name']
-        
-        # 분봉 데이터 확인
-        minute_exists, minute_count, minute_info = check_minute_data(stock_code, today_str)
-        if minute_exists and minute_count > 0:
-            minute_ok += 1
         
         # 일봉 데이터 확인
         daily_exists, daily_count, daily_info = check_daily_data(stock_code, today_str)
@@ -166,9 +131,6 @@ def check_today_data_collection():
         results.append({
             'stock_code': stock_code,
             'stock_name': stock_name,
-            'minute_exists': minute_exists,
-            'minute_count': minute_count,
-            'minute_info': minute_info,
             'daily_exists': daily_exists,
             'daily_count': daily_count,
             'daily_info': daily_info
@@ -180,11 +142,9 @@ def check_today_data_collection():
     print("=" * 80)
     
     for result in results:
-        minute_status = "[OK]" if result['minute_exists'] and result['minute_count'] > 0 else "[누락]"
         daily_status = "[OK]" if result['daily_exists'] else "[누락]"
         
         print(f"\n[{result['stock_code']}] {result['stock_name']}")
-        print(f"  분봉: {minute_status} {result['minute_info']}")
         print(f"  일봉: {daily_status} {result['daily_info']}")
     
     # 요약
@@ -193,17 +153,10 @@ def check_today_data_collection():
     print("=" * 80)
     print(f"전체 종목 수: {len(candidates)}개")
     if len(candidates) > 0:
-        print(f"분봉 데이터 수집: {minute_ok}/{len(candidates)}개 ({minute_ok/len(candidates)*100:.1f}%)")
         print(f"일봉 데이터 수집: {daily_ok}/{len(candidates)}개 ({daily_ok/len(candidates)*100:.1f}%)")
     
     # 문제가 있는 종목
-    missing_minute = [r for r in results if not r['minute_exists'] or r['minute_count'] == 0]
     missing_daily = [r for r in results if not r['daily_exists']]
-    
-    if missing_minute:
-        print(f"\n[경고] 분봉 데이터 누락: {len(missing_minute)}개")
-        for r in missing_minute:
-            print(f"  - {r['stock_code']} {r['stock_name']}: {r['minute_info']}")
     
     if missing_daily:
         print(f"\n[경고] 일봉 데이터 누락: {len(missing_daily)}개")
@@ -213,9 +166,9 @@ def check_today_data_collection():
     # 최종 판단
     print("\n" + "=" * 80)
     if len(candidates) > 0:
-        if minute_ok == len(candidates) and daily_ok == len(candidates):
+        if daily_ok == len(candidates):
             print("[성공] 모든 종목의 데이터 수집이 완료되었습니다!")
-        elif minute_ok == 0 and daily_ok == 0:
+        elif daily_ok == 0:
             print("[실패] 데이터 수집이 전혀 되지 않았습니다. 수집 스크립트를 실행해주세요.")
         else:
             print("[부분 성공] 일부 종목의 데이터가 누락되었습니다. 확인이 필요합니다.")
