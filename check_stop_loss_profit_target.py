@@ -68,18 +68,23 @@ def check_stop_loss_profit_target():
     df_sell = pd.read_sql_query(query_sell, conn, params=(cutoff_date.strftime('%Y-%m-%d'),))
     
     # 3. 보유 종목 계산
+    # 가중평균 매수가 계산 (더 명확한 방법)
+    df_buy['total_amount'] = df_buy['price'] * df_buy['quantity']
     buy_summary = df_buy.groupby('stock_code').agg({
         'quantity': 'sum',
-        'price': lambda x: (x * df_buy.loc[x.index, 'quantity']).sum() / df_buy.loc[x.index, 'quantity'].sum(),  # 가중평균
+        'total_amount': 'sum',
         'stock_name': 'first'
     }).reset_index()
+    buy_summary['avg_buy_price'] = buy_summary['total_amount'] / buy_summary['quantity']
+    buy_summary = buy_summary[['stock_code', 'quantity', 'avg_buy_price', 'stock_name']]
     buy_summary.columns = ['stock_code', 'total_buy_qty', 'avg_buy_price', 'stock_name']
     
     sell_summary = df_sell.groupby('stock_code')['quantity'].sum().reset_index()
     sell_summary.columns = ['stock_code', 'total_sell_qty']
     
     holdings = buy_summary.merge(sell_summary, on='stock_code', how='left')
-    holdings['total_sell_qty'] = holdings['total_sell_qty'].fillna(0)
+    # FutureWarning 방지: fillna 대신 직접 처리
+    holdings['total_sell_qty'] = holdings['total_sell_qty'].where(holdings['total_sell_qty'].notna(), 0).astype(int)
     holdings['holding_qty'] = holdings['total_buy_qty'] - holdings['total_sell_qty']
     holdings = holdings[holdings['holding_qty'] > 0].copy()
     
