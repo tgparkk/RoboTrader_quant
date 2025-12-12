@@ -221,9 +221,22 @@ class DatabaseManager:
                         profit_loss REAL DEFAULT 0,  -- 손익 (매도시에만)
                         profit_rate REAL DEFAULT 0,  -- 수익률 (매도시에만)
                         buy_record_id INTEGER,  -- 대응되는 매수 기록 ID (매도시에만)
+                        target_profit_rate REAL,  -- 목표 익절률 (매수시에만)
+                        stop_loss_rate REAL,  -- 목표 손절률 (매수시에만)
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
+                
+                # 기존 테이블에 컬럼 추가 (없는 경우만)
+                try:
+                    cursor.execute('ALTER TABLE virtual_trading_records ADD COLUMN target_profit_rate REAL')
+                except sqlite3.OperationalError:
+                    pass  # 컬럼이 이미 존재
+                
+                try:
+                    cursor.execute('ALTER TABLE virtual_trading_records ADD COLUMN stop_loss_rate REAL')
+                except sqlite3.OperationalError:
+                    pass  # 컬럼이 이미 존재
                 
                 # 실거래 매매 기록 테이블
                 cursor.execute('''
@@ -666,6 +679,53 @@ class DatabaseManager:
             self.logger.error(f"quant 포트폴리오 조회 실패: {e}")
             return []
     
+    def get_quant_factors(self, calc_date: str, stock_code: str = None) -> List[Dict[str, Any]]:
+        """
+        일자별 팩터 점수 조회
+        
+        Args:
+            calc_date: 계산 날짜 (YYYYMMDD)
+            stock_code: 종목코드 (None이면 전체)
+        
+        Returns:
+            List[Dict]: 팩터 점수 리스트
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                if stock_code:
+                    cursor.execute('''
+                        SELECT stock_code, value_score, momentum_score, quality_score, 
+                               growth_score, total_score, factor_rank
+                        FROM quant_factors
+                        WHERE calc_date = ? AND stock_code = ?
+                    ''', (calc_date, stock_code))
+                else:
+                    cursor.execute('''
+                        SELECT stock_code, value_score, momentum_score, quality_score, 
+                               growth_score, total_score, factor_rank
+                        FROM quant_factors
+                        WHERE calc_date = ?
+                        ORDER BY factor_rank ASC
+                    ''', (calc_date,))
+                
+                rows = cursor.fetchall()
+                return [
+                    {
+                        'stock_code': row[0],
+                        'value_score': row[1],
+                        'momentum_score': row[2],
+                        'quality_score': row[3],
+                        'growth_score': row[4],
+                        'total_score': row[5],
+                        'rank': row[6]
+                    }
+                    for row in rows
+                ]
+        except Exception as e:
+            self.logger.error(f"팩터 점수 조회 실패: {e}")
+            return []
+    
     def get_minute_data(self, stock_code: str, date_str: str) -> Optional[pd.DataFrame]:
         """1분봉 데이터를 기존 stock_prices 테이블에서 조회"""
         try:
@@ -989,7 +1049,9 @@ class DatabaseManager:
     
     def save_virtual_buy(self, stock_code: str, stock_name: str, price: float, 
                         quantity: int, strategy: str, reason: str, 
-                        timestamp: datetime = None) -> Optional[int]:
+                        timestamp: datetime = None,
+                        target_profit_rate: float = None,
+                        stop_loss_rate: float = None) -> Optional[int]:
         """가상 매수 기록 저장"""
         try:
             if timestamp is None:
@@ -1000,14 +1062,21 @@ class DatabaseManager:
                 
                 cursor.execute('''
                     INSERT INTO virtual_trading_records 
-                    (stock_code, stock_name, action, quantity, price, timestamp, strategy, reason, is_test, created_at)
-                    VALUES (?, ?, 'BUY', ?, ?, ?, ?, ?, 1, ?)
-                ''', (stock_code, stock_name, quantity, price, timestamp.strftime('%Y-%m-%d %H:%M:%S'), strategy, reason, now_kst().strftime('%Y-%m-%d %H:%M:%S')))
+                    (stock_code, stock_name, action, quantity, price, timestamp, strategy, reason, is_test, 
+                     target_profit_rate, stop_loss_rate, created_at)
+                    VALUES (?, ?, 'BUY', ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                ''', (stock_code, stock_name, quantity, price, timestamp.strftime('%Y-%m-%d %H:%M:%S'), 
+                      strategy, reason, target_profit_rate, stop_loss_rate, 
+                      now_kst().strftime('%Y-%m-%d %H:%M:%S')))
                 
                 buy_record_id = cursor.lastrowid
                 conn.commit()
                 
-                self.logger.info(f"🔥 가상 매수 기록 저장: {stock_code}({stock_name}) {quantity}주 @{price:,.0f}원 - {strategy}")
+                profit_info = ""
+                if target_profit_rate is not None and stop_loss_rate is not None:
+                    profit_info = f" (익절: {target_profit_rate*100:.1f}%, 손절: {stop_loss_rate*100:.1f}%)"
+                
+                self.logger.info(f"🔥 가상 매수 기록 저장: {stock_code}({stock_name}) {quantity}주 @{price:,.0f}원 - {strategy}{profit_info}")
                 return buy_record_id
                 
         except Exception as e:
@@ -1074,7 +1143,9 @@ class DatabaseManager:
                         b.price as buy_price,
                         b.timestamp as buy_time,
                         b.strategy,
-                        b.reason as buy_reason
+                        b.reason as buy_reason,
+                        b.target_profit_rate,
+                        b.stop_loss_rate
                     FROM virtual_trading_records b
                     WHERE b.action = 'BUY' 
                         AND b.is_test = 1

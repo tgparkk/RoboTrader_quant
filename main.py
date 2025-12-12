@@ -475,11 +475,22 @@ class DayTradingBot:
                                 # 리밸런싱 계획 계산
                                 plan = self.rebalancing_service.calculate_rebalancing_plan(today_str)
                                 
-                                if plan and (plan.get('sell_list') or plan.get('buy_list')):
-                                    # 리밸런싱 실행 (비동기로 변환 필요)
-                                    await self._execute_rebalancing_async(plan)
-                                    self._last_rebalancing_date = today_str
-                                    self.logger.info(f"✅ 리밸런싱 완료: {today_str}")
+                                # 리밸런싱 실행 (매도/매수 또는 유지 대상 목표 익절/손절률 갱신)
+                                if plan:
+                                    keep_list = plan.get('keep_list', [])
+                                    if plan.get('sell_list') or plan.get('buy_list'):
+                                        # 매도/매수 실행 (유지 대상 갱신 포함)
+                                        await self._execute_rebalancing_async(plan)
+                                        self._last_rebalancing_date = today_str
+                                        self.logger.info(f"✅ 리밸런싱 완료: {today_str}")
+                                    elif keep_list:
+                                        # 유지 대상만 있는 경우 목표 익절/손절률만 갱신
+                                        await self._update_keep_list_profit_loss(keep_list)
+                                        self._last_rebalancing_date = today_str
+                                        self.logger.info(f"✅ 유지 대상 목표 익절/손절률 갱신 완료: {today_str}")
+                                    else:
+                                        self.logger.info(f"ℹ️ 리밸런싱 불필요: 목표 포트와 동일")
+                                        self._last_rebalancing_date = today_str
                                 else:
                                     self.logger.info(f"ℹ️ 리밸런싱 불필요: 목표 포트와 동일")
                                     self._last_rebalancing_date = today_str
@@ -565,6 +576,25 @@ class DayTradingBot:
                 self.logger.info(f"⏳ 매도 주문 체결 확인 중... (최대 5분)")
                 await self._wait_for_sell_orders_completion(sell_results, max_wait_seconds=300)
             
+            # 1.5단계: 유지 대상 종목의 목표 익절/손절률 갱신
+            keep_list = plan.get('keep_list', [])
+            if keep_list:
+                self.logger.info(f"🔄 유지 대상 종목 목표 익절/손절률 갱신: {len(keep_list)}개")
+                for keep_item in keep_list:
+                    stock_code = keep_item['stock_code']
+                    target_profit_rate = keep_item.get('target_profit_rate', 0.15)
+                    stop_loss_rate = keep_item.get('stop_loss_rate', 0.10)
+                    
+                    trading_stock = self.trading_manager.get_trading_stock(stock_code)
+                    if trading_stock:
+                        trading_stock.target_profit_rate = target_profit_rate
+                        trading_stock.stop_loss_rate = stop_loss_rate
+                        self.logger.info(
+                            f"📊 {stock_code} 목표 익절/손절률 갱신: "
+                            f"익절 {target_profit_rate*100:.1f}%, 손절 {stop_loss_rate*100:.1f}% "
+                            f"(순위: {keep_item.get('rank', '?')}위, 점수: {keep_item.get('total_score', 0):.1f})"
+                        )
+            
             # 2단계: 매수 주문 (동등 비중, 시장가)
             buy_results = []
             for buy_item in buy_list:
@@ -587,6 +617,33 @@ class DayTradingBot:
                         self.logger.warning(f"⚠️ {stock_code} 목표 수량 0 (금액 부족)")
                         continue
                     
+                    # 목표 익절/손절률 설정 (매수 전에 설정)
+                    target_profit_rate = buy_item.get('target_profit_rate', 0.15)
+                    stop_loss_rate = buy_item.get('stop_loss_rate', 0.10)
+                    
+                    # TradingStock 객체에 먼저 추가 또는 업데이트
+                    trading_stock = self.trading_manager.get_trading_stock(stock_code)
+                    if not trading_stock:
+                        # TradingStock이 없으면 추가
+                        from utils.korean_time import now_kst
+                        from core.models import StockState
+                        await self.trading_manager.add_selected_stock(
+                            stock_code=stock_code,
+                            stock_name=stock_name,
+                            selection_reason=f"리밸런싱 {buy_item.get('rank', '?')}위",
+                            prev_close=current_price
+                        )
+                        trading_stock = self.trading_manager.get_trading_stock(stock_code)
+                    
+                    if trading_stock:
+                        trading_stock.target_profit_rate = target_profit_rate
+                        trading_stock.stop_loss_rate = stop_loss_rate
+                        self.logger.info(
+                            f"📊 {stock_code} 목표 익절/손절률 설정: "
+                            f"익절 {target_profit_rate*100:.1f}%, 손절 {stop_loss_rate*100:.1f}% "
+                            f"(순위: {buy_item.get('rank', '?')}위, 점수: {buy_item.get('total_score', 0):.1f})"
+                        )
+                    
                     # 시장가 매수 주문
                     order_id = await self.order_manager.place_buy_order(
                         stock_code=stock_code,
@@ -596,11 +653,14 @@ class DayTradingBot:
                     )
                     
                     if order_id:
+                        
                         buy_results.append({
                             'stock_code': stock_code,
                             'stock_name': stock_name,
                             'target_amount': target_amount,
                             'quantity': target_quantity,
+                            'target_profit_rate': target_profit_rate,
+                            'stop_loss_rate': stop_loss_rate,
                             'success': True,
                             'order_id': order_id
                         })
@@ -1156,6 +1216,44 @@ class DayTradingBot:
             
         except Exception as e:
             self.logger.error(f"❌ 매도 주문 체결 확인 오류: {e}")
+    
+    async def _update_keep_list_profit_loss(self, keep_list: List[Dict]):
+        """유지 대상 종목의 목표 익절/손절률 갱신"""
+        try:
+            if not keep_list:
+                return
+            
+            self.logger.info(f"🔄 유지 대상 종목 목표 익절/손절률 갱신: {len(keep_list)}개")
+            updated_count = 0
+            
+            for keep_item in keep_list:
+                stock_code = keep_item['stock_code']
+                target_profit_rate = keep_item.get('target_profit_rate', 0.15)
+                stop_loss_rate = keep_item.get('stop_loss_rate', 0.10)
+                
+                trading_stock = self.trading_manager.get_trading_stock(stock_code)
+                if trading_stock:
+                    old_profit = trading_stock.target_profit_rate
+                    old_loss = trading_stock.stop_loss_rate
+                    
+                    trading_stock.target_profit_rate = target_profit_rate
+                    trading_stock.stop_loss_rate = stop_loss_rate
+                    updated_count += 1
+                    
+                    if abs(old_profit - target_profit_rate) > 0.001 or abs(old_loss - stop_loss_rate) > 0.001:
+                        self.logger.info(
+                            f"📊 {stock_code} 목표 익절/손절률 갱신: "
+                            f"익절 {old_profit*100:.1f}% → {target_profit_rate*100:.1f}%, "
+                            f"손절 {old_loss*100:.1f}% → {stop_loss_rate*100:.1f}% "
+                            f"(순위: {keep_item.get('rank', '?')}위, 점수: {keep_item.get('total_score', 0):.1f})"
+                        )
+                else:
+                    self.logger.warning(f"⚠️ {stock_code} TradingStock 객체를 찾을 수 없음 (목표 익절/손절률 갱신 실패)")
+            
+            self.logger.info(f"✅ 유지 대상 목표 익절/손절률 갱신 완료: {updated_count}/{len(keep_list)}개")
+            
+        except Exception as e:
+            self.logger.error(f"❌ 유지 대상 목표 익절/손절률 갱신 오류: {e}")
     
     async def _send_rebalancing_result_notification(self, plan: Dict, sell_results: List[Dict], buy_results: List[Dict]):
         """리밸런싱 결과 상세 알림"""

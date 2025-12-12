@@ -118,13 +118,24 @@ class OrderManager:
                             if trading_stock:
                                 stock_name = trading_stock.stock_name
                         
+                        # 목표 익절/손절률 조회
+                        target_profit_rate = None
+                        stop_loss_rate = None
+                        if self.trading_manager:
+                            trading_stock = self.trading_manager.get_trading_stock(stock_code)
+                            if trading_stock:
+                                target_profit_rate = trading_stock.target_profit_rate
+                                stop_loss_rate = trading_stock.stop_loss_rate
+                        
                         buy_record_id = self.db_manager.save_virtual_buy(
                             stock_code=stock_code,
                             stock_name=stock_name,
                             price=price,
                             quantity=quantity,
                             strategy="리밸런싱",
-                            reason="퀀트 포트폴리오"
+                            reason="퀀트 포트폴리오",
+                            target_profit_rate=target_profit_rate,
+                            stop_loss_rate=stop_loss_rate
                         )
                         if buy_record_id:
                             self.logger.info(f"💾 가상매매 기록 저장 완료: {stock_code} (ID: {buy_record_id})")

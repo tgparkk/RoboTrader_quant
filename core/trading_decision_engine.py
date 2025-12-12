@@ -667,7 +667,7 @@ class TradingDecisionEngine:
             return False, ""
     
     def _check_stop_loss_conditions(self, trading_stock, data) -> Tuple[bool, str]:
-        """손절 조건 확인 (trading_config.json의 손익비 설정 사용)"""
+        """손절 조건 확인 (종목별 stop_loss_rate 우선, 없으면 trading_config.json 사용)"""
         try:
             if not trading_stock.position:
                 return False, ""
@@ -675,10 +675,14 @@ class TradingDecisionEngine:
             current_price = data['close'].iloc[-1]
             buy_price = trading_stock.position.avg_price
             
-            # trading_config.json에서 손익비 설정 가져오기
-            from config.settings import load_trading_config
-            config = load_trading_config()
-            stop_loss_rate = config.risk_management.stop_loss_ratio  # 0.025 (2.5%)
+            # 종목별 stop_loss_rate 우선 사용 (리밸런싱 시 설정됨)
+            stop_loss_rate = getattr(trading_stock, 'stop_loss_rate', None)
+            
+            # 종목별 설정이 없으면 trading_config.json 사용
+            if stop_loss_rate is None:
+                from config.settings import load_trading_config
+                config = load_trading_config()
+                stop_loss_rate = config.risk_management.stop_loss_ratio  # 기본값 10%
             
             loss_rate = (current_price - buy_price) / buy_price
             if loss_rate <= -stop_loss_rate:

@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 import threading
 from collections import defaultdict
+import pandas as pd
 
 from .models import TradingStock, StockState, OrderType, OrderStatus, Order
 from .intraday_stock_manager import IntradayStockManager
@@ -427,7 +428,17 @@ class TradingStockManager:
                                         buy_price = latest_position['buy_price']
                                         quantity = latest_position['quantity']
                                         trading_stock.set_virtual_buy_info(buy_record_id, buy_price, quantity)
-                                        self.logger.debug(f"🔄 가상매매 포지션 정보 설정: {trading_stock.stock_code} ID={buy_record_id}")
+                                        
+                                        # 목표 익절/손절률 로드
+                                        if 'target_profit_rate' in latest_position and pd.notna(latest_position['target_profit_rate']):
+                                            trading_stock.target_profit_rate = float(latest_position['target_profit_rate'])
+                                        if 'stop_loss_rate' in latest_position and pd.notna(latest_position['stop_loss_rate']):
+                                            trading_stock.stop_loss_rate = float(latest_position['stop_loss_rate'])
+                                        
+                                        self.logger.debug(
+                                            f"🔄 가상매매 포지션 정보 설정: {trading_stock.stock_code} ID={buy_record_id} "
+                                            f"(익절: {trading_stock.target_profit_rate*100:.1f}%, 손절: {trading_stock.stop_loss_rate*100:.1f}%)"
+                                        )
                                 except Exception as virtual_err:
                                     self.logger.warning(f"⚠️ 가상매매 포지션 정보 설정 실패: {virtual_err}")
 

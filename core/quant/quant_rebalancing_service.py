@@ -6,13 +6,14 @@
 - 리밸런싱 주기 선택(일간/주간/월간)
 """
 
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
 
 from utils.logger import setup_logger
 from utils.korean_time import now_kst
 from api import kis_account_api, kis_market_api
+from core.quant.target_profit_loss_calculator import TargetProfitLossCalculator
 
 
 class RebalancingPeriod(Enum):
@@ -39,6 +40,13 @@ class QuantRebalancingService:
         self._last_rebalancing_date = None
         self._last_rebalancing_week = None
         self._last_rebalancing_month = None
+        
+        # 목표 익절/손절률 계산기
+        self.profit_loss_calculator = TargetProfitLossCalculator(
+            rank_weight=0.40,
+            score_weight=0.30,
+            momentum_weight=0.30
+        )
     
     def should_rebalance(self, calc_date: Optional[str] = None) -> bool:
         """
@@ -136,25 +144,52 @@ class QuantRebalancingService:
                 total_value = self._estimate_total_portfolio_value(current_holdings)
                 target_amount_per_stock = total_value / len(target_portfolio) if target_portfolio else 0
                 
+                # 팩터 점수 조회 (momentum_score 필요)
+                factors_map = {}
+                if self.db_manager:
+                    try:
+                        factors_list = self.db_manager.get_quant_factors(portfolio_date)
+                        factors_map = {f['stock_code']: f for f in factors_list}
+                    except Exception as e:
+                        self.logger.warning(f"팩터 점수 조회 실패: {e}")
+                
                 for portfolio_item in target_portfolio:
                     code = portfolio_item['stock_code']
                     if code in new_codes:
+                        # 목표 익절/손절률 계산
+                        factors_data = factors_map.get(code)
+                        target_profit, stop_loss = self.profit_loss_calculator.calculate_from_portfolio_item(
+                            portfolio_item, factors_data
+                        )
+                        
                         buy_list.append({
                             'stock_code': code,
                             'stock_name': portfolio_item['stock_name'],
                             'target_amount': target_amount_per_stock,
                             'rank': portfolio_item['rank'],
+                            'total_score': portfolio_item.get('total_score', 0),
+                            'target_profit_rate': target_profit,
+                            'stop_loss_rate': stop_loss,
                             'reason': f"목표 포트폴리오 {portfolio_item['rank']}위"
                         })
             
-            # 5. 유지 대상: 보유하면서 목표에도 있는 종목
+            # 5. 유지 대상: 보유하면서 목표에도 있는 종목 (목표 익절/손절률 갱신)
             keep_list = []
             for portfolio_item in target_portfolio:
                 if portfolio_item['stock_code'] in keep_codes:
+                    # 목표 익절/손절률 계산 (매일 갱신)
+                    factors_data = factors_map.get(portfolio_item['stock_code'])
+                    target_profit, stop_loss = self.profit_loss_calculator.calculate_from_portfolio_item(
+                        portfolio_item, factors_data
+                    )
+                    
                     keep_list.append({
                         'stock_code': portfolio_item['stock_code'],
                         'stock_name': portfolio_item['stock_name'],
-                        'rank': portfolio_item['rank']
+                        'rank': portfolio_item['rank'],
+                        'total_score': portfolio_item.get('total_score', 0),
+                        'target_profit_rate': target_profit,
+                        'stop_loss_rate': stop_loss
                     })
             
             self.logger.info(

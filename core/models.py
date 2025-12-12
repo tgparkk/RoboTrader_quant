@@ -153,6 +153,7 @@ class TradingStock:
     prev_close: float = 0.0  # 전날 종가 (일봉 기준)
     last_update: datetime = field(default_factory=datetime.now)
     target_profit_rate: float = 0.03  # 목표수익률 (기본값 3%)
+    stop_loss_rate: float = 0.10  # 목표손절률 (기본값 10%)
     
     # 🆕 레이스 컨디션 방지 플래그
     order_processed: bool = False  # 주문 체결 처리 완료 플래그
