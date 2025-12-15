@@ -35,7 +35,7 @@ class QuantRebalancingService:
         
         # 리밸런싱 설정
         self.rebalancing_period = RebalancingPeriod.DAILY  # 기본값: 일간
-        self.target_portfolio_size = 50  # 목표 포트폴리오 크기
+        self.target_portfolio_size = 30  # 목표 포트폴리오 크기
         self.equal_weight = True  # 동등 비중
         self._last_rebalancing_date = None
         self._last_rebalancing_week = None

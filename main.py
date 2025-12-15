@@ -955,7 +955,7 @@ class DayTradingBot:
                 None, 
                 self.quant_screening_service.run_daily_screening,
                 None,  # calc_date (오늘)
-                50,    # portfolio_size
+                30,    # portfolio_size
                 3      # max_retries
             )
             
@@ -964,7 +964,7 @@ class DayTradingBot:
                 self.logger.info("✅ 퀀트 스크리닝 완료")
                 
                 # 🆕 선정된 종목을 intraday_manager에 추가 (장 마감 후 데이터 저장용)
-                portfolio = self.db_manager.get_quant_portfolio(now_kst().strftime('%Y%m%d'), limit=50)
+                portfolio = self.db_manager.get_quant_portfolio(now_kst().strftime('%Y%m%d'), limit=30)
                 if portfolio and hasattr(self, 'intraday_manager') and self.intraday_manager:
                     added_count = 0
                     for row in portfolio:
@@ -1014,13 +1014,13 @@ class DayTradingBot:
             
             # 퀀트 포트폴리오 상위 종목들 가져오기 (오늘 또는 최근)
             today = now_kst().strftime('%Y%m%d')
-            portfolio = self.db_manager.get_quant_portfolio(today, limit=50)
+            portfolio = self.db_manager.get_quant_portfolio(today, limit=30)
             
             candidates = None
             if not portfolio:
                 # 포트폴리오가 없으면 후보 종목들 사용
-                candidates = await self.candidate_selector.get_quant_candidates(limit=50)
-                stock_codes = [c.code for c in candidates[:50]] if candidates else []
+                candidates = await self.candidate_selector.get_quant_candidates(limit=30)
+                stock_codes = [c.code for c in candidates[:30]] if candidates else []
                 
                 # 후보 종목이 선정되었으면 데이터베이스에 저장
                 if candidates:

@@ -126,7 +126,7 @@ class QuantScreeningService:
             self.logger.warning(f"⚠️ {stock_code} 1차 필터링 중 오류: {e}")
             return False, f"필터링 오류: {str(e)}"
 
-    def run_daily_screening(self, calc_date: Optional[str] = None, portfolio_size: int = 50, max_retries: int = 3) -> bool:
+    def run_daily_screening(self, calc_date: Optional[str] = None, portfolio_size: int = 30, max_retries: int = 3) -> bool:
         """
         일일 퀀트 스크리닝 실행 (8단계 기준)
         

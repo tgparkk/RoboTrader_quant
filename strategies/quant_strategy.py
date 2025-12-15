@@ -1,6 +1,6 @@
 """
 퀀트 전략 (10단계 기준)
-- 상위 50개면 BUY 신호 반환
+- 상위 30개면 BUY 신호 반환
 """
 
 from typing import Optional, Dict, Any
@@ -9,13 +9,13 @@ from utils.korean_time import now_kst
 
 
 class QuantStrategy:
-    """퀀트 전략 - 상위 50개면 BUY 신호"""
+    """퀀트 전략 - 상위 30개면 BUY 신호"""
     
-    def __init__(self, db_manager, top_n: int = 50):
+    def __init__(self, db_manager, top_n: int = 30):
         """
         Args:
             db_manager: DatabaseManager 인스턴스
-            top_n: 상위 N개 종목 (기본 50)
+            top_n: 상위 N개 종목 (기본 30)
         """
         self.db_manager = db_manager
         self.top_n = top_n
