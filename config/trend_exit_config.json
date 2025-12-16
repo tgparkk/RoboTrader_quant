@@ -1,0 +1,65 @@
+{
+  "trend_based_exit": {
+    "enabled": true,
+    "description": "추세 기반 적응형 청산 활성화",
+
+    "trailing_stop": {
+      "enabled": true,
+      "trailing_stop_pct": 0.03,
+      "min_profit_for_trailing": 0.05,
+      "description": "트레일링 스톱: 최고점 대비 -3% 하락 시 청산 (5% 이상 수익 시 활성화)"
+    },
+
+    "momentum_thresholds": {
+      "strong_trend": 70,
+      "weak_trend": 30,
+      "description": "모멘텀 점수 기준 (0~100): 70+ 강한 추세, 30- 약한 추세"
+    },
+
+    "momentum_weights": {
+      "ma_alignment": 0.30,
+      "rsi_position": 0.25,
+      "volume_trend": 0.20,
+      "price_pattern": 0.15,
+      "macd_signal": 0.10,
+      "description": "모멘텀 점수 계산 가중치 (합계 1.0)"
+    },
+
+    "emergency_exit": {
+      "extreme_loss_pct": 0.15,
+      "emergency_loss_with_weak_momentum": {
+        "loss_pct": 0.12,
+        "momentum_threshold": 20
+      },
+      "description": "긴급 청산: -15% 손실 또는 -12% 손실 + 모멘텀 20 이하"
+    }
+  },
+
+  "fallback_fixed_exit": {
+    "enabled": true,
+    "description": "추세 분석 실패 시 사용할 고정 익절/손절률 (안전장치)",
+    "take_profit_ratio": 0.15,
+    "stop_loss_ratio": 0.10
+  },
+
+  "examples": {
+    "scenario_1": {
+      "description": "강한 상승 추세: 20% 수익이어도 모멘텀 70+ 이면 보유",
+      "current_profit": "20%",
+      "momentum_score": 75,
+      "action": "보유 지속"
+    },
+    "scenario_2": {
+      "description": "추세 약화: 5% 수익이지만 모멘텀 30 이하면 청산",
+      "current_profit": "5%",
+      "momentum_score": 25,
+      "action": "조기 청산 (수익 확보)"
+    },
+    "scenario_3": {
+      "description": "트레일링 스톱: 최고 25% → 현재 22% (3% 하락)",
+      "max_profit": "25%",
+      "current_profit": "22%",
+      "action": "청산 (최대 수익 보호)"
+    }
+  }
+}

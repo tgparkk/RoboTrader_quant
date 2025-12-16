@@ -30,7 +30,7 @@ class TradingDecisionEngine:
     def __init__(self, db_manager=None, telegram_integration=None, trading_manager=None, api_manager=None, intraday_manager=None):
         """
         초기화
-        
+
         Args:
             db_manager: 데이터베이스 관리자
             telegram_integration: 텔레그램 연동
@@ -44,16 +44,21 @@ class TradingDecisionEngine:
         self.trading_manager = trading_manager
         self.api_manager = api_manager
         self.intraday_manager = intraday_manager
-        
+
         # 가상 매매 설정
         self.is_virtual_mode = True  # 🆕 가상매매 모드 여부 (False: 실제매매, True: 가상매매) - 테스트 기간
-        
+
         # 🆕 가상매매 관리자 초기화
         from core.virtual_trading_manager import VirtualTradingManager
         self.virtual_trading = VirtualTradingManager(db_manager=db_manager, api_manager=api_manager)
-        
+
+        # 🆕 추세 모멘텀 분석기 초기화
+        from core.trend_momentum_analyzer import TrendMomentumAnalyzer
+        self.trend_analyzer = TrendMomentumAnalyzer()
+        self.use_trend_based_exit = True  # 추세 기반 청산 활성화 플래그
+
         # 쿨다운은 TradingStock 모델에서 관리 (is_buy_cooldown_active 메서드 사용)
-        
+
         # 퀀트 리밸런싱 모드에서는 패턴 필터, ML 등 불필요
         self.daily_pattern_filter = None
         self.use_daily_filter = False
@@ -66,7 +71,7 @@ class TradingDecisionEngine:
         self.hardcoded_ml_predictor = None
         self.pattern_logger = None
 
-        self.logger.info("🧠 매매 판단 엔진 초기화 완료")
+        self.logger.info("🧠 매매 판단 엔진 초기화 완료 (추세 기반 청산: ON)")
 
     def _safe_float_convert(self, value):
         """쉼표가 포함된 문자열을 안전하게 float로 변환"""
@@ -253,26 +258,26 @@ class TradingDecisionEngine:
     
     async def analyze_sell_decision(self, trading_stock, combined_data=None) -> Tuple[bool, str]:
         """
-        매도 판단 분석 (백테스팅과 동일: 1분봉 고가/저가 기준 익절/손절 + 3분봉 기술적 분석)
-        
+        매도 판단 분석 (추세 기반 적응형 청산 + 기존 로직 병행)
+
         Args:
             trading_stock: 거래 종목 객체
             combined_data: 분봉 데이터 (1분봉 데이터 사용)
-            
+
         Returns:
             Tuple[매도신호여부, 매도사유]
         """
         try:
             stock_code = trading_stock.stock_code
-            
+
             # 포지션 정보 확인
             if not trading_stock.position:
                 return False, "포지션 없음"
-            
+
             buy_price = trading_stock.position.avg_price
             if buy_price <= 0:
                 return False, "매수가 정보 없음"
-            
+
             # 🆕 1분봉 데이터 조회 (백테스팅과 동일한 방식)
             if combined_data is None or combined_data.empty:
                 # combined_data가 없으면 intraday_manager에서 최신 1분봉 데이터 조회
@@ -298,66 +303,81 @@ class TradingDecisionEngine:
                         if stop_profit_signal:
                             return True, f"손익절: {stop_reason}"
                     return False, ""
-            
+
             # 최신 1분봉 데이터 확인
             if len(combined_data) == 0:
                 return False, "1분봉 데이터 없음"
-            
+
             latest_candle = combined_data.iloc[-1]
             candle_high = self._safe_float_convert(latest_candle.get('high', latest_candle.get('stck_hgpr', 0)))
             candle_low = self._safe_float_convert(latest_candle.get('low', latest_candle.get('stck_lwpr', 0)))
             candle_close = self._safe_float_convert(latest_candle.get('close', latest_candle.get('stck_clpr', 0)))
-            
-            if candle_high <= 0 or candle_low <= 0:
-                return False, "1분봉 고가/저가 정보 없음"
-            
-            # 🆕 목표 수익률/손절률 조회 (퀀트 투자에 맞는 넓은 범위 설정)
-            # 퀀트 투자는 팩터 기반 장기 관점이므로 단타 트레이딩보다 넓은 범위 사용
+
+            if candle_high <= 0 or candle_low <= 0 or candle_close <= 0:
+                return False, "1분봉 고가/저가/종가 정보 없음"
+
+            # ==================== 🆕 1. 추세 기반 적응형 청산 (최우선) ====================
+            if self.use_trend_based_exit:
+                try:
+                    should_exit, trend_reason = self.trend_analyzer.should_exit_position(
+                        trading_stock=trading_stock,
+                        current_data=combined_data,
+                        current_price=candle_close
+                    )
+
+                    if should_exit:
+                        self.logger.info(f"📉 {stock_code} 추세 기반 청산 신호: {trend_reason}")
+                        return True, trend_reason
+
+                except Exception as trend_err:
+                    self.logger.warning(f"⚠️ {stock_code} 추세 분석 오류: {trend_err}, 기존 로직 사용")
+
+            # ==================== 2. 기존 로직: 1분봉 고가/저가 기준 익절/손절 (안전장치) ====================
+            # 목표 수익률/손절률 조회 (퀀트 투자에 맞는 넓은 범위 설정)
             from config.settings import load_trading_config
             config = load_trading_config()
             target_profit_rate = config.risk_management.take_profit_ratio  # 기본 15% (퀀트 투자)
             stop_loss_rate = config.risk_management.stop_loss_ratio  # 기본 10% (퀀트 투자)
-            
-            # ==================== 1. 1분봉 고가/저가 기준 익절/손절 체크 (백테스팅과 동일) ====================
+
             profit_target_price = buy_price * (1.0 + target_profit_rate)
             stop_loss_target_price = buy_price * (1.0 - stop_loss_rate)
-            
+
             # 익절: 1분봉 고가가 익절 목표가 터치 시
             if candle_high >= profit_target_price:
                 return True, f"익절_{target_profit_rate*100:.1f}pct(1분봉고가)"
-            
+
             # 손절: 1분봉 저가가 손절 목표가 터치 시
             if candle_low <= stop_loss_target_price:
                 return True, f"손절_{stop_loss_rate*100:.1f}pct(1분봉저가)"
-            
-            # ==================== 2. 3분봉 완성 시점에만 기술적 분석 매도 신호 체크 ====================
+
+            # ==================== 3. 3분봉 완성 시점에만 기술적 분석 매도 신호 체크 ====================
             from utils.korean_time import now_kst
             current_time = now_kst()
-            
+
             # 3분봉 완성 시점 체크 (매 3분마다: 09:00, 09:03, 09:06, ...)
             if current_time.minute % 3 == 0 and current_time.second >= 10:
                 try:
                     # 1분봉을 3분봉으로 변환
                     from core.timeframe_converter import TimeFrameConverter
                     data_3min = TimeFrameConverter.convert_to_3min_data(combined_data)
-                    
+
                     if data_3min is not None and len(data_3min) >= 5:
                         # 진입 저가 조회
                         entry_low = getattr(trading_stock, '_entry_low', None)
                         if entry_low is None or entry_low <= 0:
                             entry_low = candle_low  # 폴백
-                        
+
                         # 3분봉 기반 기술적 분석 매도 신호
                         from core.indicators.pullback_candle_pattern import PullbackCandlePattern
                         technical_sell, technical_reason = PullbackCandlePattern.check_technical_sell_signals(data_3min, entry_low)
-                        
+
                         if technical_sell:
                             return True, f"기술적매도_{technical_reason}(3분봉)"
                 except Exception as e:
                     self.logger.debug(f"⚠️ {stock_code} 기술적 분석 매도 신호 체크 오류: {e}")
-            
+
             return False, ""
-            
+
         except Exception as e:
             self.logger.error(f"❌ {trading_stock.stock_code} 매도 판단 오류: {e}")
             return False, f"오류: {e}"
