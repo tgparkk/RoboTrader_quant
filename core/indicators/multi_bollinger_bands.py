@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from typing import Tuple, Optional, Dict, List
 from .bollinger_bands import BollingerBands
-from .volume_bollinger_bands import VolumeBollingerBands
 
 
 class MultiBollingerBands:
@@ -208,21 +207,21 @@ class MultiBollingerBands:
         signals['bisector_breakout'] = (prices.shift(1) <= signals['bisector_line'].shift(1)) & \
                                      (prices > signals['bisector_line'])
         
-        # 거래량 볼린저밴드 (선택사항)
-        if volume_data is not None:
-            vol_center, vol_upper, vol_lower = VolumeBollingerBands.calculate_volume_bollinger_bands(
-                volume_data, 20, 2.0, 3)
-            signals['vol_center'] = vol_center
-            signals['vol_upper'] = vol_upper
-            signals['vol_lower'] = vol_lower
-            
-            # 거래량 밴드 밀집 후 확장
-            vol_band_width = vol_upper - vol_lower
-            signals['vol_band_width'] = vol_band_width
-            signals['vol_expanding'] = vol_band_width > vol_band_width.shift(1)
-            
-            # 거래량 밀집 상태 (최근 5봉 기준)
-            signals['vol_concentrated'] = vol_band_width.rolling(5).mean() < vol_band_width.rolling(20).mean() * 0.7
+        # 거래량 볼린저밴드 (선택사항) - 비활성화됨 (volume_bollinger_bands 모듈 제거됨)
+        # if volume_data is not None:
+        #     vol_center, vol_upper, vol_lower = VolumeBollingerBands.calculate_volume_bollinger_bands(
+        #         volume_data, 20, 2.0, 3)
+        #     signals['vol_center'] = vol_center
+        #     signals['vol_upper'] = vol_upper
+        #     signals['vol_lower'] = vol_lower
+        #
+        #     # 거래량 밴드 밀집 후 확장
+        #     vol_band_width = vol_upper - vol_lower
+        #     signals['vol_band_width'] = vol_band_width
+        #     signals['vol_expanding'] = vol_band_width > vol_band_width.shift(1)
+        #
+        #     # 거래량 밀집 상태 (최근 5봉 기준)
+        #     signals['vol_concentrated'] = vol_band_width.rolling(5).mean() < vol_band_width.rolling(20).mean() * 0.7
         
         # 매매 신호 생성
         
@@ -248,17 +247,17 @@ class MultiBollingerBands:
             (prices > prices.shift(1))                       # 반등 시작
         )
         
-        # 거래량 조건 추가 (거래량 데이터가 있는 경우)
-        if volume_data is not None:
-            # 거래량 밀집 후 확장 조건 추가
-            vol_condition = signals['vol_concentrated'].shift(1) & signals['vol_expanding']
-            
-            # 다중볼밴 돌파신호에 거래량 조건 적용
-            signals['buy_multi_breakout'] = signals['buy_multi_breakout'] & vol_condition
-            
-            # 기존 신호들에도 거래량 조건 적용
-            signals['buy_breakout'] = signals['buy_breakout'] & vol_condition
-            signals['buy_center_support'] = signals['buy_center_support'] & vol_condition
+        # 거래량 조건 추가 (거래량 데이터가 있는 경우) - 비활성화됨
+        # if volume_data is not None:
+        #     # 거래량 밀집 후 확장 조건 추가
+        #     vol_condition = signals['vol_concentrated'].shift(1) & signals['vol_expanding']
+        #
+        #     # 다중볼밴 돌파신호에 거래량 조건 적용
+        #     signals['buy_multi_breakout'] = signals['buy_multi_breakout'] & vol_condition
+        #
+        #     # 기존 신호들에도 거래량 조건 적용
+        #     signals['buy_breakout'] = signals['buy_breakout'] & vol_condition
+        #     signals['buy_center_support'] = signals['buy_center_support'] & vol_condition
         
         # 손절 신호
         
