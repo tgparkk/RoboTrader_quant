@@ -59,18 +59,6 @@ class TradingDecisionEngine:
 
         # 쿨다운은 TradingStock 모델에서 관리 (is_buy_cooldown_active 메서드 사용)
 
-        # 퀀트 리밸런싱 모드에서는 패턴 필터, ML 등 불필요
-        self.daily_pattern_filter = None
-        self.use_daily_filter = False
-        self.simple_pattern_filter = None
-        self.use_simple_filter = False
-        self.use_ml_filter = False
-        self.use_hardcoded_ml = False
-        self.ml_settings = None
-        self.ml_predictor = None
-        self.hardcoded_ml_predictor = None
-        self.pattern_logger = None
-
         self.logger.info("🧠 매매 판단 엔진 초기화 완료 (추세 기반 청산: ON)")
 
     def _safe_float_convert(self, value):
