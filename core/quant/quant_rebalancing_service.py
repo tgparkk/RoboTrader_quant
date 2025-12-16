@@ -282,10 +282,58 @@ class QuantRebalancingService:
             return False
     
     def _get_current_holdings(self) -> List[Dict[str, Any]]:
-        """현재 보유 종목 조회"""
+        """
+        현재 보유 종목 조회
+        
+        가상 매매 모드: virtual_trading_records 테이블에서 조회
+        실제 매매 모드: 실제 계좌 API에서 조회
+        """
         try:
-            # API에서 보유 종목 조회
-            # get_inquire_balance 함수가 있는지 확인
+            # 가상 매매 모드 확인 (db_manager를 통해 확인)
+            # 가상 매매 모드일 때는 virtual_trading_records에서 조회
+            if self.db_manager:
+                try:
+                    import sqlite3
+                    with sqlite3.connect(self.db_manager.db_path) as conn:
+                        cursor = conn.cursor()
+                        
+                        # 종목코드별 보유 수량 집계
+                        query = '''
+                        SELECT 
+                            buy.stock_code,
+                            MAX(buy.stock_name) as stock_name,
+                            SUM(buy.quantity) - COALESCE(SUM(sell.quantity), 0) as holding_qty,
+                            SUM(buy.quantity * buy.price) / SUM(buy.quantity) as avg_buy_price
+                        FROM virtual_trading_records buy
+                        LEFT JOIN virtual_trading_records sell 
+                            ON buy.id = sell.buy_record_id AND sell.action = 'SELL'
+                        WHERE buy.action = 'BUY' AND buy.is_test = 1
+                        GROUP BY buy.stock_code
+                        HAVING holding_qty > 0
+                        ORDER BY MAX(buy.timestamp) DESC
+                        '''
+                        
+                        cursor.execute(query)
+                        rows = cursor.fetchall()
+                        
+                        holdings = []
+                        for row in rows:
+                            stock_code, stock_name, holding_qty, avg_buy_price = row
+                            if holding_qty > 0:
+                                holdings.append({
+                                    'stock_code': stock_code,
+                                    'stock_name': stock_name or f'Stock_{stock_code}',
+                                    'quantity': holding_qty,
+                                    'avg_price': avg_buy_price or 0.0
+                                })
+                        
+                        if holdings:
+                            self.logger.info(f"✅ 가상 매매 보유 종목 조회: {len(holdings)}개")
+                            return holdings
+                except Exception as db_err:
+                    self.logger.warning(f"⚠️ 가상 매매 보유 종목 조회 실패: {db_err}, 실제 계좌 조회 시도")
+            
+            # 실제 계좌에서 보유 종목 조회 (가상 매매 모드가 아니거나 DB 조회 실패 시)
             if not hasattr(kis_account_api, 'get_inquire_balance'):
                 self.logger.error("❌ kis_account_api.get_inquire_balance 함수가 없습니다")
                 return []
@@ -306,6 +354,9 @@ class QuantRebalancingService:
                         'quantity': quantity,
                         'avg_price': float(row.get('pchs_avg_pric', 0) or 0)
                     })
+            
+            if holdings:
+                self.logger.info(f"✅ 실제 계좌 보유 종목 조회: {len(holdings)}개")
             
             return holdings
             

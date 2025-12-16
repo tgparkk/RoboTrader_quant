@@ -84,7 +84,9 @@ class OrderManager:
             return False
     
     async def place_buy_order(self, stock_code: str, quantity: int, price: float, 
-                             timeout_seconds: int = None) -> Optional[str]:
+                             timeout_seconds: int = None,
+                             target_profit_rate: float = None,
+                             stop_loss_rate: float = None) -> Optional[str]:
         """매수 주문 실행"""
         try:
             timeout_seconds = timeout_seconds or self.config.order_management.buy_timeout_seconds
@@ -118,14 +120,15 @@ class OrderManager:
                             if trading_stock:
                                 stock_name = trading_stock.stock_name
                         
-                        # 목표 익절/손절률 조회
-                        target_profit_rate = None
-                        stop_loss_rate = None
-                        if self.trading_manager:
-                            trading_stock = self.trading_manager.get_trading_stock(stock_code)
-                            if trading_stock:
-                                target_profit_rate = trading_stock.target_profit_rate
-                                stop_loss_rate = trading_stock.stop_loss_rate
+                        # 목표 익절/손절률 조회 (파라미터 우선, 없으면 trading_stock에서 조회)
+                        if target_profit_rate is None or stop_loss_rate is None:
+                            if self.trading_manager:
+                                trading_stock = self.trading_manager.get_trading_stock(stock_code)
+                                if trading_stock:
+                                    if target_profit_rate is None:
+                                        target_profit_rate = trading_stock.target_profit_rate
+                                    if stop_loss_rate is None:
+                                        stop_loss_rate = trading_stock.stop_loss_rate
                         
                         buy_record_id = self.db_manager.save_virtual_buy(
                             stock_code=stock_code,
@@ -248,6 +251,12 @@ class OrderManager:
                             trading_stock = self.trading_manager.get_trading_stock(stock_code)
                             if trading_stock and hasattr(trading_stock, '_virtual_buy_record_id'):
                                 buy_record_id = trading_stock._virtual_buy_record_id
+                        
+                        # buy_record_id가 없으면 DB에서 조회
+                        if not buy_record_id and self.db_manager:
+                            buy_record_id = self.db_manager.get_last_open_virtual_buy(stock_code, quantity)
+                            if buy_record_id:
+                                self.logger.debug(f"📊 {stock_code} 매수 기록 ID 조회: {buy_record_id}")
                         
                         success = self.db_manager.save_virtual_sell(
                             stock_code=stock_code,

@@ -1047,6 +1047,56 @@ class DatabaseManager:
             self.logger.error(f"실거래 미매칭 매수 조회 실패: {e}")
             return None
     
+    def get_last_open_virtual_buy(self, stock_code: str, quantity: int = None) -> Optional[int]:
+        """
+        가상 매매: 해당 종목의 미매칭 매수(가장 최근) ID 조회
+        
+        Args:
+            stock_code: 종목코드
+            quantity: 매도할 수량 (지정 시 해당 수량만큼 매도되지 않은 매수 기록 조회)
+        
+        Returns:
+            매수 기록 ID 또는 None
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                if quantity is None:
+                    # 전체 매도 시: 가장 최근 미매칭 매수 기록
+                    cursor.execute('''
+                        SELECT b.id 
+                        FROM virtual_trading_records b
+                        WHERE b.stock_code = ? AND b.action = 'BUY' AND b.is_test = 1
+                          AND NOT EXISTS (
+                            SELECT 1 FROM virtual_trading_records s 
+                            WHERE s.buy_record_id = b.id AND s.action = 'SELL' AND s.is_test = 1
+                          )
+                        ORDER BY b.timestamp DESC
+                        LIMIT 1
+                    ''', (stock_code,))
+                else:
+                    # 부분 매도 시: 매도할 수량만큼 매도되지 않은 매수 기록들 중 가장 오래된 것
+                    cursor.execute('''
+                        SELECT b.id, b.quantity - COALESCE(SUM(s.quantity), 0) as remaining_qty
+                        FROM virtual_trading_records b
+                        LEFT JOIN virtual_trading_records s 
+                            ON b.id = s.buy_record_id AND s.action = 'SELL' AND s.is_test = 1
+                        WHERE b.stock_code = ? AND b.action = 'BUY' AND b.is_test = 1
+                        GROUP BY b.id
+                        HAVING remaining_qty > 0
+                        ORDER BY b.timestamp ASC
+                        LIMIT 1
+                    ''', (stock_code,))
+                
+                row = cursor.fetchone()
+                if row:
+                    return int(row[0])
+                return None
+        except Exception as e:
+            self.logger.error(f"가상 매매 미매칭 매수 조회 실패: {e}")
+            return None
+    
     def save_virtual_buy(self, stock_code: str, stock_name: str, price: float, 
                         quantity: int, strategy: str, reason: str, 
                         timestamp: datetime = None,

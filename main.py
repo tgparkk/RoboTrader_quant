@@ -621,7 +621,7 @@ class DayTradingBot:
                     target_profit_rate = buy_item.get('target_profit_rate', 0.15)
                     stop_loss_rate = buy_item.get('stop_loss_rate', 0.10)
                     
-                    # TradingStock 객체에 먼저 추가 또는 업데이트
+                    # TradingStock 객체에 먼저 추가 또는 업데이트 (매수 주문 전에 목표 익절/손절률 설정)
                     trading_stock = self.trading_manager.get_trading_stock(stock_code)
                     if not trading_stock:
                         # TradingStock이 없으면 추가
@@ -635,6 +635,7 @@ class DayTradingBot:
                         )
                         trading_stock = self.trading_manager.get_trading_stock(stock_code)
                     
+                    # 목표 익절/손절률을 먼저 설정 (가상 매매 기록 저장 전에 설정되어야 함)
                     if trading_stock:
                         trading_stock.target_profit_rate = target_profit_rate
                         trading_stock.stop_loss_rate = stop_loss_rate
@@ -644,12 +645,14 @@ class DayTradingBot:
                             f"(순위: {buy_item.get('rank', '?')}위, 점수: {buy_item.get('total_score', 0):.1f})"
                         )
                     
-                    # 시장가 매수 주문
+                    # 시장가 매수 주문 (목표 익절/손절률 직접 전달)
                     order_id = await self.order_manager.place_buy_order(
                         stock_code=stock_code,
                         quantity=target_quantity,
                         price=current_price,  # 시장가는 가격 0으로 주문하지만, 여기서는 현재가 사용
-                        timeout_seconds=300
+                        timeout_seconds=300,
+                        target_profit_rate=target_profit_rate,
+                        stop_loss_rate=stop_loss_rate
                     )
                     
                     if order_id:
@@ -1094,7 +1097,7 @@ class DayTradingBot:
             # ML 스크리닝 실행
             result = await self.ml_screening_service.run_daily_screening(
                 date=None,  # 오늘
-                top_n=10   # 상위 10개
+                top_n=30   # 상위 30개 (퀀트 포트폴리오와 동일하게)
             )
             
             if result and result.get('success'):
