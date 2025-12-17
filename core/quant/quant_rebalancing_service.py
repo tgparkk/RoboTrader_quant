@@ -32,7 +32,7 @@ class QuantRebalancingService:
         self.order_manager = order_manager
         self.telegram = telegram
         self.logger = setup_logger(__name__)
-        
+
         # 리밸런싱 설정
         self.rebalancing_period = RebalancingPeriod.DAILY  # 기본값: 일간
         self.target_portfolio_size = 30  # 목표 포트폴리오 크기
@@ -40,7 +40,14 @@ class QuantRebalancingService:
         self._last_rebalancing_date = None
         self._last_rebalancing_week = None
         self._last_rebalancing_month = None
-        
+
+        # 점수 기반 매도 임계값 설정
+        self.hard_stop_score = 62.0  # 긴급 매도: 점수 < 62점
+        self.soft_stop_score = 64.0  # 조건부 매도: 점수 62~64점
+        self.soft_stop_rank = 50     # 조건부 매도 순위 기준: > 50위
+        self.safe_score = 65.0       # 안전 점수: >= 65점은 순위 무관 유지
+        self.safe_rank = 40          # 안전 순위: <= 40위면 점수 낮아도 유지
+
         # 목표 익절/손절률 계산기
         self.profit_loss_calculator = TargetProfitLossCalculator(
             rank_weight=0.40,
@@ -100,8 +107,7 @@ class QuantRebalancingService:
         try:
             # 1. 현재 보유 종목 조회
             current_holdings = self._get_current_holdings()
-            current_codes = {h['stock_code'] for h in current_holdings}
-            
+
             # 2. 목표 포트폴리오 조회 (전날 장 마감 후 생성된 포트폴리오 사용)
             # 예: 12/3 09:05 리밸런싱 시 → 12/2 15:40에 생성된 포트폴리오 사용
             portfolio_date = calc_date
@@ -119,40 +125,93 @@ class QuantRebalancingService:
                 return {'sell_list': [], 'buy_list': [], 'keep_list': []}
             
             self.logger.info(f"✅ 목표 포트폴리오 로드: {portfolio_date} ({len(target_portfolio)}개 종목)")
-            
+
             target_codes = {p['stock_code'] for p in target_portfolio}
-            
-            # 3. 매도 대상: 보유 중이지만 목표 포트에 없는 종목
+
+            # 팩터 점수 조회 (매도 판단에 필요)
+            factors_map = {}
+            if self.db_manager:
+                try:
+                    factors_list = self.db_manager.get_quant_factors(portfolio_date)
+                    factors_map = {f['stock_code']: f for f in factors_list}
+                except Exception as e:
+                    self.logger.warning(f"팩터 점수 조회 실패: {e}")
+
+            # 3. 매도 대상: 점수 기반 3단계 필터링
             sell_list = []
             for holding in current_holdings:
-                if holding['stock_code'] not in target_codes:
+                stock_code = holding['stock_code']
+                factors_data = factors_map.get(stock_code)
+
+                # 점수 정보가 없으면 보수적으로 매도 (데이터 없음 = 상장폐지 등)
+                if not factors_data:
+                    if stock_code not in target_codes:
+                        sell_list.append({
+                            'stock_code': stock_code,
+                            'stock_name': holding.get('stock_name', ''),
+                            'quantity': holding.get('quantity', 0),
+                            'reason': '팩터 데이터 없음 (목표 포트폴리오 제외)'
+                        })
+                    continue
+
+                total_score = factors_data.get('total_score', 0)
+                factor_rank = factors_data.get('factor_rank', 999)
+
+                should_sell = False
+                sell_reason = ""
+
+                # 1단계: 긴급 매도 (Hard Stop) - 점수 < 62점
+                if total_score < self.hard_stop_score:
+                    should_sell = True
+                    sell_reason = f"긴급 매도 (점수 {total_score:.1f} < {self.hard_stop_score})"
+
+                # 2단계: 조건부 매도 (Soft Stop) - 점수 62~64점 AND 순위 > 50위
+                elif self.hard_stop_score <= total_score < self.soft_stop_score:
+                    if factor_rank > self.soft_stop_rank:
+                        should_sell = True
+                        sell_reason = f"조건부 매도 (점수 {total_score:.1f}, {factor_rank}위 > {self.soft_stop_rank}위)"
+
+                # 3단계: 포트폴리오 리밸런싱 - 순위 > 40위 AND 점수 < 65점
+                elif stock_code not in target_codes:
+                    # 안전 종목은 유지 (점수 >= 65점 OR 순위 <= 40위)
+                    if total_score >= self.safe_score:
+                        self.logger.info(f"ℹ️ {stock_code} 유지 (점수 {total_score:.1f} >= {self.safe_score}, {factor_rank}위)")
+                        continue
+                    elif factor_rank <= self.safe_rank:
+                        self.logger.info(f"ℹ️ {stock_code} 유지 ({factor_rank}위 <= {self.safe_rank}위, 점수 {total_score:.1f})")
+                        continue
+                    else:
+                        should_sell = True
+                        sell_reason = f"포트폴리오 조정 ({factor_rank}위, 점수 {total_score:.1f})"
+
+                if should_sell:
                     sell_list.append({
-                        'stock_code': holding['stock_code'],
+                        'stock_code': stock_code,
                         'stock_name': holding.get('stock_name', ''),
                         'quantity': holding.get('quantity', 0),
-                        'reason': '목표 포트폴리오 제외'
+                        'reason': sell_reason,
+                        'total_score': total_score,
+                        'factor_rank': factor_rank
                     })
             
             # 4. 매수 대상: 목표 포트에 있지만 보유하지 않은 종목
             buy_list = []
-            keep_codes = current_codes & target_codes  # 보유하면서 목표에도 있는 종목
-            new_codes = target_codes - current_codes   # 목표에는 있지만 보유하지 않은 종목
-            
+            # 매도되지 않은 보유 종목 (점수 기반 필터링 고려)
+            will_keep_codes = set()
+            for holding in current_holdings:
+                stock_code = holding['stock_code']
+                # 매도 리스트에 없으면 유지
+                if not any(s['stock_code'] == stock_code for s in sell_list):
+                    will_keep_codes.add(stock_code)
+
+            new_codes = target_codes - will_keep_codes   # 목표에는 있지만 보유하지 않을 종목
+
             # 동등 비중 계산
             if self.equal_weight and target_portfolio:
                 # 총 자금 조회 (간단화: 보유 종목 가치 + 현금으로 가정)
                 total_value = self._estimate_total_portfolio_value(current_holdings)
                 target_amount_per_stock = total_value / len(target_portfolio) if target_portfolio else 0
-                
-                # 팩터 점수 조회 (momentum_score 필요)
-                factors_map = {}
-                if self.db_manager:
-                    try:
-                        factors_list = self.db_manager.get_quant_factors(portfolio_date)
-                        factors_map = {f['stock_code']: f for f in factors_list}
-                    except Exception as e:
-                        self.logger.warning(f"팩터 점수 조회 실패: {e}")
-                
+
                 for portfolio_item in target_portfolio:
                     code = portfolio_item['stock_code']
                     if code in new_codes:
@@ -161,7 +220,7 @@ class QuantRebalancingService:
                         target_profit, stop_loss = self.profit_loss_calculator.calculate_from_portfolio_item(
                             portfolio_item, factors_data
                         )
-                        
+
                         buy_list.append({
                             'stock_code': code,
                             'stock_name': portfolio_item['stock_name'],
@@ -172,25 +231,43 @@ class QuantRebalancingService:
                             'stop_loss_rate': stop_loss,
                             'reason': f"목표 포트폴리오 {portfolio_item['rank']}위"
                         })
-            
-            # 5. 유지 대상: 보유하면서 목표에도 있는 종목 (목표 익절/손절률 갱신)
+
+            # 5. 유지 대상: 매도되지 않은 모든 보유 종목 (목표 익절/손절률 갱신)
             keep_list = []
-            for portfolio_item in target_portfolio:
-                if portfolio_item['stock_code'] in keep_codes:
-                    # 목표 익절/손절률 계산 (매일 갱신)
-                    factors_data = factors_map.get(portfolio_item['stock_code'])
-                    target_profit, stop_loss = self.profit_loss_calculator.calculate_from_portfolio_item(
-                        portfolio_item, factors_data
-                    )
-                    
-                    keep_list.append({
-                        'stock_code': portfolio_item['stock_code'],
-                        'stock_name': portfolio_item['stock_name'],
-                        'rank': portfolio_item['rank'],
-                        'total_score': portfolio_item.get('total_score', 0),
-                        'target_profit_rate': target_profit,
-                        'stop_loss_rate': stop_loss
-                    })
+            for holding in current_holdings:
+                stock_code = holding['stock_code']
+                # 매도 리스트에 없으면 유지
+                if stock_code in will_keep_codes:
+                    factors_data = factors_map.get(stock_code)
+
+                    # 포트폴리오에 있는 종목이면 상세 정보 사용
+                    portfolio_item = next((p for p in target_portfolio if p['stock_code'] == stock_code), None)
+
+                    if portfolio_item:
+                        # 목표 익절/손절률 계산 (매일 갱신)
+                        target_profit, stop_loss = self.profit_loss_calculator.calculate_from_portfolio_item(
+                            portfolio_item, factors_data
+                        )
+
+                        keep_list.append({
+                            'stock_code': stock_code,
+                            'stock_name': portfolio_item['stock_name'],
+                            'rank': portfolio_item['rank'],
+                            'total_score': portfolio_item.get('total_score', 0),
+                            'target_profit_rate': target_profit,
+                            'stop_loss_rate': stop_loss
+                        })
+                    else:
+                        # 포트폴리오 밖이지만 점수가 좋아서 유지되는 종목
+                        if factors_data:
+                            keep_list.append({
+                                'stock_code': stock_code,
+                                'stock_name': holding.get('stock_name', ''),
+                                'rank': factors_data.get('factor_rank', 999),
+                                'total_score': factors_data.get('total_score', 0),
+                                'target_profit_rate': 0.05,  # 기본값
+                                'stop_loss_rate': -0.05  # 기본값
+                            })
             
             self.logger.info(
                 f"📊 리밸런싱 계획 ({calc_date}): "

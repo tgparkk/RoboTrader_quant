@@ -718,7 +718,7 @@ class DatabaseManager:
                         'quality_score': row[3],
                         'growth_score': row[4],
                         'total_score': row[5],
-                        'rank': row[6]
+                        'factor_rank': row[6]  # 리밸런싱 로직에서 factor_rank로 참조
                     }
                     for row in rows
                 ]
