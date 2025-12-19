@@ -28,11 +28,15 @@ from config.settings import load_trading_config
 from utils.logger import setup_logger
 from utils.korean_time import now_kst, get_market_status, is_market_open, KST
 from config.market_hours import MarketHours
-from post_market_chart_generator import PostMarketChartGenerator
 from core.quant.quant_screening_service import QuantScreeningService
 from core.ml_screening_service import MLScreeningService
 from core.ml_data_collector import MLDataCollector
 from core.quant.quant_rebalancing_service import QuantRebalancingService, RebalancingPeriod
+from config.constants import (
+    PORTFOLIO_SIZE, QUANT_CANDIDATE_LIMIT, REBALANCING_ORDER_INTERVAL,
+    SELL_ORDER_WAIT_TIMEOUT, ORDER_CHECK_INTERVAL, OHLCV_LOOKBACK_DAYS,
+    QUANT_SCREENING_MAX_RETRIES
+)
 
 
 class DayTradingBot:
@@ -80,7 +84,6 @@ class DayTradingBot:
         self.trading_manager.set_decision_engine(self.decision_engine)
 
         self.fund_manager = FundManager()  # 🆕 자금 관리자
-        self.chart_generator = None  # 🆕 장 마감 후 차트 생성기 (지연 초기화)
         self.quant_screening_service = QuantScreeningService(
             self.api_manager, self.db_manager, self.candidate_selector
         )
@@ -560,8 +563,8 @@ class DayTradingBot:
                         self.logger.error(f"❌ 리밸런싱 매도 주문 실패: {stock_code}")
                     
                     # API 호출 간격 조절
-                    await asyncio.sleep(0.1)
-                    
+                    await asyncio.sleep(REBALANCING_ORDER_INTERVAL)
+
                 except Exception as e:
                     self.logger.error(f"❌ 리밸런싱 매도 오류 {stock_code}: {e}")
                     sell_results.append({
@@ -573,8 +576,8 @@ class DayTradingBot:
             
             # 매도 완료 대기 (주문 체결 확인)
             if sell_results:
-                self.logger.info(f"⏳ 매도 주문 체결 확인 중... (최대 5분)")
-                await self._wait_for_sell_orders_completion(sell_results, max_wait_seconds=300)
+                self.logger.info(f"⏳ 매도 주문 체결 확인 중... (최대 {SELL_ORDER_WAIT_TIMEOUT//60}분)")
+                await self._wait_for_sell_orders_completion(sell_results, max_wait_seconds=SELL_ORDER_WAIT_TIMEOUT)
             
             # 1.5단계: 유지 대상 종목의 목표 익절/손절률 갱신
             keep_list = plan.get('keep_list', [])
@@ -679,8 +682,8 @@ class DayTradingBot:
                         self.logger.error(f"❌ 리밸런싱 매수 주문 실패: {stock_code}")
                     
                     # API 호출 간격 조절
-                    await asyncio.sleep(0.1)
-                    
+                    await asyncio.sleep(REBALANCING_ORDER_INTERVAL)
+
                 except Exception as e:
                     self.logger.error(f"❌ 리밸런싱 매수 오류 {stock_code}: {e}")
                     buy_results.append({
@@ -715,10 +718,6 @@ class DayTradingBot:
             
             last_api_refresh = now_kst()
             last_market_check = now_kst()
-            last_intraday_update = now_kst()  # 🆕 장중 데이터 업데이트 시간
-            # last_chart_generation = datetime(2000, 1, 1, tzinfo=KST)  # 🆕 장 마감 후 차트 생성 시간 (주석처리)
-            # chart_generation_count = 0  # 🆕 차트 생성 횟수 카운터 (주석처리)
-            # last_chart_reset_date = now_kst().date()  # 🆕 차트 카운터 리셋 기준 날짜 (주석처리)
 
             self.logger.info("🔥 DEBUG: while 루프 진입 시도")  # 디버깅용
             while self.is_running:
@@ -730,21 +729,6 @@ class DayTradingBot:
                     await self._refresh_api()
                     last_api_refresh = current_time
 
-                # 🆕 장중 종목 실시간 데이터 업데이트 (매분 13~45초 사이에 실행)
-                # 13~45초 구간에서는 이전 실행으로부터 최소 13초 이상 간격만 유지
-                if 13 <= current_time.second <= 45 and (current_time - last_intraday_update).total_seconds() >= 13:
-                    # 장중이거나 장마감 후 10분 구간에서는 실행 (데이터 저장 위해) - 동적 시간 적용
-                    market_hours = MarketHours.get_market_hours('KRX', current_time)
-                    market_close = market_hours['market_close']
-                    close_hour = market_close.hour
-                    close_minute = market_close.minute
-
-                    is_after_close_window = (current_time.hour == close_hour and
-                                            close_minute <= current_time.minute <= close_minute + 10)
-
-                    if is_market_open() or is_after_close_window:
-                        await self._update_intraday_data()
-                        last_intraday_update = current_time
                 
                 # 장마감 청산 로직 제거: 15:00 시장가 매도로 대체됨
                 # 15:30 ML 데이터 수집 및 15:40 퀀트 스크리닝 실행
@@ -767,25 +751,6 @@ class DayTradingBot:
                             self._ml_screening_task is None):
                             self._ml_screening_task = asyncio.create_task(self._run_ml_screening())
                 
-                # 🆕 차트 생성 카운터 매일 리셋 (주석처리)
-                # current_date = current_time.date()
-                # if current_date != last_chart_reset_date:
-                #     chart_generation_count = 0  # 새로운 날이면 카운터 리셋
-                #     last_chart_reset_date = current_date
-                #     self.logger.info(f"📅 새로운 날 - 차트 생성 카운터 리셋 ({current_date})")
-
-                # 🆕 장 마감 후 차트 생성 (16:00~24:00 시간대에 실행) - 주석처리
-                # current_hour = current_time.hour
-                # is_chart_time = (16 <= current_hour <= 23) and current_time.weekday() < 5  # 평일 16~24시
-                # if is_chart_time and chart_generation_count < 2:  # 16~24시 시간대에만, 최대 2번
-                #     if (current_time - last_chart_generation).total_seconds() >= 1 * 60:  # 1분 간격으로 체크
-                #         #self.logger.info(f"🔥 DEBUG: 차트 생성 실행 시작 ({chart_generation_count + 1}/2)")  # 디버깅용
-                #         await self._generate_post_market_charts()
-                #         #self.logger.info(f"🔥 DEBUG: 차트 생성 실행 완료 ({chart_generation_count + 1}/2)")  # 디버깅용
-                #         last_chart_generation = current_time
-                #         chart_generation_count += 1
-                #
-                #         if chart_generation_count >= 1:
                 #             self.logger.info("✅ 장 마감 후 차트 생성 완료 (1회 실행 완료)")
                 
                 # 시스템 모니터링 루프 대기 (5초 주기)
@@ -955,11 +920,11 @@ class DayTradingBot:
             
             # 오류 재시도 포함된 스크리닝 실행
             result = await loop.run_in_executor(
-                None, 
+                None,
                 self.quant_screening_service.run_daily_screening,
                 None,  # calc_date (오늘)
-                30,    # portfolio_size
-                3      # max_retries
+                PORTFOLIO_SIZE,
+                QUANT_SCREENING_MAX_RETRIES
             )
             
             if result:
@@ -967,7 +932,7 @@ class DayTradingBot:
                 self.logger.info("✅ 퀀트 스크리닝 완료")
                 
                 # 🆕 선정된 종목을 intraday_manager에 추가 (장 마감 후 데이터 저장용)
-                portfolio = self.db_manager.get_quant_portfolio(now_kst().strftime('%Y%m%d'), limit=30)
+                portfolio = self.db_manager.get_quant_portfolio(now_kst().strftime('%Y%m%d'), limit=PORTFOLIO_SIZE)
                 if portfolio and hasattr(self, 'intraday_manager') and self.intraday_manager:
                     added_count = 0
                     for row in portfolio:
@@ -1017,13 +982,13 @@ class DayTradingBot:
             
             # 퀀트 포트폴리오 상위 종목들 가져오기 (오늘 또는 최근)
             today = now_kst().strftime('%Y%m%d')
-            portfolio = self.db_manager.get_quant_portfolio(today, limit=30)
+            portfolio = self.db_manager.get_quant_portfolio(today, limit=PORTFOLIO_SIZE)
 
             candidates = None
             if not portfolio:
                 # 포트폴리오가 없으면 후보 종목들 사용
-                candidates = await self.candidate_selector.get_quant_candidates(limit=30)
-                stock_codes = [c.code for c in candidates[:30]] if candidates else []
+                candidates = await self.candidate_selector.get_quant_candidates(limit=PORTFOLIO_SIZE)
+                stock_codes = [c.code for c in candidates[:PORTFOLIO_SIZE]] if candidates else []
 
                 # 후보 종목이 선정되었으면 데이터베이스에 저장
                 if candidates:
@@ -1188,7 +1153,7 @@ class DayTradingBot:
             from utils.korean_time import now_kst
             
             start_time = now_kst()
-            check_interval = 5  # 5초마다 체크
+            check_interval = ORDER_CHECK_INTERVAL
             pending_orders = [r for r in sell_results if r.get('success') and r.get('order_id')]
             
             if not pending_orders:
@@ -1360,27 +1325,9 @@ class DayTradingBot:
                 stock_name = row[1] or f"Stock_{stock_code}"
                 score = row[2] or 0.0
                 reason = row[3] or "DB 복원"
-                
-                # 전날 종가 조회
-                prev_close = 0.0
-                try:
-                    daily_data = self.api_manager.get_ohlcv_data(stock_code, "D", 7)
-                    if daily_data is not None and len(daily_data) >= 2:
-                        if hasattr(daily_data, 'iloc'):
-                            daily_data = daily_data.sort_values('stck_bsop_date')
-                            last_date = daily_data.iloc[-1]['stck_bsop_date']
-                            if isinstance(last_date, str):
-                                from datetime import datetime
-                                last_date = datetime.strptime(last_date, '%Y%m%d').date()
-                            elif hasattr(last_date, 'date'):
-                                last_date = last_date.date()
-                            
-                            if last_date == now_kst().date() and len(daily_data) >= 2:
-                                prev_close = float(daily_data.iloc[-2]['stck_clpr'])
-                            else:
-                                prev_close = float(daily_data.iloc[-1]['stck_clpr'])
-                except Exception as e:
-                    self.logger.debug(f"⚠️ {stock_code} 전날 종가 조회 실패: {e}")
+
+                # 전날 종가 조회 (공통 메서드 사용)
+                prev_close = self._get_previous_close_price(stock_code)
                 
                 # 거래 상태 관리자에 추가
                 success = await self.trading_manager.add_selected_stock(
@@ -1407,26 +1354,8 @@ class DayTradingBot:
                         stock_code = holding['stock_code']
                         stock_name = holding['stock_name']
 
-                        # 전날 종가 조회
-                        prev_close = 0.0
-                        try:
-                            daily_data = self.api_manager.get_ohlcv_data(stock_code, "D", 7)
-                            if daily_data is not None and len(daily_data) >= 2:
-                                if hasattr(daily_data, 'iloc'):
-                                    daily_data = daily_data.sort_values('stck_bsop_date')
-                                    last_date = daily_data.iloc[-1]['stck_bsop_date']
-                                    if isinstance(last_date, str):
-                                        from datetime import datetime
-                                        last_date = datetime.strptime(last_date, '%Y%m%d').date()
-                                    elif hasattr(last_date, 'date'):
-                                        last_date = last_date.date()
-
-                                    if last_date == now_kst().date() and len(daily_data) >= 2:
-                                        prev_close = float(daily_data.iloc[-2]['stck_clpr'])
-                                    else:
-                                        prev_close = float(daily_data.iloc[-1]['stck_clpr'])
-                        except Exception as e:
-                            self.logger.debug(f"⚠️ {stock_code} 전날 종가 조회 실패: {e}")
+                        # 전날 종가 조회 (공통 메서드 사용)
+                        prev_close = self._get_previous_close_price(stock_code)
 
                         # 거래 상태 관리자에 추가
                         success = await self.trading_manager.add_selected_stock(
@@ -1457,7 +1386,7 @@ class DayTradingBot:
                 self.logger.debug("ℹ️ 리밸런싱 모드: 장중 조건검색 체크 스킵 (09:05 리밸런싱으로만 포지션 구성)")
                 return
             
-            quant_candidates = await self.candidate_selector.get_quant_candidates(limit=50)
+            quant_candidates = await self.candidate_selector.get_quant_candidates(limit=QUANT_CANDIDATE_LIMIT)
 
             if not quant_candidates:
                 self.logger.debug("ℹ️ 퀀트 스크리닝: 후보 종목 없음")
@@ -1506,7 +1435,7 @@ class DayTradingBot:
     def _get_previous_close_price(self, stock_code: str) -> float:
         """전날 종가 조회 (주말/공휴일 포함 안전 처리)"""
         try:
-            daily_data = self.api_manager.get_ohlcv_data(stock_code, "D", 7)
+            daily_data = self.api_manager.get_ohlcv_data(stock_code, "D", OHLCV_LOOKBACK_DAYS)
             if daily_data is None or (hasattr(daily_data, "empty") and daily_data.empty):
                 return 0.0
 
@@ -1538,97 +1467,6 @@ class DayTradingBot:
             self.logger.debug(f"⚠️ {stock_code} 전날 종가 조회 실패: {e}")
             return 0.0
     
-    async def _update_intraday_data(self):
-        """장중 종목 실시간 데이터 업데이트 + 매수 판단 실행 (완성된 분봉만 수집)"""
-        try:
-            from utils.korean_time import now_kst
-            from core.data_reconfirmation import reconfirm_intraday_data
-            current_time = now_kst()
-
-            # 🆕 완성된 봉만 수집하는 것을 로깅
-            #self.logger.debug(f"🔄 실시간 데이터 업데이트 시작: {current_time.strftime('%H:%M:%S')} "
-            #                f"(모든 관리 종목 - 재거래 대응)")
-
-            # 모든 관리 종목의 실시간 데이터 업데이트 (재거래를 위해 COMPLETED, FAILED 상태도 포함)
-            await self.intraday_manager.batch_update_realtime_data()
-
-            # 🆕 데이터 수집 후 1초 대기 (데이터 안정화)
-            await asyncio.sleep(1)
-
-            # 🆕 최근 3분 데이터 재확인 (volume=0 but price changed 감지 및 재조회)
-            updated_stocks = await reconfirm_intraday_data(
-                self.intraday_manager,
-                minutes_back=3
-            )
-            if updated_stocks:
-                self.logger.info(f"🔄 데이터 재확인 완료: {len(updated_stocks)}개 종목 업데이트됨")
-
-            # 🆕 3분봉 완성 + 10초 후 시점 체크
-            # 3분봉 완성 시점: 매 3분마다 (09:00, 09:03, 09:06, ...)
-            # 매수 판단 허용 시점: 각 3분봉 완성 후 10~59초 사이의 첫 번째 호출만
-            minute_in_3min_cycle = current_time.minute % 3
-            current_second = current_time.second
-
-            # 3분봉 사이클의 첫 번째 분(0, 3, 6, 9...)이고 10초 이후일 때만 매수 판단
-            is_3min_candle_completed = (minute_in_3min_cycle == 0 and current_second >= 10)
-
-            if not is_3min_candle_completed:
-                self.logger.debug(f"⏱️ 3분봉 미완성 또는 10초 미경과: {current_time.strftime('%H:%M:%S')} - 매수 판단 건너뜀")
-                return
-
-            # 리밸런싱 모드일 때는 장중 매수 판단만 스킵 (매도 판단은 손절/익절을 위해 활성화)
-            if getattr(self.config, 'rebalancing_mode', False):
-                # 리밸런싱 모드: 장중 매수 판단 스킵 (09:05 리밸런싱으로만 매수)
-                if minute_in_3min_cycle == 0 and current_second >= 10:
-                    self.logger.debug(f"ℹ️ 리밸런싱 모드: 장중 매수 판단 스킵 (09:05 리밸런싱으로만 매수) - {current_time.strftime('%H:%M:%S')}")
-                
-                # 🆕 리밸런싱 모드에서도 보유 종목(POSITIONED)에 대해 손절/익절 매도 판단 실행
-                # 리밸런싱 매도와 손절/익절이 병행됨
-                from core.models import StockState
-                positioned_stocks = self.trading_manager.get_stocks_by_state(StockState.POSITIONED)
-                
-                if positioned_stocks:
-                    self.logger.debug(f"📊 보유 종목 손절/익절 판단 시작: {len(positioned_stocks)}개 종목")
-                    for trading_stock in positioned_stocks:
-                        try:
-                            await self._analyze_sell_decision(trading_stock)
-                        except Exception as e:
-                            self.logger.error(f"❌ {trading_stock.stock_code} 매도 판단 오류: {e}")
-                
-                return
-
-        except Exception as e:
-            self.logger.error(f"❌ 장중 종목 실시간 데이터 업데이트 오류: {e}")
-            await self.telegram.notify_error("Intraday Data Update", e)
-    
-    async def _generate_post_market_charts(self):
-        """장 마감 후 선정 종목 차트 생성 (15:30 이후)"""
-        try:
-            # 차트 생성기 지연 초기화
-            if self.chart_generator is None:
-                self.chart_generator = PostMarketChartGenerator()
-                if not self.chart_generator.initialize():
-                    self.logger.error("❌ 차트 생성기 초기화 실패")
-                    return
-            
-            # PostMarketChartGenerator의 통합 메서드 호출
-            results = await self.chart_generator.generate_post_market_charts_for_intraday_stocks(
-                intraday_manager=self.intraday_manager,
-                telegram_integration=self.telegram
-            )
-            
-            # 결과 로깅
-            if results.get('success', False):
-                success_count = results.get('success_count', 0)
-                total_stocks = results.get('total_stocks', 0)
-                self.logger.info(f"🎯 장 마감 후 차트 생성 완료: {success_count}/{total_stocks}개 성공")
-            else:
-                message = results.get('message', '알 수 없는 오류')
-                self.logger.info(f"ℹ️ 장 마감 후 차트 생성: {message}")
-            
-        except Exception as e:
-            self.logger.error(f"❌ 장 마감 후 차트 생성 오류: {e}")
-            await self.telegram.notify_error("Post Market Chart Generation", e)
 
     async def emergency_sync_positions(self):
         """긴급 포지션 동기화 - 매수가 기준 3%/2% 고정 비율"""
