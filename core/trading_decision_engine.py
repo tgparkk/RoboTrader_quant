@@ -266,77 +266,46 @@ class TradingDecisionEngine:
             if buy_price <= 0:
                 return False, "매수가 정보 없음"
 
-            # 🆕 1분봉 데이터 조회 (백테스팅과 동일한 방식)
+            # 현재가 정보 조회 (리밸런싱 종목 포함)
             if combined_data is None or combined_data.empty:
-                # combined_data가 없으면 intraday_manager에서 최신 1분봉 데이터 조회
+                # 캐시된 현재가 먼저 시도
+                current_price_info = self.intraday_manager.get_cached_current_price(stock_code)
+
+                # 캐시 없으면 API 직접 호출 (리밸런싱 종목 대응)
+                if current_price_info is None:
+                    try:
+                        current_price_info = self.intraday_manager.get_current_price_for_sell(stock_code)
+                    except Exception as api_err:
+                        self.logger.warning(f"⚠️ {stock_code} 현재가 API 조회 실패: {api_err}")
+
+                # 현재가 정보 없으면 매도 판단 불가
+                if current_price_info is None:
+                    return False, "데이터 없음"
+
+                # 현재가 기준 손익절 체크
+                current_price = current_price_info['current_price']
+                stop_profit_signal, stop_reason = self._check_simple_stop_profit_conditions(trading_stock, current_price)
+                if stop_profit_signal:
+                    return True, f"손익절: {stop_reason}"
+                return False, ""
+
+            # combined_data가 있으면 현재가만 사용 (분봉 로직은 과거 전략)
+            # 현재가 기준 손익절 체크
+            current_price_info = self.intraday_manager.get_cached_current_price(stock_code)
+            if current_price_info is None:
                 try:
-                    combined_data = self.intraday_manager.get_combined_chart_data(stock_code)
-                    if combined_data is None or combined_data.empty:
-                        # 폴백: 현재가 정보만 사용
-                        current_price_info = self.intraday_manager.get_cached_current_price(stock_code)
-                        if current_price_info is None:
-                            return False, "데이터 없음"
-                        current_price = current_price_info['current_price']
-                        stop_profit_signal, stop_reason = self._check_simple_stop_profit_conditions(trading_stock, current_price)
-                        if stop_profit_signal:
-                            return True, f"손익절: {stop_reason}"
-                        return False, ""
-                except Exception as e:
-                    self.logger.warning(f"⚠️ {stock_code} 1분봉 데이터 조회 실패: {e}")
-                    # 폴백: 현재가만 사용
-                    current_price_info = self.intraday_manager.get_cached_current_price(stock_code)
-                    if current_price_info:
-                        current_price = current_price_info['current_price']
-                        stop_profit_signal, stop_reason = self._check_simple_stop_profit_conditions(trading_stock, current_price)
-                        if stop_profit_signal:
-                            return True, f"손익절: {stop_reason}"
-                    return False, ""
+                    current_price_info = self.intraday_manager.get_current_price_for_sell(stock_code)
+                except Exception as api_err:
+                    self.logger.warning(f"⚠️ {stock_code} 현재가 API 조회 실패: {api_err}")
+                    return False, "현재가 조회 실패"
 
-            # 최신 1분봉 데이터 확인
-            if len(combined_data) == 0:
-                return False, "1분봉 데이터 없음"
+            if current_price_info is None:
+                return False, "현재가 정보 없음"
 
-            latest_candle = combined_data.iloc[-1]
-            candle_high = self._safe_float_convert(latest_candle.get('high', latest_candle.get('stck_hgpr', 0)))
-            candle_low = self._safe_float_convert(latest_candle.get('low', latest_candle.get('stck_lwpr', 0)))
-            candle_close = self._safe_float_convert(latest_candle.get('close', latest_candle.get('stck_clpr', 0)))
-
-            if candle_high <= 0 or candle_low <= 0 or candle_close <= 0:
-                return False, "1분봉 고가/저가/종가 정보 없음"
-
-            # ==================== 🆕 1. 추세 기반 적응형 청산 (최우선) ====================
-            if self.use_trend_based_exit:
-                try:
-                    should_exit, trend_reason = self.trend_analyzer.should_exit_position(
-                        trading_stock=trading_stock,
-                        current_data=combined_data,
-                        current_price=candle_close
-                    )
-
-                    if should_exit:
-                        self.logger.info(f"📉 {stock_code} 추세 기반 청산 신호: {trend_reason}")
-                        return True, trend_reason
-
-                except Exception as trend_err:
-                    self.logger.warning(f"⚠️ {stock_code} 추세 분석 오류: {trend_err}, 기존 로직 사용")
-
-            # ==================== 2. 기존 로직: 1분봉 고가/저가 기준 익절/손절 (안전장치) ====================
-            # 목표 수익률/손절률 조회 (퀀트 투자에 맞는 넓은 범위 설정)
-            from config.settings import load_trading_config
-            config = load_trading_config()
-            target_profit_rate = config.risk_management.take_profit_ratio  # 기본 15% (퀀트 투자)
-            stop_loss_rate = config.risk_management.stop_loss_ratio  # 기본 10% (퀀트 투자)
-
-            profit_target_price = buy_price * (1.0 + target_profit_rate)
-            stop_loss_target_price = buy_price * (1.0 - stop_loss_rate)
-
-            # 익절: 1분봉 고가가 익절 목표가 터치 시
-            if candle_high >= profit_target_price:
-                return True, f"익절_{target_profit_rate*100:.1f}pct(1분봉고가)"
-
-            # 손절: 1분봉 저가가 손절 목표가 터치 시
-            if candle_low <= stop_loss_target_price:
-                return True, f"손절_{stop_loss_rate*100:.1f}pct(1분봉저가)"
+            current_price = current_price_info['current_price']
+            stop_profit_signal, stop_reason = self._check_simple_stop_profit_conditions(trading_stock, current_price)
+            if stop_profit_signal:
+                return True, f"손익절: {stop_reason}"
 
             return False, ""
 

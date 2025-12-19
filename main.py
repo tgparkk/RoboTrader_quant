@@ -1018,13 +1018,13 @@ class DayTradingBot:
             # 퀀트 포트폴리오 상위 종목들 가져오기 (오늘 또는 최근)
             today = now_kst().strftime('%Y%m%d')
             portfolio = self.db_manager.get_quant_portfolio(today, limit=30)
-            
+
             candidates = None
             if not portfolio:
                 # 포트폴리오가 없으면 후보 종목들 사용
                 candidates = await self.candidate_selector.get_quant_candidates(limit=30)
                 stock_codes = [c.code for c in candidates[:30]] if candidates else []
-                
+
                 # 후보 종목이 선정되었으면 데이터베이스에 저장
                 if candidates:
                     try:
@@ -1034,7 +1034,20 @@ class DayTradingBot:
                         self.logger.error(f"❌ 후보 종목 DB 저장 오류: {db_err}")
             else:
                 stock_codes = [row['stock_code'] for row in portfolio]
-            
+
+            # 🆕 보유 종목도 일봉 데이터 수집 대상에 추가
+            try:
+                holdings = self.db_manager.get_virtual_open_positions()
+                if not holdings.empty:
+                    holding_codes = holdings['stock_code'].unique().tolist()
+                    # 중복 제거하며 추가
+                    for code in holding_codes:
+                        if code not in stock_codes:
+                            stock_codes.append(code)
+                    self.logger.info(f"📊 보유 종목 {len(holding_codes)}개 추가 (일봉 데이터 수집 대상)")
+            except Exception as holding_err:
+                self.logger.warning(f"⚠️ 보유 종목 조회 실패: {holding_err}")
+
             if not stock_codes:
                 self.logger.warning("⚠️ ML 데이터 수집할 종목이 없습니다")
                 return
@@ -1310,36 +1323,36 @@ class DayTradingBot:
             self.logger.error(f"❌ 리밸런싱 결과 알림 오류: {e}")
     
     async def _restore_todays_candidates(self):
-        """DB에서 오늘 날짜의 후보 종목 복원"""
+        """DB에서 후보 종목 및 보유 종목 복원"""
         try:
             import sqlite3
             from pathlib import Path
-            
+
             # DB 경로
             db_path = Path(__file__).parent / "data" / "robotrader.db"
             if not db_path.exists():
-                self.logger.info("📊 DB 파일 없음 - 후보 종목 복원 건너뜀")
+                self.logger.info("📊 DB 파일 없음 - 종목 복원 건너뜀")
                 return
-            
+
             # 오늘 날짜
             today = now_kst().strftime('%Y-%m-%d')
-            
+
+            # 1. 오늘 날짜의 후보 종목 복원
             with sqlite3.connect(str(db_path)) as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    SELECT DISTINCT stock_code, stock_name, score, reasons 
-                    FROM candidate_stocks 
+                    SELECT DISTINCT stock_code, stock_name, score, reasons
+                    FROM candidate_stocks
                     WHERE DATE(selection_date) = ?
                     ORDER BY score DESC
                 ''', (today,))
-                
+
                 rows = cursor.fetchall()
-            
+
             if not rows:
                 self.logger.info(f"📊 오늘({today}) 후보 종목 없음")
-                return
-            
-            self.logger.info(f"🔄 오늘({today}) 후보 종목 {len(rows)}개 복원 시작")
+            else:
+                self.logger.info(f"🔄 오늘({today}) 후보 종목 {len(rows)}개 복원 시작")
             
             restored_count = 0
             for row in rows:
@@ -1379,11 +1392,62 @@ class DayTradingBot:
                 
                 if success:
                     restored_count += 1
-            
-            self.logger.info(f"✅ 오늘 후보 종목 {restored_count}/{len(rows)}개 복원 완료")
-            
+
+            if rows:
+                self.logger.info(f"✅ 오늘 후보 종목 {restored_count}/{len(rows)}개 복원 완료")
+
+            # 2. 보유 종목 복원 (매도 판단을 위해)
+            try:
+                holdings = self.db_manager.get_virtual_open_positions()
+                if not holdings.empty:
+                    self.logger.info(f"🔄 보유 종목 {len(holdings)}개 복원 시작")
+                    holding_restored = 0
+
+                    for _, holding in holdings.iterrows():
+                        stock_code = holding['stock_code']
+                        stock_name = holding['stock_name']
+
+                        # 전날 종가 조회
+                        prev_close = 0.0
+                        try:
+                            daily_data = self.api_manager.get_ohlcv_data(stock_code, "D", 7)
+                            if daily_data is not None and len(daily_data) >= 2:
+                                if hasattr(daily_data, 'iloc'):
+                                    daily_data = daily_data.sort_values('stck_bsop_date')
+                                    last_date = daily_data.iloc[-1]['stck_bsop_date']
+                                    if isinstance(last_date, str):
+                                        from datetime import datetime
+                                        last_date = datetime.strptime(last_date, '%Y%m%d').date()
+                                    elif hasattr(last_date, 'date'):
+                                        last_date = last_date.date()
+
+                                    if last_date == now_kst().date() and len(daily_data) >= 2:
+                                        prev_close = float(daily_data.iloc[-2]['stck_clpr'])
+                                    else:
+                                        prev_close = float(daily_data.iloc[-1]['stck_clpr'])
+                        except Exception as e:
+                            self.logger.debug(f"⚠️ {stock_code} 전날 종가 조회 실패: {e}")
+
+                        # 거래 상태 관리자에 추가
+                        success = await self.trading_manager.add_selected_stock(
+                            stock_code=stock_code,
+                            stock_name=stock_name,
+                            selection_reason="보유 종목 (매도 판단용)",
+                            prev_close=prev_close
+                        )
+
+                        if success:
+                            holding_restored += 1
+
+                    self.logger.info(f"✅ 보유 종목 {holding_restored}/{len(holdings)}개 복원 완료")
+                else:
+                    self.logger.info("📊 보유 종목 없음")
+
+            except Exception as holding_err:
+                self.logger.error(f"❌ 보유 종목 복원 실패: {holding_err}")
+
         except Exception as e:
-            self.logger.error(f"❌ 오늘 후보 종목 복원 실패: {e}")
+            self.logger.error(f"❌ 종목 복원 실패: {e}")
    
     async def _check_condition_search(self):
         """장중 퀀트 후보 스크리닝 결과 반영"""
