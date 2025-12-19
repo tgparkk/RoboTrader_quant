@@ -28,7 +28,8 @@
       "Bash(dir)",
       "Read(//c/GIT/RoboTrader_NewStrategy/**)",
       "Bash(dir:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(wc:*)"
     ],
     "deny": [],
     "ask": []

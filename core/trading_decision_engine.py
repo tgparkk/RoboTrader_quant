@@ -338,32 +338,6 @@ class TradingDecisionEngine:
             if candle_low <= stop_loss_target_price:
                 return True, f"손절_{stop_loss_rate*100:.1f}pct(1분봉저가)"
 
-            # ==================== 3. 3분봉 완성 시점에만 기술적 분석 매도 신호 체크 ====================
-            from utils.korean_time import now_kst
-            current_time = now_kst()
-
-            # 3분봉 완성 시점 체크 (매 3분마다: 09:00, 09:03, 09:06, ...)
-            if current_time.minute % 3 == 0 and current_time.second >= 10:
-                try:
-                    # 1분봉을 3분봉으로 변환
-                    from core.timeframe_converter import TimeFrameConverter
-                    data_3min = TimeFrameConverter.convert_to_3min_data(combined_data)
-
-                    if data_3min is not None and len(data_3min) >= 5:
-                        # 진입 저가 조회
-                        entry_low = getattr(trading_stock, '_entry_low', None)
-                        if entry_low is None or entry_low <= 0:
-                            entry_low = candle_low  # 폴백
-
-                        # 3분봉 기반 기술적 분석 매도 신호
-                        from core.indicators.pullback_candle_pattern import PullbackCandlePattern
-                        technical_sell, technical_reason = PullbackCandlePattern.check_technical_sell_signals(data_3min, entry_low)
-
-                        if technical_sell:
-                            return True, f"기술적매도_{technical_reason}(3분봉)"
-                except Exception as e:
-                    self.logger.debug(f"⚠️ {stock_code} 기술적 분석 매도 신호 체크 오류: {e}")
-
             return False, ""
 
         except Exception as e:
