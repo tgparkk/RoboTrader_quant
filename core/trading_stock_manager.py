@@ -358,14 +358,16 @@ class TradingStockManager:
         """종목 상태 모니터링"""
         try:
             self.logger.debug("🔄 종목 상태 모니터링 실행")
-            
+
             # 주문 완료 확인
             await self._check_order_completions()
-            
+
             # 포지션 현재가 업데이트
             await self._update_position_prices()
-            
-            
+
+            # 보유 종목 매도 판단 (손익절 체크)
+            await self._check_positioned_stocks_for_sell()
+
         except Exception as e:
             self.logger.error(f"❌ 종목 상태 모니터링 중 오류: {e}")
     
@@ -556,19 +558,107 @@ class TradingStockManager:
         """포지션 현재가 업데이트"""
         try:
             positioned_stocks = list(self.stocks_by_state[StockState.POSITIONED].values())
-            
+
             for trading_stock in positioned_stocks:
                 if trading_stock.position:
                     # 현재가 조회
                     price_data = self.data_collector.get_stock(trading_stock.stock_code)
                     if price_data and price_data.last_price > 0:
                         trading_stock.position.update_current_price(price_data.last_price)
-                        
+
         except Exception as e:
             self.logger.error(f"❌ 포지션 현재가 업데이트 오류: {e}")
-    
 
-    
+    async def _check_positioned_stocks_for_sell(self):
+        """보유 종목 매도 판단 (손익절 체크)"""
+        try:
+            positioned_stocks = list(self.stocks_by_state[StockState.POSITIONED].values())
+
+            for trading_stock in positioned_stocks:
+                if not trading_stock.position:
+                    continue
+
+                # decision_engine이 설정되어 있어야 매도 판단 가능
+                if not self.decision_engine:
+                    continue
+
+                try:
+                    # decision_engine의 매도 판단 메서드 호출
+                    # main.py의 _analyze_sell_decision 로직 활용
+                    await self._analyze_sell_for_stock(trading_stock)
+                except Exception as e:
+                    self.logger.error(f"❌ {trading_stock.stock_code} 매도 판단 오류: {e}")
+
+        except Exception as e:
+            self.logger.error(f"❌ 보유 종목 매도 판단 오류: {e}")
+
+    async def _analyze_sell_for_stock(self, trading_stock):
+        """개별 종목 매도 판단"""
+        try:
+            stock_code = trading_stock.stock_code
+
+            # 현재가 조회
+            price_data = self.data_collector.get_stock(stock_code)
+            if not price_data or price_data.last_price <= 0:
+                return
+
+            current_price = price_data.last_price
+
+            # 간단한 손익절 체크
+            if trading_stock.position:
+                buy_price = trading_stock.position.buy_price
+                profit_rate = (current_price - buy_price) / buy_price
+
+                # 목표 익절률 체크
+                if hasattr(trading_stock, 'target_profit_rate') and trading_stock.target_profit_rate:
+                    if profit_rate >= trading_stock.target_profit_rate:
+                        reason = f"목표 익절 도달 ({profit_rate:.2%} >= {trading_stock.target_profit_rate:.2%})"
+                        self.logger.info(f"🎯 {stock_code} 익절 신호: {reason}")
+                        await self._execute_sell(trading_stock, current_price, reason)
+                        return
+
+                # 손절률 체크
+                if hasattr(trading_stock, 'stop_loss_rate') and trading_stock.stop_loss_rate:
+                    if profit_rate <= -trading_stock.stop_loss_rate:
+                        reason = f"손절 실행 ({profit_rate:.2%} <= -{trading_stock.stop_loss_rate:.2%})"
+                        self.logger.info(f"🚨 {stock_code} 손절 신호: {reason}")
+                        await self._execute_sell(trading_stock, current_price, reason)
+                        return
+
+        except Exception as e:
+            self.logger.error(f"❌ {trading_stock.stock_code} 매도 분석 오류: {e}")
+
+    async def _execute_sell(self, trading_stock, sell_price: float, reason: str):
+        """매도 실행"""
+        try:
+            stock_code = trading_stock.stock_code
+
+            # decision_engine을 통해 매도 실행
+            if self.decision_engine:
+                # 가상매매 모드 확인
+                from config.settings import load_config
+                config = load_config()
+                if getattr(config, 'paper_trading', False):
+                    # 가상 매도 실행
+                    success = await self.decision_engine.execute_virtual_sell(
+                        trading_stock,
+                        sell_price,
+                        reason
+                    )
+                    if success:
+                        self.logger.info(f"✅ {stock_code} 가상 매도 완료: {reason}")
+                else:
+                    # 실제 매도 주문
+                    success = await self.decision_engine.execute_real_sell(
+                        trading_stock,
+                        reason
+                    )
+                    if success:
+                        self.logger.info(f"✅ {stock_code} 실제 매도 주문 완료: {reason}")
+
+        except Exception as e:
+            self.logger.error(f"❌ {stock_code} 매도 실행 오류: {e}")
+
     def _register_stock(self, trading_stock: TradingStock):
         """종목 등록"""
         stock_code = trading_stock.stock_code

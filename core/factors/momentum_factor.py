@@ -289,15 +289,23 @@ class MomentumFactor:
                     LIMIT ?
                 '''
                 df = pd.read_sql_query(query, conn, params=(stock_code, date, days))
-                
+
                 if df.empty:
                     return None
-                
-                df['date'] = pd.to_datetime(df['date'])
+
+                # 날짜 형식 정규화 (잘못된 형식 처리)
+                try:
+                    df['date'] = pd.to_datetime(df['date'], errors='coerce')
+                    # 유효하지 않은 날짜 제거
+                    df = df.dropna(subset=['date'])
+                except Exception as date_error:
+                    self.logger.warning(f"날짜 파싱 오류 ({stock_code}): {date_error}")
+                    return None
+
                 df = df.sort_values('date').reset_index(drop=True)
-                
+
                 return df
-                
+
         except Exception as e:
             self.logger.error(f"가격 이력 조회 오류: {e}")
             return None

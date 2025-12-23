@@ -175,37 +175,37 @@ class GrowthFactor:
         try:
             if len(financial_data) < 2:
                 return 0.0
-            
+
             # 1. 이익 레버리지 (40%)
             revenue_growth = self._calculate_growth_rate(financial_data, 'revenue', 1)
             earnings_growth = self._calculate_growth_rate(financial_data, 'net_income', 1)
-            
+
             if revenue_growth != 0:
                 earnings_leverage = earnings_growth / revenue_growth
                 earnings_leverage_score = self._normalize(earnings_leverage, 0, 3.0)
             else:
                 earnings_leverage_score = 0
-            
+
             # 2. 마진 개선도 (35%)
-            current_margin = financial_data[-1].get('operating_margin', 0)
-            prev_margin = financial_data[-2].get('operating_margin', 0) if len(financial_data) >= 2 else 0
+            current_margin = financial_data[-1].get('operating_margin') or 0
+            prev_margin = financial_data[-2].get('operating_margin') or 0 if len(financial_data) >= 2 else 0
             margin_expansion = current_margin - prev_margin
             margin_expansion_score = self._normalize(margin_expansion, -5, 5)
-            
+
             # 3. ROE 개선도 (25%)
-            current_roe = financial_data[-1].get('roe', 0)
-            prev_roe = financial_data[-2].get('roe', 0) if len(financial_data) >= 2 else 0
+            current_roe = financial_data[-1].get('roe') or 0
+            prev_roe = financial_data[-2].get('roe') or 0 if len(financial_data) >= 2 else 0
             roe_improvement = current_roe - prev_roe
             roe_improvement_score = self._normalize(roe_improvement, -5, 10)
-            
+
             growth_efficiency_score = (
                 earnings_leverage_score * 0.40 +
                 margin_expansion_score * 0.35 +
                 roe_improvement_score * 0.25
             )
-            
+
             return min(100.0, max(0.0, growth_efficiency_score))
-            
+
         except Exception as e:
             self.logger.error(f"성장 효율성 점수 계산 오류: {e}")
             return 0.0
@@ -215,21 +215,21 @@ class GrowthFactor:
         try:
             if len(financial_data) < 4:
                 return 0.0
-            
+
             # 최근 4분기 중 전분기 대비 성장한 분기 수
             growth_quarters = 0
             for i in range(1, min(5, len(financial_data))):
-                current_revenue = financial_data[-i].get('revenue', 0)
-                prev_revenue = financial_data[-i-1].get('revenue', 0) if len(financial_data) > i else 0
-                
+                current_revenue = financial_data[-i].get('revenue') or 0
+                prev_revenue = financial_data[-i-1].get('revenue') or 0 if len(financial_data) > i else 0
+
                 if prev_revenue > 0 and current_revenue > prev_revenue:
                     growth_quarters += 1
-            
+
             # 4분기 연속 성장 = 100점
             growth_consistency_score = (growth_quarters / 4) * 100
-            
+
             return min(100.0, max(0.0, growth_consistency_score))
-            
+
         except Exception as e:
             self.logger.error(f"성장 지속성 계산 오류: {e}")
             return 0.0
@@ -270,15 +270,15 @@ class GrowthFactor:
         try:
             if len(financial_data) < years + 1:
                 return 0.0
-            
-            current_value = financial_data[-1].get(field, 0)
-            past_value = financial_data[-years-1].get(field, 0) if len(financial_data) > years else 0
-            
+
+            current_value = financial_data[-1].get(field) or 0
+            past_value = financial_data[-years-1].get(field) or 0 if len(financial_data) > years else 0
+
             if past_value == 0:
                 return 0.0
-            
+
             return ((current_value - past_value) / abs(past_value)) * 100
-            
+
         except Exception as e:
             return 0.0
     
@@ -287,16 +287,16 @@ class GrowthFactor:
         try:
             if len(financial_data) < years + 1:
                 return 0.0
-            
-            current_value = financial_data[-1].get(field, 0)
-            past_value = financial_data[-years-1].get(field, 0) if len(financial_data) > years else 0
-            
-            if past_value <= 0:
+
+            current_value = financial_data[-1].get(field) or 0
+            past_value = financial_data[-years-1].get(field) or 0 if len(financial_data) > years else 0
+
+            if past_value <= 0 or current_value <= 0:
                 return 0.0
-            
+
             cagr = (pow(current_value / past_value, 1/years) - 1) * 100
             return cagr
-            
+
         except Exception as e:
             return 0.0
     

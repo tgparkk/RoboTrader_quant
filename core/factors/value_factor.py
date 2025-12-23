@@ -232,35 +232,41 @@ class ValueFactor:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+                # financial_statements 테이블 사용 (실제 존재하는 컬럼만 조회)
                 cursor.execute('''
-                    SELECT per, pbr, pcr, psr, dividend_yield, dividend_growth_3yr,
-                           dividend_capacity, discount_to_nav, liquidation_margin,
-                           roe, roa, net_income, equity
+                    SELECT per, pbr, psr, dividend_yield, roe,
+                           debt_ratio, operating_margin, net_margin,
+                           revenue, operating_profit, net_income
                     FROM financial_statements
                     WHERE stock_code = ? AND report_date <= ?
                     ORDER BY report_date DESC
                     LIMIT 1
                 ''', (stock_code, date))
-                
+
                 row = cursor.fetchone()
                 if row:
                     return {
                         'per': row[0],
                         'pbr': row[1],
-                        'pcr': row[2],
-                        'psr': row[3],
-                        'dividend_yield': row[4],
-                        'dividend_growth_3yr': row[5],
-                        'dividend_capacity': row[6],
-                        'discount_to_nav': row[7],
-                        'liquidation_margin': row[8],
-                        'roe': row[9],
-                        'roa': row[10],
-                        'net_income': row[11],
-                        'equity': row[12],
+                        'pcr': None,  # financial_statements에 없음
+                        'psr': row[2],
+                        'dividend_yield': row[3],
+                        'dividend_growth_3yr': None,  # 계산 필요
+                        'dividend_capacity': None,  # 계산 필요
+                        'discount_to_nav': None,  # 계산 필요
+                        'liquidation_margin': None,  # 계산 필요
+                        'roe': row[4],
+                        'roa': None,  # financial_statements에 없음
+                        'net_income': row[10],
+                        'equity': None,  # 계산 필요
+                        'debt_ratio': row[5],
+                        'operating_margin': row[6],
+                        'net_margin': row[7],
+                        'revenue': row[8],
+                        'operating_profit': row[9],
                     }
                 return None
-                
+
         except Exception as e:
             self.logger.error(f"재무 데이터 조회 오류: {e}")
             return None

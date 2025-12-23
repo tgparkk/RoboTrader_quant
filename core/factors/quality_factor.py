@@ -116,36 +116,26 @@ class QualityFactor:
     def _calculate_profitability_score(self, financial_data: Dict) -> float:
         """수익성 점수 계산 (35%)"""
         try:
-            # 1. ROE (30%)
-            roe = financial_data.get('roe', 0)
+            # 1. ROE (50%) - roa, roic 없으므로 가중치 재조정
+            roe = financial_data.get('roe', 0) or 0
             roe_score = self._normalize(roe, 0, 30)
-            
-            # 2. ROA (20%)
-            roa = financial_data.get('roa', 0)
-            roa_score = self._normalize(roa, 0, 15)
-            
-            # 3. ROIC (20%)
-            roic = financial_data.get('roic', 0)
-            roic_score = self._normalize(roic, 0, 20)
-            
-            # 4. 영업이익률 (15%)
-            operating_margin = financial_data.get('operating_margin', 0)
+
+            # 2. 영업이익률 (25%)
+            operating_margin = financial_data.get('operating_margin', 0) or 0
             operating_margin_score = self._normalize(operating_margin, 0, 25)
-            
-            # 5. 순이익률 (15%)
-            net_margin = financial_data.get('net_margin', 0)
+
+            # 3. 순이익률 (25%)
+            net_margin = financial_data.get('net_margin', 0) or 0
             net_margin_score = self._normalize(net_margin, 0, 20)
-            
+
             profitability_score = (
-                roe_score * 0.30 +
-                roa_score * 0.20 +
-                roic_score * 0.20 +
-                operating_margin_score * 0.15 +
-                net_margin_score * 0.15
+                roe_score * 0.50 +
+                operating_margin_score * 0.25 +
+                net_margin_score * 0.25
             )
-            
+
             return min(100.0, max(0.0, profitability_score))
-            
+
         except Exception as e:
             self.logger.error(f"수익성 점수 계산 오류: {e}")
             return 0.0
@@ -153,36 +143,15 @@ class QualityFactor:
     def _calculate_stability_score(self, financial_data: Dict) -> float:
         """재무 안정성 점수 계산 (30%)"""
         try:
-            # 1. 부채비율 (25%)
-            debt_ratio = financial_data.get('debt_ratio', 0)
+            # 부채비율만 사용 가능 (다른 지표들은 테이블에 없음)
+            debt_ratio = financial_data.get('debt_ratio', 0) or 0
             debt_ratio_score = self._normalize_inverse(debt_ratio, 0, 200)
-            
-            # 2. 이자보상배율 (25%)
-            interest_coverage = financial_data.get('interest_coverage', 0)
-            interest_coverage_score = self._normalize(interest_coverage, 1, 10)
-            
-            # 3. 유동비율 (20%)
-            current_ratio = financial_data.get('current_ratio', 0)
-            current_ratio_score = self._normalize(current_ratio, 50, 200)
-            
-            # 4. 당좌비율 (15%)
-            quick_ratio = financial_data.get('quick_ratio', 0)
-            quick_ratio_score = self._normalize(quick_ratio, 50, 150)
-            
-            # 5. 순차입금비율 (15%)
-            net_debt_ratio = financial_data.get('net_debt_ratio', 0)
-            net_debt_ratio_score = self._normalize_inverse(net_debt_ratio, -50, 150)
-            
-            stability_score = (
-                debt_ratio_score * 0.25 +
-                interest_coverage_score * 0.25 +
-                current_ratio_score * 0.20 +
-                quick_ratio_score * 0.15 +
-                net_debt_ratio_score * 0.15
-            )
-            
+
+            # 다른 지표들이 없으므로 부채비율만으로 점수 계산
+            stability_score = debt_ratio_score
+
             return min(100.0, max(0.0, stability_score))
-            
+
         except Exception as e:
             self.logger.error(f"재무 안정성 점수 계산 오류: {e}")
             return 0.0
@@ -190,31 +159,10 @@ class QualityFactor:
     def _calculate_cashflow_quality(self, financial_data: Dict, price_data: Optional[Dict]) -> float:
         """현금창출력 점수 계산 (20%)"""
         try:
-            # 1. FCF 수익률 (35%)
-            fcf_yield = financial_data.get('fcf_yield', 0)
-            fcf_yield_score = self._normalize(fcf_yield, 0, 10)
-            
-            # 2. 영업현금흐름/순이익 비율 (30%)
-            ocf_to_ni = financial_data.get('ocf_to_ni', 0)
-            ocf_ni_score = self._normalize(ocf_to_ni, 50, 150)
-            
-            # 3. CAPEX 비율 (20%)
-            capex_ratio = financial_data.get('capex_ratio', 0)
-            capex_ratio_score = self._normalize_inverse(capex_ratio, 0, 70)
-            
-            # 4. 현금보유 수준 (15%)
-            cash_ratio = financial_data.get('cash_ratio', 0)
-            cash_ratio_score = self._normalize(cash_ratio, 0, 30)
-            
-            cashflow_quality_score = (
-                fcf_yield_score * 0.35 +
-                ocf_ni_score * 0.30 +
-                capex_ratio_score * 0.20 +
-                cash_ratio_score * 0.15
-            )
-            
-            return min(100.0, max(0.0, cashflow_quality_score))
-            
+            # 현금흐름 관련 데이터가 테이블에 없으므로 기본값 반환
+            # TODO: 현금흐름 데이터 수집 후 실제 계산 구현 필요
+            return 50.0  # 중립 점수
+
         except Exception as e:
             self.logger.error(f"현금창출력 점수 계산 오류: {e}")
             return 0.0
@@ -256,36 +204,35 @@ class QualityFactor:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+                # 실제 존재하는 컬럼만 조회
                 cursor.execute('''
-                    SELECT roe, roa, roic, operating_margin, net_margin,
-                           debt_ratio, interest_coverage, current_ratio, quick_ratio,
-                           net_debt_ratio, fcf_yield, ocf_to_ni, capex_ratio, cash_ratio
+                    SELECT roe, operating_margin, net_margin, debt_ratio
                     FROM financial_statements
                     WHERE stock_code = ? AND report_date <= ?
                     ORDER BY report_date DESC
                     LIMIT 1
                 ''', (stock_code, date))
-                
+
                 row = cursor.fetchone()
                 if row:
                     return {
-                        'roe': row[0],
-                        'roa': row[1],
-                        'roic': row[2],
-                        'operating_margin': row[3],
-                        'net_margin': row[4],
-                        'debt_ratio': row[5],
-                        'interest_coverage': row[6],
-                        'current_ratio': row[7],
-                        'quick_ratio': row[8],
-                        'net_debt_ratio': row[9],
-                        'fcf_yield': row[10],
-                        'ocf_to_ni': row[11],
-                        'capex_ratio': row[12],
-                        'cash_ratio': row[13],
+                        'roe': row[0] if row[0] is not None else 0,
+                        'roa': None,  # 테이블에 없음
+                        'roic': None,  # 테이블에 없음
+                        'operating_margin': row[1] if row[1] is not None else 0,
+                        'net_margin': row[2] if row[2] is not None else 0,
+                        'debt_ratio': row[3] if row[3] is not None else 0,
+                        'interest_coverage': None,  # 테이블에 없음
+                        'current_ratio': None,  # 테이블에 없음
+                        'quick_ratio': None,  # 테이블에 없음
+                        'net_debt_ratio': None,  # 테이블에 없음
+                        'fcf_yield': None,  # 테이블에 없음
+                        'ocf_to_ni': None,  # 테이블에 없음
+                        'capex_ratio': None,  # 테이블에 없음
+                        'cash_ratio': None,  # 테이블에 없음
                     }
                 return None
-                
+
         except Exception as e:
             self.logger.error(f"재무 데이터 조회 오류: {e}")
             return None

@@ -185,11 +185,31 @@ class MLDataCollector:
                 skipped_count = 0
                 for _, row in daily_data.iterrows():
                     try:
-                        # 날짜 파싱
+                        # 날짜 파싱 및 검증
                         date_str = str(row.get('stck_bsop_date', ''))
-                        if len(date_str) == 8:
-                            date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
-                        else:
+                        if len(date_str) != 8:
+                            continue
+
+                        # YYYYMMDD 형식 검증
+                        try:
+                            year = int(date_str[:4])
+                            month = int(date_str[4:6])
+                            day = int(date_str[6:8])
+
+                            # 유효성 검사
+                            if year < 1900 or year > 2100:
+                                self.logger.warning(f"⚠️ [{stock_code}] 잘못된 연도: {date_str}")
+                                continue
+                            if month < 1 or month > 12:
+                                self.logger.warning(f"⚠️ [{stock_code}] 잘못된 월: {date_str}")
+                                continue
+                            if day < 1 or day > 31:
+                                self.logger.warning(f"⚠️ [{stock_code}] 잘못된 일: {date_str}")
+                                continue
+
+                            date = f"{year:04d}-{month:02d}-{day:02d}"
+                        except ValueError:
+                            self.logger.warning(f"⚠️ [{stock_code}] 날짜 변환 실패: {date_str}")
                             continue
                         
                         # 가격 데이터
@@ -375,12 +395,14 @@ class MLDataCollector:
                             # 배당수익률
                             dividend_yield = ratio.raw.get('dvd_yld') if ratio.raw else None
                             
+                            # 재무비율은 per, pbr, psr, dividend_yield, roe, debt_ratio만 저장
+                            # operating_margin, net_margin은 손익계산서에서 계산하여 저장
                             cursor.execute('''
                                 INSERT OR REPLACE INTO financial_statements
                                 (stock_code, report_date, fiscal_quarter,
-                                 per, pbr, psr, dividend_yield, 
-                                 roe, debt_ratio, operating_margin, net_margin)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                 per, pbr, psr, dividend_yield,
+                                 roe, debt_ratio)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                             ''', (
                                 stock_code,
                                 report_date,
@@ -391,8 +413,6 @@ class MLDataCollector:
                                 float(dividend_yield) if dividend_yield and dividend_yield != '' else None,
                                 ratio.roe_value if ratio.roe_value else None,
                                 ratio.liability_ratio if ratio.liability_ratio else None,
-                                ratio.operating_income_growth if ratio.operating_income_growth else None,  # 임시
-                                ratio.net_income_growth if ratio.net_income_growth else None,  # 임시
                             ))
                         except Exception as e:
                             self.logger.warning(f"⚠️ 재무비율 저장 오류 (건너뜀): {e}")
@@ -407,12 +427,21 @@ class MLDataCollector:
                                 report_date = f"{report_date[:4]}-{report_date[4:6]}-01"
                             else:
                                 report_date = f"{report_date[:4]}-{report_date[4:6]}-{report_date[6:8]}"
-                            
+
+                            # 마진 계산
+                            operating_margin = None
+                            net_margin = None
+                            if income.revenue and income.revenue > 0:
+                                if income.operating_income:
+                                    operating_margin = (income.operating_income / income.revenue) * 100
+                                if income.net_income:
+                                    net_margin = (income.net_income / income.revenue) * 100
+
                             cursor.execute('''
                                 INSERT OR REPLACE INTO financial_statements
                                 (stock_code, report_date, fiscal_quarter,
-                                 revenue, operating_profit, net_income)
-                                VALUES (?, ?, ?, ?, ?, ?)
+                                 revenue, operating_profit, net_income, operating_margin, net_margin)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                             ''', (
                                 stock_code,
                                 report_date,
@@ -420,6 +449,8 @@ class MLDataCollector:
                                 income.revenue if income.revenue else None,
                                 income.operating_income if income.operating_income else None,
                                 income.net_income if income.net_income else None,
+                                operating_margin,
+                                net_margin,
                             ))
                         except Exception as e:
                             self.logger.warning(f"⚠️ 손익계산서 저장 오류 (건너뜀): {e}")

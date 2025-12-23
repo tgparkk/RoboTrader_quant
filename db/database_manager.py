@@ -988,16 +988,49 @@ class DatabaseManager:
             if timestamp is None:
                 timestamp = now_kst()
             buy_price = None
-            if buy_record_id:
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
+
+            # 해당 종목의 모든 미체결 매수 기록을 조회하여 평균 매수가 계산
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT
+                        SUM(b.quantity * b.price) / SUM(b.quantity) as avg_buy_price,
+                        SUM(b.quantity) as total_buy_qty
+                    FROM real_trading_records b
+                    WHERE b.stock_code = ?
+                      AND b.action = 'BUY'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM real_trading_records s
+                          WHERE s.buy_record_id = b.id AND s.action = 'SELL'
+                      )
+                ''', (stock_code,))
+
+                avg_result = cursor.fetchone()
+                if avg_result and avg_result[0] is not None:
+                    avg_buy_price, total_buy_qty = avg_result
+                    buy_price = avg_buy_price
+
+                    # 매도 수량이 보유 수량을 초과하는지 확인
+                    if quantity > total_buy_qty:
+                        self.logger.warning(
+                            f"⚠️ {stock_code} 실거래 매도 수량({quantity}주)이 보유 수량({total_buy_qty}주)을 초과"
+                        )
+
+                    self.logger.debug(
+                        f"📊 {stock_code} 실거래 평균 매수가: {avg_buy_price:,.0f}원 "
+                        f"(보유 {total_buy_qty}주, 매도 {quantity}주)"
+                    )
+                elif buy_record_id:
+                    # 평균가 계산 실패 시 기존 로직으로 fallback
+                    self.logger.warning(f"⚠️ {stock_code} 실거래 평균 매수가 계산 실패, buy_record_id={buy_record_id}로 계산")
                     cursor.execute('''
-                        SELECT price FROM real_trading_records 
+                        SELECT price FROM real_trading_records
                         WHERE id = ? AND action = 'BUY'
                     ''', (buy_record_id,))
                     row = cursor.fetchone()
                     if row:
                         buy_price = float(row[0])
+
             profit_loss = 0.0
             profit_rate = 0.0
             if buy_price and buy_price > 0:
@@ -1133,30 +1166,62 @@ class DatabaseManager:
             self.logger.error(f"가상 매수 기록 저장 실패: {e}")
             return None
     
-    def save_virtual_sell(self, stock_code: str, stock_name: str, price: float, 
-                         quantity: int, strategy: str, reason: str, 
+    def save_virtual_sell(self, stock_code: str, stock_name: str, price: float,
+                         quantity: int, strategy: str, reason: str,
                          buy_record_id: int, timestamp: datetime = None) -> bool:
         """가상 매도 기록 저장"""
         try:
             if timestamp is None:
                 timestamp = now_kst()
-            
+
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                
-                # 매수 기록 조회
+
+                # 해당 종목의 모든 미체결 매수 기록을 조회하여 평균 매수가 계산
                 cursor.execute('''
-                    SELECT price FROM virtual_trading_records 
-                    WHERE id = ? AND action = 'BUY'
-                ''', (buy_record_id,))
-                
-                buy_result = cursor.fetchone()
-                if not buy_result:
-                    self.logger.error(f"매수 기록을 찾을 수 없음: ID {buy_record_id}")
-                    return False
-                
-                buy_price = buy_result[0]
-                
+                    SELECT
+                        SUM(b.quantity * b.price) / SUM(b.quantity) as avg_buy_price,
+                        SUM(b.quantity) as total_buy_qty
+                    FROM virtual_trading_records b
+                    WHERE b.stock_code = ?
+                      AND b.action = 'BUY'
+                      AND b.is_test = 1
+                      AND NOT EXISTS (
+                          SELECT 1 FROM virtual_trading_records s
+                          WHERE s.buy_record_id = b.id AND s.action = 'SELL'
+                      )
+                ''', (stock_code,))
+
+                avg_result = cursor.fetchone()
+                if not avg_result or avg_result[0] is None:
+                    # 평균가 계산 실패 시 기존 로직으로 fallback
+                    self.logger.warning(f"⚠️ {stock_code} 평균 매수가 계산 실패, buy_record_id={buy_record_id}로 계산")
+                    cursor.execute('''
+                        SELECT price FROM virtual_trading_records
+                        WHERE id = ? AND action = 'BUY'
+                    ''', (buy_record_id,))
+
+                    buy_result = cursor.fetchone()
+                    if not buy_result:
+                        self.logger.error(f"매수 기록을 찾을 수 없음: ID {buy_record_id}")
+                        return False
+
+                    buy_price = buy_result[0]
+                else:
+                    avg_buy_price, total_buy_qty = avg_result
+                    buy_price = avg_buy_price
+
+                    # 매도 수량이 보유 수량을 초과하는지 확인
+                    if quantity > total_buy_qty:
+                        self.logger.warning(
+                            f"⚠️ {stock_code} 매도 수량({quantity}주)이 보유 수량({total_buy_qty}주)을 초과"
+                        )
+
+                    self.logger.debug(
+                        f"📊 {stock_code} 평균 매수가: {avg_buy_price:,.0f}원 "
+                        f"(보유 {total_buy_qty}주, 매도 {quantity}주)"
+                    )
+
                 # 손익 계산
                 profit_loss = (price - buy_price) * quantity
                 profit_rate = ((price - buy_price) / buy_price) * 100
