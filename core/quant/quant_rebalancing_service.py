@@ -48,6 +48,10 @@ class QuantRebalancingService:
         self.safe_score = 65.0       # 안전 점수: >= 65점은 순위 무관 유지
         self.safe_rank = 40          # 안전 순위: <= 40위면 점수 낮아도 유지
 
+        # 모멘텀 약화 감지 설정 (상승 가능성 평가)
+        self.momentum_decline_threshold = -3.0  # 모멘텀 점수 하락 임계값 (전일 대비)
+        self.weak_momentum_score = 50.0         # 약한 모멘텀 기준 점수
+
         # 목표 익절/손절률 계산기
         self.profit_loss_calculator = TargetProfitLossCalculator(
             rank_weight=0.40,
@@ -181,8 +185,21 @@ class QuantRebalancingService:
                         self.logger.info(f"ℹ️ {stock_code} 유지 ({factor_rank}위 <= {self.safe_rank}위, 점수 {total_score:.1f})")
                         continue
                     else:
+                        # 모멘텀 약화 여부 체크 (상승 가능성 평가)
+                        momentum_score = factors_data.get('momentum_score', 0)
+                        has_upside_potential = self._check_upside_potential(
+                            stock_code, momentum_score, factor_rank, calc_date
+                        )
+
+                        if has_upside_potential:
+                            self.logger.info(
+                                f"ℹ️ {stock_code} 유지 (TOP30 밖이지만 상승 가능성 있음 - "
+                                f"모멘텀 {momentum_score:.1f}점, 점수 {total_score:.1f}점)"
+                            )
+                            continue
+
                         should_sell = True
-                        sell_reason = f"포트폴리오 조정 ({factor_rank}위, 점수 {total_score:.1f})"
+                        sell_reason = f"포트폴리오 조정 (상승 가능성 낮음: {factor_rank}위, 점수 {total_score:.1f}, 모멘텀 {momentum_score:.1f})"
 
                 if should_sell:
                     sell_list.append({
@@ -482,6 +499,72 @@ class QuantRebalancingService:
             self.logger.error(f"❌ 매도 주문 오류 {stock_code}: {e}")
             return False
     
+    def _check_upside_potential(self, stock_code: str, momentum_score: float,
+                                 factor_rank: int, calc_date: str) -> bool:
+        """
+        상승 가능성 평가 (TOP 30 밖 종목의 유지 여부 판단)
+
+        Args:
+            stock_code: 종목코드
+            momentum_score: 현재 모멘텀 점수
+            factor_rank: 현재 순위
+            calc_date: 평가 날짜
+
+        Returns:
+            True: 상승 가능성 있음 (유지), False: 상승 가능성 낮음 (매도)
+        """
+        try:
+            # 1. 모멘텀 점수 체크 - 모멘텀이 강하면 유지
+            if momentum_score >= 60.0:  # 모멘텀 점수가 60점 이상이면 단기 상승 가능성 있음
+                self.logger.debug(f"{stock_code} 모멘텀 강함 ({momentum_score:.1f}점)")
+                return True
+
+            # 2. 모멘텀 약화 추세 체크 (전일 대비)
+            try:
+                from datetime import datetime, timedelta
+                prev_date = (datetime.strptime(calc_date, '%Y%m%d') - timedelta(days=1)).strftime('%Y%m%d')
+
+                # 전일 팩터 점수 조회
+                prev_factors_list = self.db_manager.get_quant_factors(prev_date)
+                prev_factors_map = {f['stock_code']: f for f in prev_factors_list}
+                prev_factors = prev_factors_map.get(stock_code)
+
+                if prev_factors:
+                    prev_momentum = prev_factors.get('momentum_score', 0)
+                    momentum_change = momentum_score - prev_momentum
+
+                    # 모멘텀이 급격히 하락하면 매도
+                    if momentum_change <= self.momentum_decline_threshold:
+                        self.logger.debug(
+                            f"{stock_code} 모멘텀 급락 ({prev_momentum:.1f} -> {momentum_score:.1f}, "
+                            f"변화 {momentum_change:.1f})"
+                        )
+                        return False
+
+                    # 모멘텀이 상승 중이면 유지
+                    if momentum_change > 0:
+                        self.logger.debug(f"{stock_code} 모멘텀 상승 중 ({momentum_change:+.1f})")
+                        return True
+            except Exception as e:
+                self.logger.debug(f"{stock_code} 모멘텀 추세 체크 실패: {e}")
+
+            # 3. 약한 모멘텀 체크
+            if momentum_score < self.weak_momentum_score:
+                self.logger.debug(f"{stock_code} 모멘텀 약함 ({momentum_score:.1f}점 < {self.weak_momentum_score}점)")
+                return False
+
+            # 4. 순위가 크게 떨어지지 않았다면 유지 (50위 이내)
+            if factor_rank <= 50:
+                self.logger.debug(f"{stock_code} 순위 양호 ({factor_rank}위)")
+                return True
+
+            # 5. 기본: 상승 가능성 낮음
+            return False
+
+        except Exception as e:
+            self.logger.error(f"❌ 상승 가능성 평가 오류 {stock_code}: {e}")
+            return False  # 오류 시 보수적으로 매도
+
     def _execute_buy_order(self, stock_code: str, target_amount: float) -> bool:
         """매수 주문 실행 (시장가, 동등 비중)"""
         try:

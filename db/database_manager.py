@@ -1035,7 +1035,7 @@ class DatabaseManager:
             profit_rate = 0.0
             if buy_price and buy_price > 0:
                 profit_loss = (price - buy_price) * quantity
-                profit_rate = (price - buy_price) / buy_price * 100.0
+                profit_rate = (price - buy_price) / buy_price  # 소수 형태로 저장 (0.05 = 5%)
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
@@ -1224,7 +1224,7 @@ class DatabaseManager:
 
                 # 손익 계산
                 profit_loss = (price - buy_price) * quantity
-                profit_rate = ((price - buy_price) / buy_price) * 100
+                profit_rate = (price - buy_price) / buy_price  # 소수 형태로 저장 (0.05 = 5%)
                 
                 cursor.execute('''
                     INSERT INTO virtual_trading_records 
