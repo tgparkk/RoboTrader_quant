@@ -387,16 +387,47 @@ class MLDataCollector:
                             else:  # YYYYMMDD 형식
                                 report_date = f"{report_date[:4]}-{report_date[4:6]}-{report_date[6:8]}"
                             
-                            # PER, PBR, PSR은 raw 데이터에서 추출
-                            per = ratio.raw.get('per') if ratio.raw else None
-                            pbr = ratio.raw.get('pbr') if ratio.raw else None
-                            psr = ratio.raw.get('psr') if ratio.raw else None
-                            
-                            # 배당수익률
-                            dividend_yield = ratio.raw.get('dvd_yld') if ratio.raw else None
-                            
-                            # 재무비율은 per, pbr, psr, dividend_yield, roe, debt_ratio만 저장
-                            # operating_margin, net_margin은 손익계산서에서 계산하여 저장
+                            # PER, PBR, PSR 등 밸류에이션 지표는 raw 데이터에서 시도
+                            # (API에 없을 수 있으므로 None으로 처리)
+                            per = None
+                            pbr = None
+                            psr = None
+                            dividend_yield = None
+
+                            if ratio.raw and isinstance(ratio.raw, dict):
+                                # 다양한 필드명 시도
+                                per = ratio.raw.get('per') or ratio.raw.get('PER') or ratio.raw.get('stock_per')
+                                pbr = ratio.raw.get('pbr') or ratio.raw.get('PBR') or ratio.raw.get('stock_pbr')
+                                psr = ratio.raw.get('psr') or ratio.raw.get('PSR')
+                                dividend_yield = ratio.raw.get('dvd_yld') or ratio.raw.get('DVD_YLD')
+
+                            # EPS, BPS를 이용한 PER, PBR 계산 (현재가 기준)
+                            # 최신 데이터인 경우 현재가로 계산
+                            if not per and ratio.eps and ratio.eps > 0:
+                                try:
+                                    # 현재가 조회 (최신 데이터에만 적용)
+                                    from api.kis_market_api import get_stock_market_cap
+                                    market_info = get_stock_market_cap(stock_code)
+                                    if market_info and market_info.get('current_price'):
+                                        current_price = float(market_info['current_price'])
+                                        per = current_price / ratio.eps  # PER = 주가 / EPS
+                                        self.logger.debug(f"📊 [{stock_code}] PER 계산: {per:.2f} (주가: {current_price:,.0f}, EPS: {ratio.eps:.0f})")
+                                except Exception as calc_err:
+                                    self.logger.debug(f"⚠️ [{stock_code}] PER 계산 실패: {calc_err}")
+
+                            if not pbr and ratio.bps and ratio.bps > 0:
+                                try:
+                                    # 현재가 조회
+                                    from api.kis_market_api import get_stock_market_cap
+                                    market_info = get_stock_market_cap(stock_code)
+                                    if market_info and market_info.get('current_price'):
+                                        current_price = float(market_info['current_price'])
+                                        pbr = current_price / ratio.bps  # PBR = 주가 / BPS
+                                        self.logger.debug(f"📊 [{stock_code}] PBR 계산: {pbr:.2f} (주가: {current_price:,.0f}, BPS: {ratio.bps:.0f})")
+                                except Exception as calc_err:
+                                    self.logger.debug(f"⚠️ [{stock_code}] PBR 계산 실패: {calc_err}")
+
+                            # 재무비율 저장 (roe, debt_ratio, eps, bps는 FinancialRatioEntry에 있음)
                             cursor.execute('''
                                 INSERT OR REPLACE INTO financial_statements
                                 (stock_code, report_date, fiscal_quarter,
@@ -407,13 +438,24 @@ class MLDataCollector:
                                 stock_code,
                                 report_date,
                                 None,  # fiscal_quarter는 별도 파싱 필요
-                                float(per) if per and per != '' else None,
-                                float(pbr) if pbr and pbr != '' else None,
-                                float(psr) if psr and psr != '' else None,
-                                float(dividend_yield) if dividend_yield and dividend_yield != '' else None,
-                                ratio.roe_value if ratio.roe_value else None,
-                                ratio.liability_ratio if ratio.liability_ratio else None,
+                                float(per) if per and per not in (None, '') else None,
+                                float(pbr) if pbr and pbr not in (None, '') else None,
+                                float(psr) if psr and psr not in (None, '') else None,
+                                float(dividend_yield) if dividend_yield and dividend_yield not in (None, '') else None,
+                                float(ratio.roe_value) if ratio.roe_value else None,
+                                float(ratio.liability_ratio) if ratio.liability_ratio else None,
                             ))
+
+                            # 저장 결과 로깅
+                            roe_str = f"{ratio.roe_value:.2f}" if ratio.roe_value else "0.00"
+                            debt_str = f"{ratio.liability_ratio:.2f}" if ratio.liability_ratio else "0.00"
+                            eps_str = f"{ratio.eps:.0f}" if ratio.eps else "0"
+                            bps_str = f"{ratio.bps:.0f}" if ratio.bps else "0"
+                            self.logger.debug(
+                                f"📊 [{stock_code}] 재무비율 저장: {report_date} - "
+                                f"ROE: {roe_str}%, 부채비율: {debt_str}%, "
+                                f"EPS: {eps_str}, BPS: {bps_str}"
+                            )
                         except Exception as e:
                             self.logger.warning(f"⚠️ 재무비율 저장 오류 (건너뜀): {e}")
                             continue
