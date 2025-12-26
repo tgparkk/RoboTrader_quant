@@ -163,6 +163,11 @@ class IncomeStatementEntry:
     created_at: datetime
     raw: Dict[str, Any]
 
+    @property
+    def ebitda(self) -> float:
+        """EBITDA 계산 (영업이익 + 감가상각비)"""
+        return self.operating_income + self.depreciation
+
     @staticmethod
     def from_api_output(data: Dict[str, Any]) -> "IncomeStatementEntry":
         def to_float(value: Any) -> float:
@@ -233,6 +238,130 @@ def get_income_statement(stock_code: str,
     else:
         logger.error(f"❌ 손익계산서 조회 실패 (응답 없음): {stock_code}")
     return None
+
+
+@dataclass
+class BalanceSheetEntry:
+    """대차대조표 항목"""
+    statement_ym: str
+    total_assets: float          # 자산총계
+    current_assets: float        # 유동자산
+    non_current_assets: float    # 비유동자산
+    total_liabilities: float     # 부채총계
+    current_liabilities: float   # 유동부채
+    non_current_liabilities: float  # 비유동부채
+    total_equity: float          # 자본총계
+    capital_stock: float         # 자본금
+    retained_earnings: float     # 이익잉여금
+    created_at: datetime
+    raw: Dict[str, Any]
+
+    @staticmethod
+    def from_api_output(data: Dict[str, Any]) -> "BalanceSheetEntry":
+        def to_float(value: Any) -> float:
+            try:
+                return float(str(value).replace(",", "")) if value not in (None, "") else 0.0
+            except (ValueError, TypeError):
+                return 0.0
+
+        return BalanceSheetEntry(
+            statement_ym=str(data.get("stac_yymm", "")).strip(),
+            total_assets=to_float(data.get("total_aset")),
+            current_assets=to_float(data.get("flow_aset")),
+            non_current_assets=to_float(data.get("fix_aset")),
+            total_liabilities=to_float(data.get("total_lblt")),
+            current_liabilities=to_float(data.get("flow_lblt")),
+            non_current_liabilities=to_float(data.get("fix_lblt")),
+            total_equity=to_float(data.get("total_cptl")),
+            capital_stock=to_float(data.get("cptl_stck")),
+            retained_earnings=to_float(data.get("retained_earnings")),
+            created_at=now_kst(),
+            raw=data
+        )
+
+    @property
+    def current_ratio(self) -> float:
+        """유동비율 계산 (유동자산 / 유동부채 * 100)"""
+        if self.current_liabilities > 0:
+            return (self.current_assets / self.current_liabilities) * 100
+        return 0.0
+
+    @property
+    def debt_ratio(self) -> float:
+        """부채비율 계산 (부채총계 / 자본총계 * 100)"""
+        if self.total_equity > 0:
+            return (self.total_liabilities / self.total_equity) * 100
+        return 0.0
+
+
+def get_balance_sheet(stock_code: str,
+                      div_cls: str = "0",
+                      tr_cont: str = "") -> Optional[List[BalanceSheetEntry]]:
+    """
+    대차대조표 조회 (다중 연도/분기 반환)
+
+    Args:
+        stock_code: 종목코드 (6자리)
+        div_cls: 분기/연간 구분
+        tr_cont: 연속조회 키
+    """
+    url = '/uapi/domestic-stock/v1/finance/balance-sheet'
+    tr_id = "FHKST66430100"  # 대차대조표 TR
+
+    params = {
+        "FID_DIV_CLS_CODE": div_cls,
+        "FID_COND_MRKT_DIV_CODE": "J",
+        "FID_INPUT_ISCD": stock_code
+    }
+
+    res = kis._url_fetch(url, tr_id, tr_cont, params)
+
+    if res and res.isOK():
+        body = res.getBody()
+        output = getattr(body, 'output', None)
+        if not output:
+            logger.warning(f"📭 대차대조표 데이터 없음: {stock_code}")
+            return None
+
+        if isinstance(output, list):
+            entries = [BalanceSheetEntry.from_api_output(item) for item in output]
+        else:
+            entries = [BalanceSheetEntry.from_api_output(output)]
+
+        logger.debug(f"📊 대차대조표 조회 성공: {stock_code} ({len(entries)}건)")
+        return entries
+
+    if res:
+        res.printError(url)
+    else:
+        logger.error(f"❌ 대차대조표 조회 실패 (응답 없음): {stock_code}")
+    return None
+
+
+def balance_sheet_to_dataframe(entries: List[BalanceSheetEntry]) -> pd.DataFrame:
+    """대차대조표 결과를 DataFrame으로 변환"""
+    if not entries:
+        return pd.DataFrame()
+
+    data = [
+        {
+            "statement_ym": e.statement_ym,
+            "total_assets": e.total_assets,
+            "current_assets": e.current_assets,
+            "non_current_assets": e.non_current_assets,
+            "total_liabilities": e.total_liabilities,
+            "current_liabilities": e.current_liabilities,
+            "non_current_liabilities": e.non_current_liabilities,
+            "total_equity": e.total_equity,
+            "capital_stock": e.capital_stock,
+            "retained_earnings": e.retained_earnings,
+            "current_ratio": e.current_ratio,
+            "debt_ratio": e.debt_ratio,
+            "created_at": e.created_at
+        }
+        for e in entries
+    ]
+    return pd.DataFrame(data)
 
 
 def income_statement_to_dataframe(entries: List[IncomeStatementEntry]) -> pd.DataFrame:

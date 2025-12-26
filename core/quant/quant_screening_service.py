@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 from utils.logger import setup_logger
 from utils.korean_time import now_kst
-from api.kis_financial_api import get_financial_ratio, get_income_statement
+from api.kis_financial_api import get_financial_ratio, get_income_statement, get_balance_sheet
 from api import kis_market_api
 
 
@@ -214,10 +214,13 @@ class QuantScreeningService:
                 income_entries = get_income_statement(stock_code, div_cls="0")
                 income = income_entries[0] if income_entries else None
 
+                balance_entries = get_balance_sheet(stock_code, div_cls="0")
+                balance = balance_entries[0] if balance_entries else None
+
                 # 모멘텀 계산용: 12개월(250거래일) 필요 → 캘린더 400일
                 price_data = self.api_manager.get_ohlcv_data(stock_code, "D", 400)
 
-                scores = self._calculate_scores(ratio, income, price_data, stock_code)
+                scores = self._calculate_scores(ratio, income, balance, price_data, stock_code)
                 if not scores:
                     filter_stats['score_failed'] += 1
                     continue
@@ -283,10 +286,10 @@ class QuantScreeningService:
         self.logger.info(f"✅ 퀀트 스크리닝 완료: {calc_date} - {len(rows)}개 종목 평가, 상위 {len(portfolio_rows)}개 저장")
         return True
 
-    def _calculate_scores(self, ratio, income, price_data, stock_code: str) -> Optional[Dict[str, Any]]:
+    def _calculate_scores(self, ratio, income, balance, price_data, stock_code: str) -> Optional[Dict[str, Any]]:
         """팩터 점수 계산 (계획서 3~6단계 기준)"""
         value_score = self._calc_value_score(ratio, stock_code)
-        quality_score = self._calc_quality_score(ratio, income)
+        quality_score = self._calc_quality_score(ratio, income, balance)
         growth_score = self._calc_growth_score(ratio, income)
         momentum_score = self._calc_momentum_score(price_data)
 
@@ -439,38 +442,61 @@ class QuantScreeningService:
             self.logger.warning(f"⚠️ Momentum 팩터 계산 오류: {e}")
             return 0.0
 
-    def _calc_quality_score(self, ratio, income) -> float:
+    def _calc_quality_score(self, ratio, income, balance) -> float:
         """
         Quality 팩터 계산 (5단계 기준)
         Quality 점수 = ROE(30%) + ROA(20%) + 부채비율(20%) + 유동비율(15%) + 영업이익률(15%)
         """
         try:
-            # ROE, ROA
+            # ROE
             roe = ratio.roe_value if ratio.roe_value > 0 else 0
-            roa = ratio.roe_value * 0.6  # ROA 근사값 (ROE 대비, 추후 실제 ROA 데이터 필요)
-            
-            # 부채비율, 유동비율
+
+            # ROA 계산 (순이익 / 자산총계)
+            roa = 0
+            if balance and balance.total_assets and balance.total_assets > 0:
+                if income and income.net_income:
+                    roa = (income.net_income / balance.total_assets) * 100
+                    self.logger.debug(f"📊 ROA 계산: {roa:.2f}% (순이익: {income.net_income:,.0f}, 자산: {balance.total_assets:,.0f})")
+                else:
+                    # 대안: ROE * 0.6 근사값
+                    roa = roe * 0.6
+                    self.logger.debug(f"⚠️ ROA 근사값 사용: {roa:.2f}% (ROE * 0.6)")
+            else:
+                # 대차대조표 없으면 근사값 사용
+                roa = roe * 0.6
+
+            # 부채비율
             debt_ratio = ratio.liability_ratio
-            current_ratio = 100 - debt_ratio  # 유동비율 근사값 (추후 실제 유동비율 데이터 필요)
-            
+
+            # 유동비율 (유동자산 / 유동부채 * 100)
+            current_ratio = 0
+            if balance and balance.current_liabilities and balance.current_liabilities > 0:
+                current_ratio = (balance.current_assets / balance.current_liabilities) * 100
+                self.logger.debug(f"📊 유동비율 계산: {current_ratio:.1f}% (유동자산: {balance.current_assets:,.0f}, 유동부채: {balance.current_liabilities:,.0f})")
+            else:
+                # 대차대조표 없으면 근사값 사용
+                current_ratio = 100 - debt_ratio
+                self.logger.debug(f"⚠️ 유동비율 근사값 사용: {current_ratio:.1f}% (100 - 부채비율)")
+
             # 영업이익률 (영업이익/매출)
             operating_margin = 0
             if income and income.revenue > 0:
                 operating_margin = (income.operating_income / income.revenue) * 100
-            
+
             # 점수화
             roe_score = clamp(roe, 0, 100)  # ROE는 그대로 사용
-            roa_score = clamp(roa, 0, 100)  # ROA 근사값
-            
+            roa_score = clamp(roa, 0, 100)  # ROA
+
             # 부채비율: 낮을수록 좋음 (100 - 부채비율)
             debt_score = clamp(100 - debt_ratio, 0, 100)
-            
-            # 유동비율: 높을수록 좋음
-            current_score = clamp(current_ratio, 0, 100)
-            
+
+            # 유동비율: 100%를 기준으로 점수화 (100% 이상이면 좋음)
+            # 유동비율 200% = 100점, 100% = 50점, 0% = 0점
+            current_score = clamp(current_ratio / 2, 0, 100)
+
             # 영업이익률: 높을수록 좋음
             margin_score = clamp(operating_margin * 10, 0, 100)  # 영업이익률을 10배해서 점수화
-            
+
             # Quality 점수 = ROE(30%) + ROA(20%) + 부채비율(20%) + 유동비율(15%) + 영업이익률(15%)
             quality_score = (
                 roe_score * 0.30 +
@@ -479,9 +505,9 @@ class QuantScreeningService:
                 current_score * 0.15 +
                 margin_score * 0.15
             )
-            
+
             return clamp(quality_score)
-            
+
         except Exception as e:
             self.logger.warning(f"⚠️ Quality 팩터 계산 오류: {e}")
             return 0.0

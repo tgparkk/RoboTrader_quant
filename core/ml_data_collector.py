@@ -13,7 +13,7 @@ from pathlib import Path
 from utils.logger import setup_logger
 from utils.korean_time import now_kst, get_previous_trading_day
 from api.kis_market_api import get_inquire_daily_itemchartprice, get_stock_market_cap
-from api.kis_financial_api import get_financial_ratio, get_income_statement
+from api.kis_financial_api import get_financial_ratio, get_income_statement, get_balance_sheet
 
 
 logger = setup_logger(__name__)
@@ -351,8 +351,9 @@ class MLDataCollector:
             # 재무비율 데이터 조회
             financial_ratios = get_financial_ratio(stock_code, div_cls="0")  # 연간/분기 데이터
             income_statements = get_income_statement(stock_code, div_cls="0")  # 연간/분기 데이터
-            
-            if not financial_ratios and not income_statements:
+            balance_sheets = get_balance_sheet(stock_code, div_cls="0")  # 대차대조표 데이터
+
+            if not financial_ratios and not income_statements and not balance_sheets:
                 self.logger.warning(f"⚠️ [{stock_code}] 재무 데이터 없음. 저장 건너뜀.")
                 return False
             
@@ -382,6 +383,11 @@ class MLDataCollector:
                                 revenue REAL,
                                 operating_profit REAL,
                                 net_income REAL,
+                                total_assets REAL,
+                                current_assets REAL,
+                                current_liabilities REAL,
+                                total_liabilities REAL,
+                                total_equity REAL,
                                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                                 UNIQUE(stock_code, report_date)
@@ -567,7 +573,71 @@ class MLDataCollector:
                         except Exception as e:
                             self.logger.warning(f"⚠️ 손익계산서 저장 오류 (건너뜀): {e}")
                             continue
-                
+
+                # 대차대조표 데이터 저장
+                if balance_sheets:
+                    for balance in balance_sheets:
+                        try:
+                            report_date = balance.statement_ym
+                            if len(report_date) == 6:
+                                report_date = f"{report_date[:4]}-{report_date[4:6]}-01"
+                            else:
+                                report_date = f"{report_date[:4]}-{report_date[4:6]}-{report_date[6:8]}"
+
+                            # 대차대조표 저장 (INSERT OR IGNORE + UPDATE 방식)
+                            # 1) 레코드 생성 (없을 경우만)
+                            cursor.execute('''
+                                INSERT OR IGNORE INTO financial_statements
+                                (stock_code, report_date, created_at)
+                                VALUES (?, ?, CURRENT_TIMESTAMP)
+                            ''', (stock_code, report_date))
+
+                            # 2) 대차대조표 업데이트 (NULL이 아닌 값만)
+                            update_parts = []
+                            update_values = []
+
+                            if balance.total_assets and balance.total_assets > 0:
+                                update_parts.append("total_assets = ?")
+                                update_values.append(float(balance.total_assets))
+
+                            if balance.current_assets and balance.current_assets > 0:
+                                update_parts.append("current_assets = ?")
+                                update_values.append(float(balance.current_assets))
+
+                            if balance.current_liabilities and balance.current_liabilities > 0:
+                                update_parts.append("current_liabilities = ?")
+                                update_values.append(float(balance.current_liabilities))
+
+                            if balance.total_liabilities and balance.total_liabilities > 0:
+                                update_parts.append("total_liabilities = ?")
+                                update_values.append(float(balance.total_liabilities))
+
+                            if balance.total_equity and balance.total_equity > 0:
+                                update_parts.append("total_equity = ?")
+                                update_values.append(float(balance.total_equity))
+
+                            if update_parts:
+                                update_parts.append("updated_at = CURRENT_TIMESTAMP")
+                                update_values.extend([stock_code, report_date])
+
+                                cursor.execute(f'''
+                                    UPDATE financial_statements
+                                    SET {", ".join(update_parts)}
+                                    WHERE stock_code = ? AND report_date = ?
+                                ''', update_values)
+
+                                # 저장 결과 로깅
+                                assets_str = f"{balance.total_assets:,.0f}" if balance.total_assets else "N/A"
+                                current_ratio = (balance.current_assets / balance.current_liabilities * 100) if balance.current_liabilities and balance.current_liabilities > 0 else 0
+                                current_ratio_str = f"{current_ratio:.1f}%" if current_ratio > 0 else "N/A"
+                                self.logger.debug(
+                                    f"📊 [{stock_code}] 대차대조표 저장: {report_date} - "
+                                    f"자산총계: {assets_str}, 유동비율: {current_ratio_str}"
+                                )
+                        except Exception as e:
+                            self.logger.warning(f"⚠️ 대차대조표 저장 오류 (건너뜀): {e}")
+                            continue
+
                 conn.commit()
                 self.logger.info(f"✅ [{stock_code}] 재무 데이터 저장 완료")
                 return True

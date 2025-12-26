@@ -312,6 +312,11 @@ class DatabaseManager:
                         revenue REAL,
                         operating_profit REAL,
                         net_income REAL,
+                        total_assets REAL,
+                        current_assets REAL,
+                        current_liabilities REAL,
+                        total_liabilities REAL,
+                        total_equity REAL,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(stock_code, report_date)
