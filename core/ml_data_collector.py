@@ -427,35 +427,62 @@ class MLDataCollector:
                                 except Exception as calc_err:
                                     self.logger.debug(f"⚠️ [{stock_code}] PBR 계산 실패: {calc_err}")
 
-                            # 재무비율 저장 (roe, debt_ratio, eps, bps는 FinancialRatioEntry에 있음)
+                            # 재무비율 저장 (INSERT OR IGNORE + UPDATE 방식으로 NULL 덮어쓰기 방지)
+                            # 1) 레코드 생성 (없을 경우만)
                             cursor.execute('''
-                                INSERT OR REPLACE INTO financial_statements
-                                (stock_code, report_date, fiscal_quarter,
-                                 per, pbr, psr, dividend_yield,
-                                 roe, debt_ratio)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (
-                                stock_code,
-                                report_date,
-                                None,  # fiscal_quarter는 별도 파싱 필요
-                                float(per) if per and per not in (None, '') else None,
-                                float(pbr) if pbr and pbr not in (None, '') else None,
-                                float(psr) if psr and psr not in (None, '') else None,
-                                float(dividend_yield) if dividend_yield and dividend_yield not in (None, '') else None,
-                                float(ratio.roe_value) if ratio.roe_value else None,
-                                float(ratio.liability_ratio) if ratio.liability_ratio else None,
-                            ))
+                                INSERT OR IGNORE INTO financial_statements
+                                (stock_code, report_date, created_at)
+                                VALUES (?, ?, CURRENT_TIMESTAMP)
+                            ''', (stock_code, report_date))
 
-                            # 저장 결과 로깅
-                            roe_str = f"{ratio.roe_value:.2f}" if ratio.roe_value else "0.00"
-                            debt_str = f"{ratio.liability_ratio:.2f}" if ratio.liability_ratio else "0.00"
-                            eps_str = f"{ratio.eps:.0f}" if ratio.eps else "0"
-                            bps_str = f"{ratio.bps:.0f}" if ratio.bps else "0"
-                            self.logger.debug(
-                                f"📊 [{stock_code}] 재무비율 저장: {report_date} - "
-                                f"ROE: {roe_str}%, 부채비율: {debt_str}%, "
-                                f"EPS: {eps_str}, BPS: {bps_str}"
-                            )
+                            # 2) 재무비율 업데이트 (NULL이 아닌 값만)
+                            update_parts = []
+                            update_values = []
+
+                            if per is not None and per != '':
+                                update_parts.append("per = ?")
+                                update_values.append(float(per))
+
+                            if pbr is not None and pbr != '':
+                                update_parts.append("pbr = ?")
+                                update_values.append(float(pbr))
+
+                            if psr is not None and psr != '':
+                                update_parts.append("psr = ?")
+                                update_values.append(float(psr))
+
+                            if dividend_yield:
+                                update_parts.append("dividend_yield = ?")
+                                update_values.append(float(dividend_yield))
+
+                            if ratio.roe_value:
+                                update_parts.append("roe = ?")
+                                update_values.append(float(ratio.roe_value))
+
+                            if ratio.liability_ratio:
+                                update_parts.append("debt_ratio = ?")
+                                update_values.append(float(ratio.liability_ratio))
+
+                            if update_parts:
+                                update_parts.append("updated_at = CURRENT_TIMESTAMP")
+                                update_values.extend([stock_code, report_date])
+
+                                cursor.execute(f'''
+                                    UPDATE financial_statements
+                                    SET {", ".join(update_parts)}
+                                    WHERE stock_code = ? AND report_date = ?
+                                ''', update_values)
+
+                                # 저장 결과 로깅
+                                roe_str = f"{ratio.roe_value:.2f}" if ratio.roe_value else "N/A"
+                                debt_str = f"{ratio.liability_ratio:.2f}" if ratio.liability_ratio else "N/A"
+                                per_str = f"{per:.2f}" if per else "N/A"
+                                pbr_str = f"{pbr:.2f}" if pbr else "N/A"
+                                self.logger.debug(
+                                    f"📊 [{stock_code}] 재무비율 저장: {report_date} - "
+                                    f"ROE: {roe_str}%, 부채비율: {debt_str}%, "
+                                    f"PER: {per_str}, PBR: {pbr_str}"
+                                )
                         except Exception as e:
                             self.logger.warning(f"⚠️ 재무비율 저장 오류 (건너뜀): {e}")
                             continue
@@ -479,21 +506,47 @@ class MLDataCollector:
                                 if income.net_income:
                                     net_margin = (income.net_income / income.revenue) * 100
 
+                            # 손익계산서 저장 (INSERT OR IGNORE + UPDATE 방식으로 NULL 덮어쓰기 방지)
+                            # 1) 레코드 생성 (없을 경우만)
                             cursor.execute('''
-                                INSERT OR REPLACE INTO financial_statements
-                                (stock_code, report_date, fiscal_quarter,
-                                 revenue, operating_profit, net_income, operating_margin, net_margin)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (
-                                stock_code,
-                                report_date,
-                                None,
-                                income.revenue if income.revenue else None,
-                                income.operating_income if income.operating_income else None,
-                                income.net_income if income.net_income else None,
-                                operating_margin,
-                                net_margin,
-                            ))
+                                INSERT OR IGNORE INTO financial_statements
+                                (stock_code, report_date, created_at)
+                                VALUES (?, ?, CURRENT_TIMESTAMP)
+                            ''', (stock_code, report_date))
+
+                            # 2) 손익계산서 업데이트 (NULL이 아닌 값만)
+                            update_parts = []
+                            update_values = []
+
+                            if income.revenue:
+                                update_parts.append("revenue = ?")
+                                update_values.append(float(income.revenue))
+
+                            if income.operating_income:
+                                update_parts.append("operating_profit = ?")
+                                update_values.append(float(income.operating_income))
+
+                            if income.net_income:
+                                update_parts.append("net_income = ?")
+                                update_values.append(float(income.net_income))
+
+                            if operating_margin is not None:
+                                update_parts.append("operating_margin = ?")
+                                update_values.append(float(operating_margin))
+
+                            if net_margin is not None:
+                                update_parts.append("net_margin = ?")
+                                update_values.append(float(net_margin))
+
+                            if update_parts:
+                                update_parts.append("updated_at = CURRENT_TIMESTAMP")
+                                update_values.extend([stock_code, report_date])
+
+                                cursor.execute(f'''
+                                    UPDATE financial_statements
+                                    SET {", ".join(update_parts)}
+                                    WHERE stock_code = ? AND report_date = ?
+                                ''', update_values)
                         except Exception as e:
                             self.logger.warning(f"⚠️ 손익계산서 저장 오류 (건너뜀): {e}")
                             continue
