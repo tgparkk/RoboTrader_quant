@@ -317,8 +317,10 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
     global _api_stats
     
     if not _TRENV:
-        logger.error("인증되지 않음. auth() 호출 필요")
-        return None
+        logger.warning("토큰이 없습니다. 자동 인증 시도...")
+        if not auth():
+            logger.error("자동 인증 실패. auth() 호출 필요")
+            return None
 
     url = f"{_TRENV.my_url}{api_url}"
 

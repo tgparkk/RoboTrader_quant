@@ -267,14 +267,14 @@ class BalanceSheetEntry:
         return BalanceSheetEntry(
             statement_ym=str(data.get("stac_yymm", "")).strip(),
             total_assets=to_float(data.get("total_aset")),
-            current_assets=to_float(data.get("flow_aset")),
-            non_current_assets=to_float(data.get("fix_aset")),
+            current_assets=to_float(data.get("cras")),  # 수정: flow_aset → cras
+            non_current_assets=to_float(data.get("fxas")),  # 수정: fix_aset → fxas
             total_liabilities=to_float(data.get("total_lblt")),
             current_liabilities=to_float(data.get("flow_lblt")),
             non_current_liabilities=to_float(data.get("fix_lblt")),
             total_equity=to_float(data.get("total_cptl")),
-            capital_stock=to_float(data.get("cptl_stck")),
-            retained_earnings=to_float(data.get("retained_earnings")),
+            capital_stock=to_float(data.get("cpfn")),  # 수정: cptl_stck → cpfn
+            retained_earnings=to_float(data.get("prfi_surp")),  # 수정: retained_earnings → prfi_surp
             created_at=now_kst(),
             raw=data
         )

@@ -1,13 +1,35 @@
 # 데이터 수집 및 매매 판단, DB 저장 상태 종합 보고서
 
-**확인 날짜**: 2025-12-17  
-**확인 시간**: 22:34 KST
+**최종 업데이트**: 2025-12-27 01:30 KST
+**이전 확인**: 2025-12-17 22:34 KST
 
 ---
 
-## 📊 종합 평가: ✅ 정상 작동
+## 📊 종합 평가: ✅ 정상 작동 (대차대조표 데이터 추가됨)
 
-모든 주요 기능이 정상적으로 작동하고 있습니다.
+모든 주요 기능이 정상적으로 작동하고 있으며, 대차대조표 데이터 수집이 새로 추가되었습니다.
+
+### 🆕 2025-12-27 업데이트 내역
+
+#### ✅ 대차대조표 데이터 수집 추가
+- **기능**: 보유 종목의 대차대조표 데이터 수집 및 저장
+- **수집 완료**: 49개 보유 종목 (100% 성공)
+- **저장 테이블**: `financial_statements` (기존 테이블에 컬럼 추가)
+- **새 컬럼**: `total_assets`, `current_assets`, `current_liabilities`, `total_liabilities`, `total_equity`
+- **코드 위치**:
+  - API: `api/kis_financial_api.py` - `get_balance_sheet()`
+  - 수집: `core/ml_data_collector.py` - `save_financial_data()`
+  - 수집 스크립트: `collect_balance_sheet.py`
+- **수정 사항**:
+  - KIS API 필드명 오류 수정 (flow_aset → cras, fix_aset → fxas)
+  - 상세 내용: `BALANCE_SHEET_FIX.md` 참조
+
+#### ✅ Quality Factor 계산 개선
+- **기능**: ROA와 유동비율을 실제 재무데이터로 계산
+- **개선 전**: 근사값 사용 (ROA = ROE * 0.6, 유동비율 = 100 - 부채비율)
+- **개선 후**: 정확한 계산 (ROA = 순이익 / 총자산, 유동비율 = 유동자산 / 유동부채 * 100)
+- **코드 위치**: `core/quant/quant_screening_service.py` - `_calc_quality_score()`
+- **기대 효과**: Quality Score 정확도 향상, 재무 안정성 기반 종목 선별 개선
 
 ---
 
