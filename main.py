@@ -734,9 +734,11 @@ class DayTradingBot:
                 # 15:30 ML 데이터 수집 및 15:40 퀀트 스크리닝 실행
                 if (current_time.hour > 15 or (current_time.hour == 15 and current_time.minute >= 30)):
                     # 15:30 ML 데이터 수집 (스크리닝 전 데이터 준비)
-                    if (current_time.hour == 15 and current_time.minute >= 30 and current_time.minute < 40):
-                        if (self._last_ml_data_collection_date != current_time.date() and 
+                    # ✅ 수정: 15:40 제한 제거 - 15:30 이후 언제든 1회 실행
+                    if current_time.hour == 15 and current_time.minute >= 30:
+                        if (self._last_ml_data_collection_date != current_time.date() and
                             self._ml_data_collection_task is None):
+                            self.logger.info(f"📊 15:30+ ML 데이터 수집 스케줄 트리거 ({current_time.strftime('%H:%M:%S')})")
                             self._ml_data_collection_task = asyncio.create_task(self._run_ml_data_collection())
                     
                     # 15:40 퀀트 스크리닝 실행
@@ -1045,16 +1047,21 @@ class DayTradingBot:
             financial_success = sum(1 for v in financial_results.values() if v)
             
             self.logger.info(f"✅ ML 데이터 수집 완료: 가격 {price_success}/{len(stock_codes)}개, 재무 {financial_success}/{len(stock_codes)}개")
-            
+
+            # ✅ 추가: 데이터 검증 (당일 일봉 데이터 저장 여부 확인)
+            data_verified = await self._verify_daily_data_completeness()
+
             # 데이터 수집 완료 플래그 설정
             self._last_ml_data_collection_date = now_kst().date()
             self._ml_data_collection_completed = True
-            
+
             if self.telegram:
+                verification_msg = "✅ 당일 데이터 저장 확인" if data_verified else "⚠️ 당일 데이터 미확인"
                 await self.telegram.notify_system_status(
                     f"📊 ML 데이터 수집 완료\n"
                     f"가격 데이터: {price_success}/{len(stock_codes)}개\n"
-                    f"재무 데이터: {financial_success}/{len(stock_codes)}개"
+                    f"재무 데이터: {financial_success}/{len(stock_codes)}개\n"
+                    f"{verification_msg}"
                 )
             
         except Exception as e:
@@ -1455,6 +1462,52 @@ class DayTradingBot:
         except Exception as e:
             self.logger.error(f"❌ 장중 조건검색 체크 오류: {e}")
             await self.telegram.notify_error("Condition Search", e)
+
+    async def _verify_daily_data_completeness(self) -> bool:
+        """
+        당일 일봉 데이터 완전성 검증
+
+        Returns:
+            bool: 당일 데이터가 정상적으로 저장되었는지 여부
+        """
+        try:
+            import sqlite3
+            today = now_kst().strftime('%Y-%m-%d')
+
+            conn = sqlite3.connect(self.db_manager.db_path)
+            cursor = conn.cursor()
+
+            # 당일 데이터 조회
+            cursor.execute(
+                """
+                SELECT COUNT(DISTINCT stock_code) as count,
+                       MIN(close) as min_price,
+                       MAX(close) as max_price
+                FROM daily_prices
+                WHERE date = ?
+                """,
+                (today,)
+            )
+            result = cursor.fetchone()
+            conn.close()
+
+            count = result[0] if result else 0
+
+            if count == 0:
+                self.logger.warning(f"⚠️ {today} 일봉 데이터 없음 - 장 마감 전이거나 수집 실패")
+                return False
+            else:
+                min_price = result[1]
+                max_price = result[2]
+                self.logger.info(
+                    f"✅ {today} 일봉 데이터 검증 완료: "
+                    f"{count}개 종목 (가격 범위: {min_price:,.0f}~{max_price:,.0f}원)"
+                )
+                return True
+
+        except Exception as e:
+            self.logger.error(f"❌ 데이터 검증 오류: {e}")
+            return False
 
     def _get_previous_close_price(self, stock_code: str) -> float:
         """전날 종가 조회 (주말/공휴일 포함 안전 처리)"""
