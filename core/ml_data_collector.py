@@ -126,22 +126,31 @@ class MLDataCollector:
         Args:
             stock_code: 종목코드
             start_date: 시작일 (YYYYMMDD), None이면 3년 전
-            end_date: 종료일 (YYYYMMDD), None이면 전 영업일 (백테스팅용)
+            end_date: 종료일 (YYYYMMDD), None이면 전 영업일
 
         Returns:
             bool: 성공 여부
 
         Note:
-            백테스팅을 위해 end_date는 기본적으로 "전 영업일"로 설정됩니다.
-            예: 12/26(목) 실행 시 → 12/25(수) 데이터까지 수집
-                12/26(목) 15:30 실행 시에도 → 12/25(수) 데이터까지만 수집 (당일 데이터 제외)
+            end_date는 기본적으로 "전 영업일"로 설정됩니다 (백테스팅 + 실운영 공통).
+
+            이유:
+            1. 리밸런싱(09:05)은 전날 확정 데이터로 판단
+            2. 당일 데이터는 장 시작 전에는 존재하지 않음
+            3. 당일 데이터는 다음날 아침에 "전 영업일"로 수집됨
+
+            예시:
+            - 12/26(목) 08:26 실행 → 12/25(수) 데이터까지 수집
+            - 12/26(목) 15:30 실행 → 12/25(수) 데이터까지 수집 (일관성)
+            - 12/27(금) 08:26 실행 → 12/26(목) 데이터 수집 (어제 종가)
         """
         try:
             if end_date is None:
-                # 백테스팅을 위해 전 영업일까지만 수집
+                # 전 영업일까지만 수집 (백테스팅 + 실운영 공통 로직)
+                # 리밸런싱은 전날 확정 데이터로 판단하므로 당일 데이터 불필요
                 prev_trading_day = get_previous_trading_day(now_kst())
                 end_date = prev_trading_day.strftime("%Y%m%d")
-                self.logger.info(f"📊 [{stock_code}] 백테스팅 모드: 전 영업일까지 수집 (end_date: {end_date})")
+                self.logger.info(f"📊 [{stock_code}] 전 영업일까지 수집 (end_date: {end_date})")
 
             if start_date is None:
                 # 3년 전 날짜 계산 (영업일 기준으로 여유있게 1100일 전)
