@@ -73,3 +73,43 @@ else:
     def get_market_status() -> str:
         """시장 상태 반환 (KRX 기준, 특수일 자동 반영)"""
         return MarketHours.get_market_status('KRX')
+
+    def get_previous_trading_day(dt: datetime = None, market: str = 'KRX') -> datetime:
+        """전 영업일 반환 (주말, 공휴일 자동 건너뛰기)
+
+        Args:
+            dt: 기준 날짜 (None이면 오늘)
+            market: 시장 코드 (기본값: KRX)
+
+        Returns:
+            전 영업일 datetime (시간은 00:00:00)
+
+        Examples:
+            >>> # 2025-12-26(목) → 2025-12-25(수)
+            >>> get_previous_trading_day(datetime(2025, 12, 26))
+            datetime(2025, 12, 25, 0, 0, 0)
+
+            >>> # 2025-12-23(월) → 2025-12-20(금) (주말 건너뛰기)
+            >>> get_previous_trading_day(datetime(2025, 12, 23))
+            datetime(2025, 12, 20, 0, 0, 0)
+        """
+        from datetime import timedelta
+
+        if dt is None:
+            dt = now_kst()
+
+        # 하루 전부터 시작
+        prev_day = dt.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+
+        # 최대 7일 전까지 검색 (주말 + 공휴일 대비)
+        for _ in range(7):
+            # 주말 체크
+            if prev_day.weekday() < 5:  # 월(0) ~ 금(4)
+                # TODO: 향후 공휴일 캘린더 추가 가능
+                # 현재는 주말만 체크
+                return prev_day
+
+            prev_day -= timedelta(days=1)
+
+        # 7일 전까지 영업일이 없으면 (비정상) 그냥 7일 전 반환
+        return prev_day

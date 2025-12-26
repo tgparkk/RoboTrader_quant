@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from utils.logger import setup_logger
-from utils.korean_time import now_kst
+from utils.korean_time import now_kst, get_previous_trading_day
 from api.kis_market_api import get_inquire_daily_itemchartprice, get_stock_market_cap
 from api.kis_financial_api import get_financial_ratio, get_income_statement
 
@@ -122,23 +122,31 @@ class MLDataCollector:
     def save_daily_price_data(self, stock_code: str, start_date: str = None, end_date: str = None) -> bool:
         """
         일별 가격 데이터 수집 및 daily_prices 테이블에 저장
-        
+
         Args:
             stock_code: 종목코드
             start_date: 시작일 (YYYYMMDD), None이면 3년 전
-            end_date: 종료일 (YYYYMMDD), None이면 오늘
-            
+            end_date: 종료일 (YYYYMMDD), None이면 전 영업일 (백테스팅용)
+
         Returns:
             bool: 성공 여부
+
+        Note:
+            백테스팅을 위해 end_date는 기본적으로 "전 영업일"로 설정됩니다.
+            예: 12/26(목) 실행 시 → 12/25(수) 데이터까지 수집
+                12/26(목) 15:30 실행 시에도 → 12/25(수) 데이터까지만 수집 (당일 데이터 제외)
         """
         try:
             if end_date is None:
-                end_date = now_kst().strftime("%Y%m%d")
-            
+                # 백테스팅을 위해 전 영업일까지만 수집
+                prev_trading_day = get_previous_trading_day(now_kst())
+                end_date = prev_trading_day.strftime("%Y%m%d")
+                self.logger.info(f"📊 [{stock_code}] 백테스팅 모드: 전 영업일까지 수집 (end_date: {end_date})")
+
             if start_date is None:
                 # 3년 전 날짜 계산 (영업일 기준으로 여유있게 1100일 전)
                 start_date = (now_kst() - timedelta(days=1100)).strftime("%Y%m%d")
-            
+
             self.logger.info(f"📊 [{stock_code}] 일별 가격 데이터 수집 시작: {start_date} ~ {end_date}")
             
             # 일봉 데이터 조회
