@@ -184,9 +184,13 @@ class MLDataCollector:
                 first_row = daily_data.iloc[0]
                 self.logger.debug(f"📊 [{stock_code}] 첫 번째 행 샘플: {dict(first_row)}")
             
-            # 시가총액 조회 (최신 데이터만)
+            # 시가총액 조회 (모든 날짜에 동일하게 저장)
+            # 주의: 현재 시점의 시가총액을 과거 데이터에도 적용 (향후 개선 필요)
             market_cap_info = get_stock_market_cap(stock_code)
             market_cap = market_cap_info.get('market_cap', 0) if market_cap_info else 0
+
+            if market_cap > 0:
+                self.logger.debug(f"📊 [{stock_code}] 시가총액: {market_cap:,.0f}원")
             
             # 데이터 변환 및 저장
             with sqlite3.connect(self.db_path) as conn:
@@ -290,7 +294,7 @@ class MLDataCollector:
                         # 데이터 저장
                         cursor.execute('''
                             INSERT OR REPLACE INTO daily_prices
-                            (stock_code, date, open, high, low, close, volume, trading_value, 
+                            (stock_code, date, open, high, low, close, volume, trading_value,
                              market_cap, returns_1d, returns_5d, returns_20d, volatility_20d)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (
@@ -302,7 +306,7 @@ class MLDataCollector:
                             close_price,
                             volume,
                             trading_value,
-                            market_cap if date == end_date else None,  # 최신 데이터만 시가총액 저장
+                            market_cap,  # 수정: 모든 날짜에 시가총액 저장 (NULL 방지)
                             returns_1d,
                             returns_5d,
                             returns_20d,

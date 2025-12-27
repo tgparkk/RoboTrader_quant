@@ -297,6 +297,18 @@ class QuantScreeningService:
            math.isnan(quality_score) or math.isnan(growth_score):
             return None
 
+        # Factor 점수 범위 검증 (0-100)
+        def validate_score(score: float, name: str) -> float:
+            if score < 0 or score > 100:
+                self.logger.warning(f"⚠️ [{stock_code}] {name} 점수 범위 오류: {score:.2f}, 조정됨")
+                return max(0, min(100, score))
+            return score
+
+        value_score = validate_score(value_score, "Value")
+        quality_score = validate_score(quality_score, "Quality")
+        growth_score = validate_score(growth_score, "Growth")
+        momentum_score = validate_score(momentum_score, "Momentum")
+
         # 최종 점수 = Value(30%) + Momentum(30%) + Quality(20%) + Growth(20%)
         total_score = (
             value_score * 0.30 +
@@ -304,6 +316,9 @@ class QuantScreeningService:
             quality_score * 0.20 +
             growth_score * 0.20
         )
+
+        # 최종 점수도 검증
+        total_score = validate_score(total_score, "Total")
 
         details = {
             'value': value_score,
@@ -340,12 +355,17 @@ class QuantScreeningService:
             if market_cap_info is None:
                 return 0.0
             market_cap = market_cap_info.get('market_cap', 0)
-            
+
+            # 시가총액 NULL 체크
+            if market_cap is None or market_cap <= 0:
+                self.logger.warning(f"⚠️ [{stock_code}] 시가총액 NULL 또는 0 - Value 점수 계산 불가")
+                return 0.0
+
             # EPS, BPS, SPS 확인
             eps = ratio.eps if ratio.eps > 0 else 0.01  # 0 방지
             bps = ratio.bps if ratio.bps > 0 else 0.01
             sps = ratio.sps if ratio.sps > 0 else 0.01
-            
+
             # PER, PBR, PSR 계산
             per = current_price / eps if eps > 0 else 9999
             pbr = current_price / bps if bps > 0 else 9999

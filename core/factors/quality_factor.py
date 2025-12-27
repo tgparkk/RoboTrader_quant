@@ -250,9 +250,17 @@ class QualityFactor:
                 
                 row = cursor.fetchone()
                 if row:
+                    close = row[0]
+                    market_cap = row[1]
+
+                    # NULL 체크 및 기본값 설정
+                    if market_cap is None or market_cap <= 0:
+                        self.logger.warning(f"⚠️ [{stock_code}] 시가총액 NULL 또는 0 - 계산 불가")
+                        return None
+
                     return {
-                        'close': row[0],
-                        'market_cap': row[1],
+                        'close': close,
+                        'market_cap': market_cap,
                     }
                 return None
                 

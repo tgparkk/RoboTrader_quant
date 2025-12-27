@@ -32,26 +32,39 @@ class TargetProfitLossCalculator:
             self.score_weight = score_weight / total_weight
             self.momentum_weight = momentum_weight / total_weight
     
-    def calculate(self, rank: int, total_score: float, 
+    def calculate(self, rank: int, total_score: float,
                  momentum_score: float) -> Tuple[float, float]:
         """
         종목별 목표 익절/손절률 계산 (복합 기준)
-        
+
         Args:
             rank: 순위 (1-50)
             total_score: 종합 점수 (0-100)
             momentum_score: Momentum 팩터 점수 (0-100)
-        
+
         Returns:
             (target_profit_rate, stop_loss_rate)
         """
         try:
+            # 입력값 검증
+            if not isinstance(rank, (int, float)) or rank < 1:
+                logger.warning(f"⚠️ 잘못된 rank 값: {rank}, 기본값 50 사용")
+                rank = 50
+
+            if not isinstance(total_score, (int, float)) or total_score < 0 or total_score > 100:
+                logger.warning(f"⚠️ 잘못된 total_score 값: {total_score}, 범위 조정")
+                total_score = max(0, min(100, total_score))
+
+            if not isinstance(momentum_score, (int, float)) or momentum_score < 0 or momentum_score > 100:
+                logger.warning(f"⚠️ 잘못된 momentum_score 값: {momentum_score}, 범위 조정")
+                momentum_score = max(0, min(100, momentum_score))
+
             # 1. 순위 점수 (1위=100점, 50위=0점)
             rank_score = (51 - rank) / 50 * 100 if rank <= 50 else 0
-            
+
             # 2. 점수 정규화 (이미 0-100 범위)
             score_normalized = max(0, min(100, total_score))
-            
+
             # 3. Momentum 점수 정규화 (이미 0-100 범위)
             momentum_normalized = max(0, min(100, momentum_score))
             
