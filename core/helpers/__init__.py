@@ -7,6 +7,7 @@ from .order_wait_helper import OrderWaitHelper
 from .keep_list_updater import KeepListUpdater
 from .rebalancing_executor import RebalancingExecutor
 from .screening_task_runner import ScreeningTaskRunner
+from .state_restoration_helper import StateRestorationHelper
 
 __all__ = [
     'RebalancingNotificationHelper',
@@ -14,4 +15,5 @@ __all__ = [
     'KeepListUpdater',
     'RebalancingExecutor',
     'ScreeningTaskRunner',
+    'StateRestorationHelper',
 ]
