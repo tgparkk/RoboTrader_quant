@@ -27,6 +27,7 @@ from api.kis_api_manager import KISAPIManager
 from config.settings import load_trading_config
 from utils.logger import setup_logger
 from utils.korean_time import now_kst, get_market_status, is_market_open, KST
+from utils.price_utils import round_to_tick, check_duplicate_process, load_config
 from config.market_hours import MarketHours
 from core.quant.quant_screening_service import QuantScreeningService
 from core.ml_screening_service import MLScreeningService
@@ -49,12 +50,12 @@ class DayTradingBot:
         # 프로젝트 고유 PID 파일명으로 충돌 방지
         self.pid_file = Path("robotrader_quant.pid")
         self._last_eod_liquidation_date = None  # 장마감 일괄청산 실행 일자
-        
+
         # 프로세스 중복 실행 방지
-        self._check_duplicate_process()
-        
+        check_duplicate_process(str(self.pid_file))
+
         # 설정 초기화
-        self.config = self._load_config()
+        self.config = load_config()
         
         # 리밸런싱 모드 상태 로깅
         if getattr(self.config, 'rebalancing_mode', False):
@@ -118,67 +119,6 @@ class DayTradingBot:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
-    def _round_to_tick(self, price: float) -> float:
-        """KRX 정확한 호가단위에 맞게 반올림 - kis_order_api 함수 사용"""
-        try:
-            from api.kis_order_api import _round_to_krx_tick
-            
-            if price <= 0:
-                return 0.0
-            
-            original_price = price
-            rounded_price = _round_to_krx_tick(price)
-            
-            # 로깅으로 가격 조정 확인
-            if abs(rounded_price - original_price) > 0:
-                self.logger.debug(f"💰 호가단위 조정: {original_price:,.0f}원 → {rounded_price:,.0f}원")
-            
-            return float(rounded_price)
-            
-        except Exception as e:
-            self.logger.error(f"❌ 호가단위 조정 오류: {e}")
-            return float(int(price))
-
-
-    
-    def _check_duplicate_process(self):
-        """프로세스 중복 실행 방지"""
-        try:
-            if self.pid_file.exists():
-                # 기존 PID 파일 읽기
-                existing_pid = int(self.pid_file.read_text().strip())
-                
-                # Windows에서 프로세스 존재 여부 확인
-                try:
-                    import psutil
-                    if psutil.pid_exists(existing_pid):
-                        process = psutil.Process(existing_pid)
-                        if 'python' in process.name().lower() and 'main.py' in ' '.join(process.cmdline()):
-                            self.logger.error(f"이미 봇이 실행 중입니다 (PID: {existing_pid})")
-                            print(f"오류: 이미 거래 봇이 실행 중입니다 (PID: {existing_pid})")
-                            print("기존 프로세스를 먼저 종료해주세요.")
-                            sys.exit(1)
-                except ImportError:
-                    # psutil이 없는 경우 간단한 체크
-                    self.logger.warning("psutil 모듈이 없어 정확한 중복 실행 체크를 할 수 없습니다")
-                except:
-                    # 기존 PID가 존재하지 않으면 PID 파일 삭제
-                    self.pid_file.unlink(missing_ok=True)
-            
-            # 현재 프로세스 PID 저장
-            current_pid = os.getpid()
-            self.pid_file.write_text(str(current_pid))
-            self.logger.info(f"프로세스 PID 등록: {current_pid}")
-            
-        except Exception as e:
-            self.logger.warning(f"중복 실행 체크 중 오류: {e}")
-    
-    def _load_config(self) -> TradingConfig:
-        """거래 설정 로드"""
-        config = load_trading_config()
-        self.logger.info(f"거래 설정 로드 완료: 후보종목 {len(config.data_collection.candidate_stocks)}개")
-        return config
-    
     def _signal_handler(self, signum, frame):
         """시그널 핸들러 (Ctrl+C 등)"""
         self.logger.info(f"종료 신호 수신: {signum}")
@@ -812,7 +752,7 @@ class DayTradingBot:
                         price_obj = self.api_manager.get_current_price(stock_code)
                         if price_obj:
                             sell_price = float(price_obj.current_price)
-                    sell_price = self._round_to_tick(sell_price)
+                    sell_price = round_to_tick(sell_price)
                     # 상태 전환 후 시장가 매도 주문 실행
                     moved = self.trading_manager.move_to_sell_candidate(stock_code, "장마감 일괄청산")
                     if moved:
