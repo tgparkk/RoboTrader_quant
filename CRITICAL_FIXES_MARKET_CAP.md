@@ -306,5 +306,5 @@ WHERE calc_date = (SELECT MAX(calc_date) FROM quant_factor_scores);
 ---
 
 **수정 완료**: 2025-12-27 01:40 KST
-**테스트 필요**: 다음 아침 08:26 자동 데이터 수집 시 검증
+**테스트 필요**: 다음 아침 08:50 자동 데이터 수집 시 검증
 **우선순위**: 🔴 CRITICAL (즉시 배포 권장)
