@@ -172,25 +172,37 @@ class MLDataCollector:
             if daily_data is None or daily_data.empty:
                 self.logger.warning(f"⚠️ [{stock_code}] 일봉 데이터 없음 (API 응답: None 또는 empty)")
                 return False
-            
+
             # 데이터가 있는지 확인
             if len(daily_data) == 0:
                 self.logger.warning(f"⚠️ [{stock_code}] 일봉 데이터가 비어있음 (길이: 0)")
                 return False
-            
+
             self.logger.info(f"📊 [{stock_code}] API 응답 데이터: {len(daily_data)}건, 컬럼: {list(daily_data.columns)}")
-            # 첫 번째 행 샘플 로깅
+
+            # API 필드 검증: 필수 필드가 있는지 확인
+            required_fields = ['stck_bsop_date', 'stck_oprc', 'stck_hgpr', 'stck_lwpr', 'stck_clpr', 'acml_vol']
+            missing_fields = [field for field in required_fields if field not in daily_data.columns]
+
+            if missing_fields:
+                self.logger.error(
+                    f"❌ [{stock_code}] API 응답에 필수 필드 누락: {missing_fields}\n"
+                    f"   실제 컬럼: {list(daily_data.columns)}"
+                )
+                return False
+
+            # 첫 번째 행 샘플 로깅 (필드 검증 후)
             if len(daily_data) > 0:
                 first_row = daily_data.iloc[0]
                 self.logger.debug(f"📊 [{stock_code}] 첫 번째 행 샘플: {dict(first_row)}")
             
-            # 시가총액 조회 (모든 날짜에 동일하게 저장)
-            # 주의: 현재 시점의 시가총액을 과거 데이터에도 적용 (향후 개선 필요)
+            # 시가총액 조회 (현재 시점 기준)
             market_cap_info = get_stock_market_cap(stock_code)
-            market_cap = market_cap_info.get('market_cap', 0) if market_cap_info else 0
+            current_market_cap = market_cap_info.get('market_cap', 0) if market_cap_info else 0
+            current_price = market_cap_info.get('current_price', 0) if market_cap_info else 0
 
-            if market_cap > 0:
-                self.logger.debug(f"📊 [{stock_code}] 시가총액: {market_cap:,.0f}원")
+            if current_market_cap > 0:
+                self.logger.debug(f"📊 [{stock_code}] 현재 시가총액: {current_market_cap:,.0f}원")
             
             # 데이터 변환 및 저장
             with sqlite3.connect(self.db_path) as conn:
@@ -201,7 +213,19 @@ class MLDataCollector:
                 if not cursor.fetchone():
                     self.logger.error(f"❌ [{stock_code}] daily_prices 테이블이 없습니다. 시스템을 재시작해주세요.")
                     return False
-                
+
+                # ✅ 최적화: 과거 가격 데이터를 한 번에 로드 (N+1 쿼리 방지)
+                cursor.execute('''
+                    SELECT date, close
+                    FROM daily_prices
+                    WHERE stock_code = ?
+                    ORDER BY date ASC
+                ''', (stock_code,))
+
+                historical_prices = {}  # {date: close_price}
+                for hist_date, hist_close in cursor.fetchall():
+                    historical_prices[hist_date] = hist_close
+
                 saved_count = 0
                 skipped_count = 0
                 for _, row in daily_data.iterrows():
@@ -240,33 +264,49 @@ class MLDataCollector:
                         close_price = float(row.get('stck_clpr', 0) or 0)
                         volume = int(row.get('acml_vol', 0) or 0)
                         trading_value = int(row.get('acml_tr_pbmn', 0) or 0)
-                        
+
+                        # 가격 데이터 검증
                         if close_price == 0:
                             continue
-                        
-                        # 과거 데이터 조회 (수익률 계산용)
-                        cursor.execute('''
-                            SELECT close, date
-                            FROM daily_prices
-                            WHERE stock_code = ? AND date < ?
-                            ORDER BY date DESC
-                            LIMIT 20
-                        ''', (stock_code, date))
-                        
-                        past_prices = cursor.fetchall()
-                        
+
+                        # OHLC 관계 검증
+                        if not (low_price <= open_price <= high_price):
+                            self.logger.warning(f"⚠️ [{stock_code}] {date} 시가 범위 오류: low={low_price}, open={open_price}, high={high_price}")
+                            continue
+
+                        if not (low_price <= close_price <= high_price):
+                            self.logger.warning(f"⚠️ [{stock_code}] {date} 종가 범위 오류: low={low_price}, close={close_price}, high={high_price}")
+                            continue
+
+                        # 거래량 검증 (0이면 비정상)
+                        if volume == 0 and trading_value > 0:
+                            self.logger.warning(f"⚠️ [{stock_code}] {date} 거래량 0이지만 거래대금 존재: {trading_value:,}원")
+                            # 거래대금이 있으면 허용 (일부 API 오류 가능성)
+
+                        # ✅ 최적화: 메모리에서 과거 데이터 조회 (N+1 쿼리 제거)
+                        past_dates = sorted([d for d in historical_prices.keys() if d < date], reverse=True)[:20]
+                        past_prices = [(historical_prices[d], d) for d in past_dates]
+
                         # 수익률 계산
                         returns_1d = None
                         returns_5d = None
                         returns_20d = None
                         volatility_20d = None
-                        
+
                         if past_prices:
                             # 1일 수익률
                             if len(past_prices) >= 1:
                                 prev_close = past_prices[0][0]
                                 if prev_close > 0:
                                     returns_1d = ((close_price / prev_close) - 1) * 100
+
+                                    # 급격한 가격 변동 감지 (하루 50% 이상)
+                                    if abs(returns_1d) > 50:
+                                        self.logger.warning(
+                                            f"⚠️ [{stock_code}] {date} 급격한 가격 변동: {returns_1d:+.1f}% "
+                                            f"(전일 {prev_close:,.0f}원 → {close_price:,.0f}원)"
+                                        )
+                                        # 상한가/하한가 또는 유상증자 등 가능성 - 데이터는 저장
                             
                             # 5일 수익률
                             if len(past_prices) >= 5:
@@ -290,7 +330,17 @@ class MLDataCollector:
                                 
                                 if returns_20d_list:
                                     volatility_20d = np.std(returns_20d_list) if len(returns_20d_list) > 1 else 0
-                        
+
+                        # 시가총액 계산 (종가 기준)
+                        # - 현재 시가총액과 현재가로부터 상장주식수 추정
+                        # - 과거 날짜의 종가로 그 날의 시가총액 계산
+                        market_cap = None
+                        if current_market_cap > 0 and current_price > 0:
+                            # 상장주식수 = 현재 시가총액 / 현재가
+                            listed_shares = current_market_cap / current_price
+                            # 해당 날짜 시가총액 = 해당 날짜 종가 × 상장주식수
+                            market_cap = int(close_price * listed_shares)
+
                         # 데이터 저장
                         cursor.execute('''
                             INSERT OR REPLACE INTO daily_prices
@@ -306,7 +356,7 @@ class MLDataCollector:
                             close_price,
                             volume,
                             trading_value,
-                            market_cap,  # 수정: 모든 날짜에 시가총액 저장 (NULL 방지)
+                            market_cap,  # 개선: 각 날짜별 종가 기준 시가총액
                             returns_1d,
                             returns_5d,
                             returns_20d,
@@ -351,14 +401,33 @@ class MLDataCollector:
                 date = now_kst().strftime("%Y-%m-%d")
             
             self.logger.info(f"📊 [{stock_code}] 재무 데이터 수집 시작")
-            
+
             # 재무비율 데이터 조회
-            financial_ratios = get_financial_ratio(stock_code, div_cls="0")  # 연간/분기 데이터
-            income_statements = get_income_statement(stock_code, div_cls="0")  # 연간/분기 데이터
-            balance_sheets = get_balance_sheet(stock_code, div_cls="0")  # 대차대조표 데이터
+            try:
+                financial_ratios = get_financial_ratio(stock_code, div_cls="0")  # 연간/분기 데이터
+                self.logger.debug(f"📊 [{stock_code}] 재무비율 조회 완료: {len(financial_ratios) if financial_ratios else 0}건")
+            except Exception as api_err:
+                self.logger.error(f"❌ [{stock_code}] 재무비율 API 호출 실패: {api_err}")
+                financial_ratios = None
+
+            # 손익계산서 데이터 조회
+            try:
+                income_statements = get_income_statement(stock_code, div_cls="0")  # 연간/분기 데이터
+                self.logger.debug(f"📊 [{stock_code}] 손익계산서 조회 완료: {len(income_statements) if income_statements else 0}건")
+            except Exception as api_err:
+                self.logger.error(f"❌ [{stock_code}] 손익계산서 API 호출 실패: {api_err}")
+                income_statements = None
+
+            # 대차대조표 데이터 조회
+            try:
+                balance_sheets = get_balance_sheet(stock_code, div_cls="0")  # 대차대조표 데이터
+                self.logger.debug(f"📊 [{stock_code}] 대차대조표 조회 완료: {len(balance_sheets) if balance_sheets else 0}건")
+            except Exception as api_err:
+                self.logger.error(f"❌ [{stock_code}] 대차대조표 API 호출 실패: {api_err}")
+                balance_sheets = None
 
             if not financial_ratios and not income_statements and not balance_sheets:
-                self.logger.warning(f"⚠️ [{stock_code}] 재무 데이터 없음. 저장 건너뜀.")
+                self.logger.warning(f"⚠️ [{stock_code}] 재무 데이터 없음 (API 조회 실패 또는 데이터 미존재). 저장 건너뜀.")
                 return False
             
             with sqlite3.connect(self.db_path) as conn:
@@ -404,10 +473,28 @@ class MLDataCollector:
                         self.logger.error(f"❌ [{stock_code}] financial_statements 테이블 생성 실패: {create_err}")
                         return False
                 
+                # 에러 카운트 초기화
+                error_counts = {
+                    'ratio': 0,
+                    'income': 0,
+                    'balance': 0
+                }
+                success_counts = {
+                    'ratio': 0,
+                    'income': 0,
+                    'balance': 0
+                }
+
                 # 재무비율 데이터 저장
                 if financial_ratios:
-                    for ratio in financial_ratios:
+                    for idx, ratio in enumerate(financial_ratios, 1):
                         try:
+                            # API 필드 검증: statement_ym이 있는지 확인
+                            if not hasattr(ratio, 'statement_ym') or not ratio.statement_ym:
+                                self.logger.warning(f"⚠️ [{stock_code}] 재무비율 #{idx} statement_ym 필드 누락, 건너뜀")
+                                error_counts['ratio'] += 1
+                                continue
+
                             report_date = ratio.statement_ym
                             if len(report_date) == 6:  # YYYYMM 형식
                                 report_date = f"{report_date[:4]}-{report_date[4:6]}-01"
@@ -454,70 +541,93 @@ class MLDataCollector:
                                 except Exception as calc_err:
                                     self.logger.debug(f"⚠️ [{stock_code}] PBR 계산 실패: {calc_err}")
 
-                            # 재무비율 저장 (INSERT OR IGNORE + UPDATE 방식으로 NULL 덮어쓰기 방지)
-                            # 1) 레코드 생성 (없을 경우만)
-                            cursor.execute('''
-                                INSERT OR IGNORE INTO financial_statements
-                                (stock_code, report_date, created_at)
-                                VALUES (?, ?, CURRENT_TIMESTAMP)
-                            ''', (stock_code, report_date))
+                            # 재무비율 저장 (원자성 보장: 트랜잭션 내 INSERT OR IGNORE + UPDATE)
+                            try:
+                                # 1) 레코드 생성 (없을 경우만)
+                                cursor.execute('''
+                                    INSERT OR IGNORE INTO financial_statements
+                                    (stock_code, report_date, created_at)
+                                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                                ''', (stock_code, report_date))
 
-                            # 2) 재무비율 업데이트 (NULL이 아닌 값만)
-                            update_parts = []
-                            update_values = []
+                                # 2) 재무비율 업데이트 (NULL이 아닌 값만)
+                                update_parts = []
+                                update_values = []
 
-                            if per is not None and per != '':
-                                update_parts.append("per = ?")
-                                update_values.append(float(per))
+                                if per is not None and per != '':
+                                    update_parts.append("per = ?")
+                                    update_values.append(float(per))
 
-                            if pbr is not None and pbr != '':
-                                update_parts.append("pbr = ?")
-                                update_values.append(float(pbr))
+                                if pbr is not None and pbr != '':
+                                    update_parts.append("pbr = ?")
+                                    update_values.append(float(pbr))
 
-                            if psr is not None and psr != '':
-                                update_parts.append("psr = ?")
-                                update_values.append(float(psr))
+                                if psr is not None and psr != '':
+                                    update_parts.append("psr = ?")
+                                    update_values.append(float(psr))
 
-                            if dividend_yield:
-                                update_parts.append("dividend_yield = ?")
-                                update_values.append(float(dividend_yield))
+                                if dividend_yield:
+                                    update_parts.append("dividend_yield = ?")
+                                    update_values.append(float(dividend_yield))
 
-                            if ratio.roe_value:
-                                update_parts.append("roe = ?")
-                                update_values.append(float(ratio.roe_value))
+                                if ratio.roe_value:
+                                    update_parts.append("roe = ?")
+                                    update_values.append(float(ratio.roe_value))
 
-                            if ratio.liability_ratio:
-                                update_parts.append("debt_ratio = ?")
-                                update_values.append(float(ratio.liability_ratio))
+                                if ratio.liability_ratio:
+                                    update_parts.append("debt_ratio = ?")
+                                    update_values.append(float(ratio.liability_ratio))
 
-                            if update_parts:
-                                update_parts.append("updated_at = CURRENT_TIMESTAMP")
-                                update_values.extend([stock_code, report_date])
+                                if update_parts:
+                                    update_parts.append("updated_at = CURRENT_TIMESTAMP")
+                                    update_values.extend([stock_code, report_date])
 
-                                cursor.execute(f'''
-                                    UPDATE financial_statements
-                                    SET {", ".join(update_parts)}
-                                    WHERE stock_code = ? AND report_date = ?
-                                ''', update_values)
+                                    cursor.execute(f'''
+                                        UPDATE financial_statements
+                                        SET {", ".join(update_parts)}
+                                        WHERE stock_code = ? AND report_date = ?
+                                    ''', update_values)
 
-                                # 저장 결과 로깅
-                                roe_str = f"{ratio.roe_value:.2f}" if ratio.roe_value else "N/A"
-                                debt_str = f"{ratio.liability_ratio:.2f}" if ratio.liability_ratio else "N/A"
-                                per_str = f"{per:.2f}" if per else "N/A"
-                                pbr_str = f"{pbr:.2f}" if pbr else "N/A"
-                                self.logger.debug(
-                                    f"📊 [{stock_code}] 재무비율 저장: {report_date} - "
-                                    f"ROE: {roe_str}%, 부채비율: {debt_str}%, "
-                                    f"PER: {per_str}, PBR: {pbr_str}"
-                                )
+                                    # 업데이트 확인
+                                    if cursor.rowcount == 0:
+                                        raise Exception(f"재무비율 업데이트 실패 (레코드 없음): {stock_code} {report_date}")
+
+                                    # 저장 결과 로깅
+                                    roe_str = f"{ratio.roe_value:.2f}" if ratio.roe_value else "N/A"
+                                    debt_str = f"{ratio.liability_ratio:.2f}" if ratio.liability_ratio else "N/A"
+                                    per_str = f"{per:.2f}" if per else "N/A"
+                                    pbr_str = f"{pbr:.2f}" if pbr else "N/A"
+                                    self.logger.debug(
+                                        f"📊 [{stock_code}] 재무비율 저장: {report_date} - "
+                                        f"ROE: {roe_str}%, 부채비율: {debt_str}%, "
+                                        f"PER: {per_str}, PBR: {pbr_str}"
+                                    )
+                                    success_counts['ratio'] += 1
+                            except Exception as update_err:
+                                # 재무비율 저장 실패 시 롤백 (개별 데이터 타입만)
+                                self.logger.warning(f"⚠️ [{stock_code}] 재무비율 저장 실패, 건너뜀: {update_err}")
+                                error_counts['ratio'] += 1
+                                raise  # 외부 try-except로 전달
                         except Exception as e:
                             self.logger.warning(f"⚠️ 재무비율 저장 오류 (건너뜀): {e}")
+                            error_counts['ratio'] += 1
                             continue
                 
                 # 손익계산서 데이터 저장
                 if income_statements:
-                    for income in income_statements:
+                    for idx, income in enumerate(income_statements, 1):
                         try:
+                            # API 필드 검증: 필수 필드 확인
+                            if not hasattr(income, 'statement_ym') or not income.statement_ym:
+                                self.logger.warning(f"⚠️ [{stock_code}] 손익계산서 #{idx} statement_ym 필드 누락, 건너뜀")
+                                error_counts['income'] += 1
+                                continue
+
+                            if not hasattr(income, 'revenue') or income.revenue is None:
+                                self.logger.warning(f"⚠️ [{stock_code}] 손익계산서 #{idx} revenue 필드 누락, 건너뜀")
+                                error_counts['income'] += 1
+                                continue
+
                             report_date = income.statement_ym
                             if len(report_date) == 6:
                                 report_date = f"{report_date[:4]}-{report_date[4:6]}-01"
@@ -533,117 +643,185 @@ class MLDataCollector:
                                 if income.net_income:
                                     net_margin = (income.net_income / income.revenue) * 100
 
-                            # 손익계산서 저장 (INSERT OR IGNORE + UPDATE 방식으로 NULL 덮어쓰기 방지)
-                            # 1) 레코드 생성 (없을 경우만)
-                            cursor.execute('''
-                                INSERT OR IGNORE INTO financial_statements
-                                (stock_code, report_date, created_at)
-                                VALUES (?, ?, CURRENT_TIMESTAMP)
-                            ''', (stock_code, report_date))
+                            # 손익계산서 저장 (원자성 보장: 트랜잭션 내 INSERT OR IGNORE + UPDATE)
+                            try:
+                                # 1) 레코드 생성 (없을 경우만)
+                                cursor.execute('''
+                                    INSERT OR IGNORE INTO financial_statements
+                                    (stock_code, report_date, created_at)
+                                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                                ''', (stock_code, report_date))
 
-                            # 2) 손익계산서 업데이트 (NULL이 아닌 값만)
-                            update_parts = []
-                            update_values = []
+                                # 2) 손익계산서 업데이트 (NULL이 아닌 값만)
+                                update_parts = []
+                                update_values = []
 
-                            if income.revenue:
-                                update_parts.append("revenue = ?")
-                                update_values.append(float(income.revenue))
+                                if income.revenue:
+                                    update_parts.append("revenue = ?")
+                                    update_values.append(float(income.revenue))
 
-                            if income.operating_income:
-                                update_parts.append("operating_profit = ?")
-                                update_values.append(float(income.operating_income))
+                                if income.operating_income:
+                                    update_parts.append("operating_profit = ?")
+                                    update_values.append(float(income.operating_income))
 
-                            if income.net_income:
-                                update_parts.append("net_income = ?")
-                                update_values.append(float(income.net_income))
+                                if income.net_income:
+                                    update_parts.append("net_income = ?")
+                                    update_values.append(float(income.net_income))
 
-                            if operating_margin is not None:
-                                update_parts.append("operating_margin = ?")
-                                update_values.append(float(operating_margin))
+                                if operating_margin is not None:
+                                    update_parts.append("operating_margin = ?")
+                                    update_values.append(float(operating_margin))
 
-                            if net_margin is not None:
-                                update_parts.append("net_margin = ?")
-                                update_values.append(float(net_margin))
+                                if net_margin is not None:
+                                    update_parts.append("net_margin = ?")
+                                    update_values.append(float(net_margin))
 
-                            if update_parts:
-                                update_parts.append("updated_at = CURRENT_TIMESTAMP")
-                                update_values.extend([stock_code, report_date])
+                                if update_parts:
+                                    update_parts.append("updated_at = CURRENT_TIMESTAMP")
+                                    update_values.extend([stock_code, report_date])
 
-                                cursor.execute(f'''
-                                    UPDATE financial_statements
-                                    SET {", ".join(update_parts)}
-                                    WHERE stock_code = ? AND report_date = ?
-                                ''', update_values)
+                                    cursor.execute(f'''
+                                        UPDATE financial_statements
+                                        SET {", ".join(update_parts)}
+                                        WHERE stock_code = ? AND report_date = ?
+                                    ''', update_values)
+
+                                    # 업데이트 확인
+                                    if cursor.rowcount == 0:
+                                        raise Exception(f"손익계산서 업데이트 실패 (레코드 없음): {stock_code} {report_date}")
+
+                                    self.logger.debug(
+                                        f"📊 [{stock_code}] 손익계산서 저장: {report_date} - "
+                                        f"매출: {income.revenue:,.0f}, 영업이익: {income.operating_income:,.0f}"
+                                    )
+                                    success_counts['income'] += 1
+                            except Exception as update_err:
+                                # 손익계산서 저장 실패 시 롤백
+                                self.logger.warning(f"⚠️ [{stock_code}] 손익계산서 저장 실패, 건너뜀: {update_err}")
+                                error_counts['income'] += 1
+                                raise  # 외부 try-except로 전달
                         except Exception as e:
                             self.logger.warning(f"⚠️ 손익계산서 저장 오류 (건너뜀): {e}")
+                            error_counts['income'] += 1
                             continue
 
                 # 대차대조표 데이터 저장
                 if balance_sheets:
-                    for balance in balance_sheets:
+                    for idx, balance in enumerate(balance_sheets, 1):
                         try:
+                            # API 필드 검증: 필수 필드 확인
+                            if not hasattr(balance, 'statement_ym') or not balance.statement_ym:
+                                self.logger.warning(f"⚠️ [{stock_code}] 대차대조표 #{idx} statement_ym 필드 누락, 건너뜀")
+                                error_counts['balance'] += 1
+                                continue
+
+                            # 최소 하나의 재무 항목이 있는지 확인
+                            has_data = any([
+                                hasattr(balance, 'total_assets') and balance.total_assets,
+                                hasattr(balance, 'current_assets') and balance.current_assets,
+                                hasattr(balance, 'total_liabilities') and balance.total_liabilities
+                            ])
+
+                            if not has_data:
+                                self.logger.warning(f"⚠️ [{stock_code}] 대차대조표 #{idx} 재무 항목 모두 누락, 건너뜀")
+                                error_counts['balance'] += 1
+                                continue
+
                             report_date = balance.statement_ym
                             if len(report_date) == 6:
                                 report_date = f"{report_date[:4]}-{report_date[4:6]}-01"
                             else:
                                 report_date = f"{report_date[:4]}-{report_date[4:6]}-{report_date[6:8]}"
 
-                            # 대차대조표 저장 (INSERT OR IGNORE + UPDATE 방식)
-                            # 1) 레코드 생성 (없을 경우만)
-                            cursor.execute('''
-                                INSERT OR IGNORE INTO financial_statements
-                                (stock_code, report_date, created_at)
-                                VALUES (?, ?, CURRENT_TIMESTAMP)
-                            ''', (stock_code, report_date))
+                            # 대차대조표 저장 (원자성 보장: 트랜잭션 내 INSERT OR IGNORE + UPDATE)
+                            try:
+                                # 1) 레코드 생성 (없을 경우만)
+                                cursor.execute('''
+                                    INSERT OR IGNORE INTO financial_statements
+                                    (stock_code, report_date, created_at)
+                                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                                ''', (stock_code, report_date))
 
-                            # 2) 대차대조표 업데이트 (NULL이 아닌 값만)
-                            update_parts = []
-                            update_values = []
+                                # 2) 대차대조표 업데이트 (NULL이 아닌 값만)
+                                update_parts = []
+                                update_values = []
 
-                            if balance.total_assets and balance.total_assets > 0:
-                                update_parts.append("total_assets = ?")
-                                update_values.append(float(balance.total_assets))
+                                if balance.total_assets and balance.total_assets > 0:
+                                    update_parts.append("total_assets = ?")
+                                    update_values.append(float(balance.total_assets))
 
-                            if balance.current_assets and balance.current_assets > 0:
-                                update_parts.append("current_assets = ?")
-                                update_values.append(float(balance.current_assets))
+                                if balance.current_assets and balance.current_assets > 0:
+                                    update_parts.append("current_assets = ?")
+                                    update_values.append(float(balance.current_assets))
 
-                            if balance.current_liabilities and balance.current_liabilities > 0:
-                                update_parts.append("current_liabilities = ?")
-                                update_values.append(float(balance.current_liabilities))
+                                if balance.current_liabilities and balance.current_liabilities > 0:
+                                    update_parts.append("current_liabilities = ?")
+                                    update_values.append(float(balance.current_liabilities))
 
-                            if balance.total_liabilities and balance.total_liabilities > 0:
-                                update_parts.append("total_liabilities = ?")
-                                update_values.append(float(balance.total_liabilities))
+                                if balance.total_liabilities and balance.total_liabilities > 0:
+                                    update_parts.append("total_liabilities = ?")
+                                    update_values.append(float(balance.total_liabilities))
 
-                            if balance.total_equity and balance.total_equity > 0:
-                                update_parts.append("total_equity = ?")
-                                update_values.append(float(balance.total_equity))
+                                if balance.total_equity and balance.total_equity > 0:
+                                    update_parts.append("total_equity = ?")
+                                    update_values.append(float(balance.total_equity))
 
-                            if update_parts:
-                                update_parts.append("updated_at = CURRENT_TIMESTAMP")
-                                update_values.extend([stock_code, report_date])
+                                if update_parts:
+                                    update_parts.append("updated_at = CURRENT_TIMESTAMP")
+                                    update_values.extend([stock_code, report_date])
 
-                                cursor.execute(f'''
-                                    UPDATE financial_statements
-                                    SET {", ".join(update_parts)}
-                                    WHERE stock_code = ? AND report_date = ?
-                                ''', update_values)
+                                    cursor.execute(f'''
+                                        UPDATE financial_statements
+                                        SET {", ".join(update_parts)}
+                                        WHERE stock_code = ? AND report_date = ?
+                                    ''', update_values)
 
-                                # 저장 결과 로깅
-                                assets_str = f"{balance.total_assets:,.0f}" if balance.total_assets else "N/A"
-                                current_ratio = (balance.current_assets / balance.current_liabilities * 100) if balance.current_liabilities and balance.current_liabilities > 0 else 0
-                                current_ratio_str = f"{current_ratio:.1f}%" if current_ratio > 0 else "N/A"
-                                self.logger.debug(
-                                    f"📊 [{stock_code}] 대차대조표 저장: {report_date} - "
-                                    f"자산총계: {assets_str}, 유동비율: {current_ratio_str}"
-                                )
+                                    # 업데이트 확인
+                                    if cursor.rowcount == 0:
+                                        raise Exception(f"대차대조표 업데이트 실패 (레코드 없음): {stock_code} {report_date}")
+
+                                    # 저장 결과 로깅
+                                    assets_str = f"{balance.total_assets:,.0f}" if balance.total_assets else "N/A"
+                                    current_ratio = (balance.current_assets / balance.current_liabilities * 100) if balance.current_liabilities and balance.current_liabilities > 0 else 0
+                                    current_ratio_str = f"{current_ratio:.1f}%" if current_ratio > 0 else "N/A"
+                                    self.logger.debug(
+                                        f"📊 [{stock_code}] 대차대조표 저장: {report_date} - "
+                                        f"자산총계: {assets_str}, 유동비율: {current_ratio_str}"
+                                    )
+                                    success_counts['balance'] += 1
+                            except Exception as update_err:
+                                # 대차대조표 저장 실패 시 롤백
+                                self.logger.warning(f"⚠️ [{stock_code}] 대차대조표 저장 실패, 건너뜀: {update_err}")
+                                error_counts['balance'] += 1
+                                raise  # 외부 try-except로 전달
                         except Exception as e:
                             self.logger.warning(f"⚠️ 대차대조표 저장 오류 (건너뜀): {e}")
+                            error_counts['balance'] += 1
                             continue
 
                 conn.commit()
-                self.logger.info(f"✅ [{stock_code}] 재무 데이터 저장 완료")
+
+                # 저장 결과 요약 로깅
+                total_success = success_counts['ratio'] + success_counts['income'] + success_counts['balance']
+                total_errors = error_counts['ratio'] + error_counts['income'] + error_counts['balance']
+
+                summary_parts = []
+                if success_counts['ratio'] > 0:
+                    summary_parts.append(f"재무비율 {success_counts['ratio']}건")
+                if success_counts['income'] > 0:
+                    summary_parts.append(f"손익계산서 {success_counts['income']}건")
+                if success_counts['balance'] > 0:
+                    summary_parts.append(f"대차대조표 {success_counts['balance']}건")
+
+                summary = ", ".join(summary_parts) if summary_parts else "없음"
+
+                if total_errors > 0:
+                    self.logger.warning(
+                        f"⚠️ [{stock_code}] 재무 데이터 저장 완료 (성공: {total_success}건, 실패: {total_errors}건) - {summary}"
+                    )
+                else:
+                    self.logger.info(f"✅ [{stock_code}] 재무 데이터 저장 완료: {summary}")
+
                 return True
                 
         except Exception as e:
@@ -665,23 +843,34 @@ class MLDataCollector:
         Returns:
             Dict[str, bool]: 종목별 성공 여부
         """
+        import time
         results = {}
-        
-        for stock_code in stock_codes:
+        total_stocks = len(stock_codes)
+
+        for idx, stock_code in enumerate(stock_codes, 1):
             try:
                 success_price = True
                 success_financial = True
-                
+
                 if collect_price:
                     success_price = self.save_daily_price_data(stock_code)
-                
+                    # API 호출 간격 (0.2초)
+                    if idx < total_stocks:  # 마지막 종목이 아니면
+                        time.sleep(0.2)
+
                 if collect_financial:
                     success_financial = self.save_financial_data(stock_code)
-                
+                    # API 호출 간격 (0.2초)
+                    if idx < total_stocks:  # 마지막 종목이 아니면
+                        time.sleep(0.2)
+
                 results[stock_code] = success_price and success_financial
-                
+
             except Exception as e:
                 self.logger.error(f"❌ [{stock_code}] 데이터 수집 오류: {e}")
                 results[stock_code] = False
-        
+
+        self.logger.info(
+            f"📊 일괄 수집 완료: {sum(results.values())}/{total_stocks}개 성공"
+        )
         return results

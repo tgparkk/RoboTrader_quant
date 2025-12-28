@@ -32,6 +32,7 @@ from core.quant.quant_screening_service import QuantScreeningService
 from core.ml_screening_service import MLScreeningService
 from core.ml_data_collector import MLDataCollector
 from core.quant.quant_rebalancing_service import QuantRebalancingService, RebalancingPeriod
+from scripts.daily_trading_summary import print_today_trading_summary
 from config.constants import (
     PORTFOLIO_SIZE, QUANT_CANDIDATE_LIMIT, REBALANCING_ORDER_INTERVAL,
     SELL_ORDER_WAIT_TIMEOUT, ORDER_CHECK_INTERVAL, OHLCV_LOOKBACK_DAYS,
@@ -98,7 +99,10 @@ class DayTradingBot:
         self._ml_data_collection_task = None
         self._ml_screening_task = None
         self._ml_data_collection_completed = False
-        
+
+        # 🆕 일일 매매 리포트 초기화
+        self._last_daily_report_date = None
+
         # 🆕 리밸런싱 서비스 초기화 (9단계)
         self.rebalancing_service = QuantRebalancingService(
             api_manager=self.api_manager,
@@ -740,16 +744,27 @@ class DayTradingBot:
                             self._ml_data_collection_task is None):
                             self.logger.info(f"📊 15:30+ ML 데이터 수집 스케줄 트리거 ({current_time.strftime('%H:%M:%S')})")
                             self._ml_data_collection_task = asyncio.create_task(self._run_ml_data_collection())
-                    
+
+                    # 15:35 장 마감 후 일일 매매 리포트 생성
+                    if (current_time.hour == 15 and current_time.minute >= 35):
+                        if self._last_daily_report_date != current_time.date():
+                            self.logger.info(f"📊 15:35+ 장 마감 후 일일 매매 리포트 생성 ({current_time.strftime('%H:%M:%S')})")
+                            try:
+                                print_today_trading_summary()
+                                self._last_daily_report_date = current_time.date()
+                                self.logger.info("✅ 일일 매매 리포트 생성 완료")
+                            except Exception as report_err:
+                                self.logger.error(f"❌ 일일 매매 리포트 생성 오류: {report_err}")
+
                     # 15:40 퀀트 스크리닝 실행
                     if (current_time.hour == 15 and current_time.minute >= 40):
                         if self._last_quant_screening_date != current_time.date() and self._quant_screening_task is None:
                             self._quant_screening_task = asyncio.create_task(self._run_quant_screening())
-                        
+
                         # 15:40 ML 스크리닝 실행 (ML 데이터 수집 완료 후)
-                        if (self._last_ml_data_collection_date == current_time.date() and 
+                        if (self._last_ml_data_collection_date == current_time.date() and
                             self._ml_data_collection_completed and
-                            self._last_ml_screening_date != current_time.date() and 
+                            self._last_ml_screening_date != current_time.date() and
                             self._ml_screening_task is None):
                             self._ml_screening_task = asyncio.create_task(self._run_ml_screening())
                 

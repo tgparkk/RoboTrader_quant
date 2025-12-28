@@ -92,6 +92,10 @@ else:
             >>> # 2025-12-23(월) → 2025-12-20(금) (주말 건너뛰기)
             >>> get_previous_trading_day(datetime(2025, 12, 23))
             datetime(2025, 12, 20, 0, 0, 0)
+
+            >>> # 2025-01-30(목) → 2025-01-27(월) (설날 연휴 건너뛰기)
+            >>> get_previous_trading_day(datetime(2025, 1, 30))
+            datetime(2025, 1, 27, 0, 0, 0)
         """
         from datetime import timedelta
 
@@ -101,15 +105,25 @@ else:
         # 하루 전부터 시작
         prev_day = dt.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
 
-        # 최대 7일 전까지 검색 (주말 + 공휴일 대비)
-        for _ in range(7):
-            # 주말 체크
-            if prev_day.weekday() < 5:  # 월(0) ~ 금(4)
-                # TODO: 향후 공휴일 캘린더 추가 가능
-                # 현재는 주말만 체크
-                return prev_day
+        # 공휴일 캘린더 import (fallback: 주말만 체크)
+        try:
+            from utils.korean_holidays import is_holiday
+            use_holiday_calendar = True
+        except ImportError:
+            use_holiday_calendar = False
+
+        # 최대 10일 전까지 검색 (연휴 대비)
+        for _ in range(10):
+            if use_holiday_calendar:
+                # 공휴일 캘린더 사용
+                if not is_holiday(prev_day):
+                    return prev_day
+            else:
+                # Fallback: 주말만 체크
+                if prev_day.weekday() < 5:  # 월(0) ~ 금(4)
+                    return prev_day
 
             prev_day -= timedelta(days=1)
 
-        # 7일 전까지 영업일이 없으면 (비정상) 그냥 7일 전 반환
+        # 10일 전까지 영업일이 없으면 (비정상) 그냥 10일 전 반환
         return prev_day
