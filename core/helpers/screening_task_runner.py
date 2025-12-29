@@ -46,7 +46,7 @@ class ScreeningTaskRunner:
     async def run_quant_screening(self):
         """일일 퀀트 스크리닝 실행 (8단계 기준)"""
         try:
-            logger.info("📊 15:40 퀀트 스크리닝 시작")
+            logger.info("📊 08:55 퀀트 스크리닝 시작")
             loop = asyncio.get_event_loop()
 
             # 오류 재시도 포함된 스크리닝 실행
@@ -108,13 +108,13 @@ class ScreeningTaskRunner:
             return False
 
     async def run_ml_data_collection(self, verify_callback=None):
-        """ML 데이터 수집 실행 (15:30)
+        """ML 데이터 수집 실행 (08:30 - 전일 데이터)
 
         Args:
             verify_callback: 데이터 검증 콜백 함수 (선택적)
         """
         try:
-            logger.info("📊 15:30 ML 데이터 수집 시작")
+            logger.info("📊 08:30 전일 데이터 수집 시작")
 
             # 퀀트 포트폴리오 상위 종목들 가져오기 (오늘 또는 최근)
             today = now_kst().strftime('%Y%m%d')
@@ -206,9 +206,9 @@ class ScreeningTaskRunner:
             return False
 
     async def run_ml_screening(self):
-        """ML 멀티팩터 스크리닝 실행 (15:40)"""
+        """ML 멀티팩터 스크리닝 실행 (08:55)"""
         try:
-            logger.info("🔍 15:40 ML 멀티팩터 스크리닝 시작")
+            logger.info("🔍 08:55 ML 멀티팩터 스크리닝 시작")
             loop = asyncio.get_event_loop()
 
             # ML 스크리닝 실행

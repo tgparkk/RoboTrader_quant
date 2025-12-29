@@ -510,39 +510,39 @@ class DayTradingBot:
                     last_api_refresh = current_time
 
                 
-                # 장마감 청산 로직 제거: 15:00 시장가 매도로 대체됨
-                # 15:30 ML 데이터 수집 및 15:40 퀀트 스크리닝 실행
-                if (current_time.hour > 15 or (current_time.hour == 15 and current_time.minute >= 30)):
-                    # 15:30 ML 데이터 수집 (스크리닝 전 데이터 준비)
-                    # ✅ 수정: 15:40 제한 제거 - 15:30 이후 언제든 1회 실행
-                    if current_time.hour == 15 and current_time.minute >= 30:
+                # 08:30 전일 데이터 수집 및 08:55 퀀트 스크리닝 실행 (장 시작 전)
+                if current_time.hour == 8:
+                    # 08:30 전일 일봉 + 재무데이터 수집
+                    if current_time.minute >= 30:
                         if (self._last_ml_data_collection_date != current_time.date() and
                             self._ml_data_collection_task is None):
-                            self.logger.info(f"📊 15:30+ ML 데이터 수집 스케줄 트리거 ({current_time.strftime('%H:%M:%S')})")
+                            self.logger.info(f"📊 08:30+ 전일 데이터 수집 스케줄 트리거 ({current_time.strftime('%H:%M:%S')})")
                             self._ml_data_collection_task = asyncio.create_task(self._run_ml_data_collection())
 
-                    # 15:35 장 마감 후 일일 매매 리포트 생성
-                    if (current_time.hour == 15 and current_time.minute >= 35):
-                        if self._last_daily_report_date != current_time.date():
-                            self.logger.info(f"📊 15:35+ 장 마감 후 일일 매매 리포트 생성 ({current_time.strftime('%H:%M:%S')})")
-                            try:
-                                print_today_trading_summary()
-                                self._last_daily_report_date = current_time.date()
-                                self.logger.info("✅ 일일 매매 리포트 생성 완료")
-                            except Exception as report_err:
-                                self.logger.error(f"❌ 일일 매매 리포트 생성 오류: {report_err}")
-
-                    # 15:40 퀀트 스크리닝 실행
-                    if (current_time.hour == 15 and current_time.minute >= 40):
+                    # 08:55 퀀트 스크리닝 실행 (오늘용 포트폴리오 생성)
+                    if current_time.minute >= 55:
                         if self._last_quant_screening_date != current_time.date() and self._quant_screening_task is None:
+                            self.logger.info(f"🔍 08:55+ 퀀트 스크리닝 스케줄 트리거 ({current_time.strftime('%H:%M:%S')})")
                             self._quant_screening_task = asyncio.create_task(self._run_quant_screening())
 
-                        # 15:40 ML 스크리닝 실행 (ML 데이터 수집 완료 후)
+                        # 08:55 ML 스크리닝 실행 (ML 데이터 수집 완료 후)
                         if (self._last_ml_data_collection_date == current_time.date() and
                             self._ml_data_collection_completed and
                             self._last_ml_screening_date != current_time.date() and
                             self._ml_screening_task is None):
+                            self.logger.info(f"🔍 08:55+ ML 스크리닝 스케줄 트리거 ({current_time.strftime('%H:%M:%S')})")
                             self._ml_screening_task = asyncio.create_task(self._run_ml_screening())
+
+                # 15:35 장 마감 후 일일 매매 리포트 생성
+                if (current_time.hour == 15 and current_time.minute >= 35):
+                    if self._last_daily_report_date != current_time.date():
+                        self.logger.info(f"📊 15:35+ 장 마감 후 일일 매매 리포트 생성 ({current_time.strftime('%H:%M:%S')})")
+                        try:
+                            print_today_trading_summary()
+                            self._last_daily_report_date = current_time.date()
+                            self.logger.info("✅ 일일 매매 리포트 생성 완료")
+                        except Exception as report_err:
+                            self.logger.error(f"❌ 일일 매매 리포트 생성 오류: {report_err}")
                 
                 #             self.logger.info("✅ 장 마감 후 차트 생성 완료 (1회 실행 완료)")
                 
@@ -719,7 +719,7 @@ class DayTradingBot:
             self._quant_screening_task = None
     
     async def _run_ml_data_collection(self):
-        """ML 데이터 수집 실행 (15:30)"""
+        """ML 데이터 수집 실행 (08:30 - 전일 데이터)"""
         try:
             self._ml_data_collection_completed = False
             result = await self.screening_task_runner.run_ml_data_collection(
@@ -732,7 +732,7 @@ class DayTradingBot:
             self._ml_data_collection_task = None
     
     async def _run_ml_screening(self):
-        """ML 멀티팩터 스크리닝 실행 (15:40)"""
+        """ML 멀티팩터 스크리닝 실행 (08:55)"""
         try:
             result = await self.screening_task_runner.run_ml_screening()
             # 성공/실패 여부와 무관하게 날짜 기록 (같은 날 재시도 방지)
