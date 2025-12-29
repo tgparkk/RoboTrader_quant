@@ -38,14 +38,15 @@ def print_today_trading_summary():
 
         # 매수 내역
         cursor.execute('''
-            SELECT stock_code, stock_name, quantity, buy_price,
-                   (quantity * buy_price) as total_amount,
+            SELECT stock_code, stock_name, quantity, price,
+                   (quantity * price) as total_amount,
                    target_profit_rate, stop_loss_rate,
-                   created_at
+                   timestamp
             FROM virtual_trading_records
-            WHERE trade_type = 'BUY'
-              AND date(created_at) = date(?)
-            ORDER BY created_at
+            WHERE action = 'BUY'
+              AND is_test = 0
+              AND date(timestamp, 'localtime') = date(?)
+            ORDER BY timestamp
         ''', (today,))
 
         buy_records = cursor.fetchall()
@@ -76,14 +77,15 @@ def print_today_trading_summary():
 
         # 매도 내역
         cursor.execute('''
-            SELECT stock_code, stock_name, quantity, sell_price,
-                   (quantity * sell_price) as total_amount,
-                   profit_loss, profit_loss_rate,
-                   created_at
+            SELECT stock_code, stock_name, quantity, price,
+                   (quantity * price) as total_amount,
+                   profit_loss, profit_rate,
+                   timestamp
             FROM virtual_trading_records
-            WHERE trade_type = 'SELL'
-              AND date(created_at) = date(?)
-            ORDER BY created_at
+            WHERE action = 'SELL'
+              AND is_test = 0
+              AND date(timestamp, 'localtime') = date(?)
+            ORDER BY timestamp
         ''', (today,))
 
         sell_records = cursor.fetchall()
@@ -135,22 +137,21 @@ def print_today_trading_summary():
 
         cursor.execute('''
             SELECT
-                stock_code,
-                stock_name,
-                SUM(CASE WHEN trade_type = 'BUY' THEN quantity ELSE -quantity END) as quantity,
-                AVG(CASE WHEN trade_type = 'BUY' THEN buy_price ELSE NULL END) as avg_buy_price,
-                MAX(CASE WHEN trade_type = 'BUY' THEN target_profit_rate ELSE NULL END) as target_profit_rate,
-                MAX(CASE WHEN trade_type = 'BUY' THEN stop_loss_rate ELSE NULL END) as stop_loss_rate
-            FROM virtual_trading_records
-            WHERE stock_code IN (
-                SELECT stock_code
-                FROM virtual_trading_records
-                GROUP BY stock_code
-                HAVING SUM(CASE WHEN trade_type = 'BUY' THEN quantity ELSE -quantity END) > 0
-            )
-            GROUP BY stock_code, stock_name
-            HAVING SUM(CASE WHEN trade_type = 'BUY' THEN quantity ELSE -quantity END) > 0
-            ORDER BY stock_name
+                b.stock_code,
+                b.stock_name,
+                b.quantity,
+                b.price as avg_buy_price,
+                b.target_profit_rate,
+                b.stop_loss_rate
+            FROM virtual_trading_records b
+            WHERE b.action = 'BUY'
+              AND b.is_test = 0
+              AND NOT EXISTS (
+                SELECT 1 FROM virtual_trading_records s
+                WHERE s.buy_record_id = b.id
+                  AND s.action = 'SELL'
+              )
+            ORDER BY b.stock_name
         ''')
 
         holdings = cursor.fetchall()
@@ -212,11 +213,12 @@ def print_today_trading_summary():
         # 전체 매매 손익
         cursor.execute('''
             SELECT
-                SUM(CASE WHEN trade_type = 'SELL' THEN profit_loss ELSE 0 END) as total_realized_pl,
-                COUNT(CASE WHEN trade_type = 'SELL' AND profit_loss > 0 THEN 1 END) as win_count,
-                COUNT(CASE WHEN trade_type = 'SELL' AND profit_loss < 0 THEN 1 END) as loss_count,
-                COUNT(CASE WHEN trade_type = 'SELL' THEN 1 END) as total_trades
+                SUM(CASE WHEN action = 'SELL' THEN profit_loss ELSE 0 END) as total_realized_pl,
+                COUNT(CASE WHEN action = 'SELL' AND profit_loss > 0 THEN 1 END) as win_count,
+                COUNT(CASE WHEN action = 'SELL' AND profit_loss < 0 THEN 1 END) as loss_count,
+                COUNT(CASE WHEN action = 'SELL' THEN 1 END) as total_trades
             FROM virtual_trading_records
+            WHERE is_test = 0
         ''')
 
         pl_row = cursor.fetchone()

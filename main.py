@@ -27,6 +27,8 @@ from api.kis_api_manager import KISAPIManager
 from config.settings import load_trading_config
 from utils.logger import setup_logger
 from utils.korean_time import now_kst, get_market_status, is_market_open, KST
+from utils.price_utils import round_to_tick, check_duplicate_process, load_config
+from core.helpers import RebalancingNotificationHelper, OrderWaitHelper, KeepListUpdater, RebalancingExecutor, ScreeningTaskRunner, StateRestorationHelper
 from config.market_hours import MarketHours
 from core.quant.quant_screening_service import QuantScreeningService
 from core.ml_screening_service import MLScreeningService
@@ -49,12 +51,12 @@ class DayTradingBot:
         # 프로젝트 고유 PID 파일명으로 충돌 방지
         self.pid_file = Path("robotrader_quant.pid")
         self._last_eod_liquidation_date = None  # 장마감 일괄청산 실행 일자
-        
+
         # 프로세스 중복 실행 방지
-        self._check_duplicate_process()
-        
+        check_duplicate_process(str(self.pid_file))
+
         # 설정 초기화
-        self.config = self._load_config()
+        self.config = load_config()
         
         # 리밸런싱 모드 상태 로깅
         if getattr(self.config, 'rebalancing_mode', False):
@@ -112,73 +114,42 @@ class DayTradingBot:
         )
         self.rebalancing_service.rebalancing_period = RebalancingPeriod.DAILY  # 일간 리밸런싱
         self._last_rebalancing_date = None  # 마지막 리밸런싱 실행 날짜
-        
-        
+
+        # 🆕 헬퍼 초기화
+        self.notification_helper = RebalancingNotificationHelper(self.telegram)
+        self.order_wait_helper = OrderWaitHelper(self.api_manager)
+        self.keep_list_updater = KeepListUpdater(self.trading_manager)
+        self.rebalancing_executor = RebalancingExecutor(
+            api_manager=self.api_manager,
+            order_manager=self.order_manager,
+            trading_manager=self.trading_manager,
+            order_wait_helper=self.order_wait_helper,
+            keep_list_updater=self.keep_list_updater,
+            notification_helper=self.notification_helper,
+            telegram_integration=self.telegram
+        )
+        self.screening_task_runner = ScreeningTaskRunner(
+            quant_screening_service=self.quant_screening_service,
+            ml_screening_service=self.ml_screening_service,
+            ml_data_collector=self.ml_data_collector,
+            db_manager=self.db_manager,
+            candidate_selector=self.candidate_selector,
+            intraday_manager=self.intraday_manager,
+            telegram_integration=self.telegram
+        )
+        self.state_restoration_helper = StateRestorationHelper(
+            trading_manager=self.trading_manager,
+            db_manager=self.db_manager,
+            candidate_selector=self.candidate_selector,
+            telegram_integration=self.telegram,
+            config=self.config,
+            get_previous_close_callback=self._get_previous_close_price
+        )
+
         # 신호 핸들러 등록
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
-    def _round_to_tick(self, price: float) -> float:
-        """KRX 정확한 호가단위에 맞게 반올림 - kis_order_api 함수 사용"""
-        try:
-            from api.kis_order_api import _round_to_krx_tick
-            
-            if price <= 0:
-                return 0.0
-            
-            original_price = price
-            rounded_price = _round_to_krx_tick(price)
-            
-            # 로깅으로 가격 조정 확인
-            if abs(rounded_price - original_price) > 0:
-                self.logger.debug(f"💰 호가단위 조정: {original_price:,.0f}원 → {rounded_price:,.0f}원")
-            
-            return float(rounded_price)
-            
-        except Exception as e:
-            self.logger.error(f"❌ 호가단위 조정 오류: {e}")
-            return float(int(price))
-
-
-    
-    def _check_duplicate_process(self):
-        """프로세스 중복 실행 방지"""
-        try:
-            if self.pid_file.exists():
-                # 기존 PID 파일 읽기
-                existing_pid = int(self.pid_file.read_text().strip())
-                
-                # Windows에서 프로세스 존재 여부 확인
-                try:
-                    import psutil
-                    if psutil.pid_exists(existing_pid):
-                        process = psutil.Process(existing_pid)
-                        if 'python' in process.name().lower() and 'main.py' in ' '.join(process.cmdline()):
-                            self.logger.error(f"이미 봇이 실행 중입니다 (PID: {existing_pid})")
-                            print(f"오류: 이미 거래 봇이 실행 중입니다 (PID: {existing_pid})")
-                            print("기존 프로세스를 먼저 종료해주세요.")
-                            sys.exit(1)
-                except ImportError:
-                    # psutil이 없는 경우 간단한 체크
-                    self.logger.warning("psutil 모듈이 없어 정확한 중복 실행 체크를 할 수 없습니다")
-                except:
-                    # 기존 PID가 존재하지 않으면 PID 파일 삭제
-                    self.pid_file.unlink(missing_ok=True)
-            
-            # 현재 프로세스 PID 저장
-            current_pid = os.getpid()
-            self.pid_file.write_text(str(current_pid))
-            self.logger.info(f"프로세스 PID 등록: {current_pid}")
-            
-        except Exception as e:
-            self.logger.warning(f"중복 실행 체크 중 오류: {e}")
-    
-    def _load_config(self) -> TradingConfig:
-        """거래 설정 로드"""
-        config = load_trading_config()
-        self.logger.info(f"거래 설정 로드 완료: 후보종목 {len(config.data_collection.candidate_stocks)}개")
-        return config
-    
     def _signal_handler(self, signum, frame):
         """시그널 핸들러 (Ctrl+C 등)"""
         self.logger.info(f"종료 신호 수신: {signum}")
@@ -517,202 +488,7 @@ class DayTradingBot:
     
     async def _execute_rebalancing_async(self, plan):
         """리밸런싱 실행 (비동기 버전)"""
-        try:
-            
-            sell_list = plan.get('sell_list', [])
-            buy_list = plan.get('buy_list', [])
-            
-            self.logger.info(f"🔄 리밸런싱 실행: 매도 {len(sell_list)}개, 매수 {len(buy_list)}개")
-            
-            # 1단계: 매도 주문 (시장가 전량)
-            sell_results = []
-            for sell_item in sell_list:
-                stock_code = sell_item['stock_code']
-                quantity = sell_item['quantity']
-                stock_name = sell_item.get('stock_name', stock_code)
-                
-                try:
-                    # 현재가 조회 (시장가 매도용)
-                    current_price_data = self.api_manager.get_current_price(stock_code)
-                    if not current_price_data:
-                        self.logger.error(f"❌ {stock_code} 현재가 조회 실패")
-                        continue
-                    
-                    current_price = current_price_data.current_price
-                    
-                    # 시장가 매도 주문
-                    order_id = await self.order_manager.place_sell_order(
-                        stock_code=stock_code,
-                        quantity=quantity,
-                        price=current_price,  # 시장가는 가격 0으로 주문하지만, 여기서는 현재가 사용
-                        market=True  # 시장가 주문
-                    )
-                    
-                    if order_id:
-                        sell_results.append({
-                            'stock_code': stock_code,
-                            'stock_name': stock_name,
-                            'quantity': quantity,
-                            'success': True,
-                            'order_id': order_id
-                        })
-                        self.logger.info(f"✅ 리밸런싱 매도 주문: {stock_code}({stock_name}) {quantity}주 시장가")
-                    else:
-                        sell_results.append({
-                            'stock_code': stock_code,
-                            'stock_name': stock_name,
-                            'quantity': quantity,
-                            'success': False
-                        })
-                        self.logger.error(f"❌ 리밸런싱 매도 주문 실패: {stock_code}")
-                    
-                    # API 호출 간격 조절
-                    await asyncio.sleep(REBALANCING_ORDER_INTERVAL)
-
-                except Exception as e:
-                    self.logger.error(f"❌ 리밸런싱 매도 오류 {stock_code}: {e}")
-                    sell_results.append({
-                        'stock_code': stock_code,
-                        'stock_name': stock_name,
-                        'quantity': quantity,
-                        'success': False
-                    })
-            
-            # 매도 완료 대기 (주문 체결 확인)
-            if sell_results:
-                self.logger.info(f"⏳ 매도 주문 체결 확인 중... (최대 {SELL_ORDER_WAIT_TIMEOUT//60}분)")
-                await self._wait_for_sell_orders_completion(sell_results, max_wait_seconds=SELL_ORDER_WAIT_TIMEOUT)
-            
-            # 1.5단계: 유지 대상 종목의 목표 익절/손절률 갱신
-            keep_list = plan.get('keep_list', [])
-            if keep_list:
-                self.logger.info(f"🔄 유지 대상 종목 목표 익절/손절률 갱신: {len(keep_list)}개")
-                for keep_item in keep_list:
-                    stock_code = keep_item['stock_code']
-                    target_profit_rate = keep_item.get('target_profit_rate', 0.15)
-                    stop_loss_rate = keep_item.get('stop_loss_rate', 0.10)
-                    
-                    trading_stock = self.trading_manager.get_trading_stock(stock_code)
-                    if trading_stock:
-                        trading_stock.target_profit_rate = target_profit_rate
-                        trading_stock.stop_loss_rate = stop_loss_rate
-                        self.logger.info(
-                            f"📊 {stock_code} 목표 익절/손절률 갱신: "
-                            f"익절 {target_profit_rate*100:.1f}%, 손절 {stop_loss_rate*100:.1f}% "
-                            f"(순위: {keep_item.get('rank', '?')}위, 점수: {keep_item.get('total_score', 0):.1f})"
-                        )
-            
-            # 2단계: 매수 주문 (동등 비중, 시장가)
-            buy_results = []
-            for buy_item in buy_list:
-                stock_code = buy_item['stock_code']
-                target_amount = buy_item['target_amount']
-                stock_name = buy_item.get('stock_name', stock_code)
-                
-                try:
-                    # 현재가 조회
-                    current_price_data = self.api_manager.get_current_price(stock_code)
-                    if not current_price_data:
-                        self.logger.error(f"❌ {stock_code} 현재가 조회 실패")
-                        continue
-                    
-                    current_price = current_price_data.current_price
-                    
-                    # 목표 수량 계산
-                    target_quantity = int(target_amount / current_price)
-                    if target_quantity <= 0:
-                        self.logger.warning(f"⚠️ {stock_code} 목표 수량 0 (금액 부족)")
-                        continue
-                    
-                    # 목표 익절/손절률 설정 (매수 전에 설정)
-                    target_profit_rate = buy_item.get('target_profit_rate', 0.15)
-                    stop_loss_rate = buy_item.get('stop_loss_rate', 0.10)
-                    
-                    # TradingStock 객체에 먼저 추가 또는 업데이트 (매수 주문 전에 목표 익절/손절률 설정)
-                    trading_stock = self.trading_manager.get_trading_stock(stock_code)
-                    if not trading_stock:
-                        # TradingStock이 없으면 추가
-                        from utils.korean_time import now_kst
-                        from core.models import StockState
-                        await self.trading_manager.add_selected_stock(
-                            stock_code=stock_code,
-                            stock_name=stock_name,
-                            selection_reason=f"리밸런싱 {buy_item.get('rank', '?')}위",
-                            prev_close=current_price
-                        )
-                        trading_stock = self.trading_manager.get_trading_stock(stock_code)
-                    
-                    # 목표 익절/손절률을 먼저 설정 (가상 매매 기록 저장 전에 설정되어야 함)
-                    if trading_stock:
-                        trading_stock.target_profit_rate = target_profit_rate
-                        trading_stock.stop_loss_rate = stop_loss_rate
-                        self.logger.info(
-                            f"📊 {stock_code} 목표 익절/손절률 설정: "
-                            f"익절 {target_profit_rate*100:.1f}%, 손절 {stop_loss_rate*100:.1f}% "
-                            f"(순위: {buy_item.get('rank', '?')}위, 점수: {buy_item.get('total_score', 0):.1f})"
-                        )
-                    
-                    # 시장가 매수 주문 (목표 익절/손절률 직접 전달)
-                    order_id = await self.order_manager.place_buy_order(
-                        stock_code=stock_code,
-                        quantity=target_quantity,
-                        price=current_price,  # 시장가는 가격 0으로 주문하지만, 여기서는 현재가 사용
-                        timeout_seconds=300,
-                        target_profit_rate=target_profit_rate,
-                        stop_loss_rate=stop_loss_rate
-                    )
-                    
-                    if order_id:
-                        
-                        buy_results.append({
-                            'stock_code': stock_code,
-                            'stock_name': stock_name,
-                            'target_amount': target_amount,
-                            'quantity': target_quantity,
-                            'target_profit_rate': target_profit_rate,
-                            'stop_loss_rate': stop_loss_rate,
-                            'success': True,
-                            'order_id': order_id
-                        })
-                        self.logger.info(f"✅ 리밸런싱 매수 주문: {stock_code}({stock_name}) {target_quantity}주 시장가 (목표: {target_amount:,.0f}원)")
-                    else:
-                        buy_results.append({
-                            'stock_code': stock_code,
-                            'stock_name': stock_name,
-                            'target_amount': target_amount,
-                            'quantity': target_quantity,
-                            'success': False
-                        })
-                        self.logger.error(f"❌ 리밸런싱 매수 주문 실패: {stock_code}")
-                    
-                    # API 호출 간격 조절
-                    await asyncio.sleep(REBALANCING_ORDER_INTERVAL)
-
-                except Exception as e:
-                    self.logger.error(f"❌ 리밸런싱 매수 오류 {stock_code}: {e}")
-                    buy_results.append({
-                        'stock_code': stock_code,
-                        'stock_name': stock_name,
-                        'target_amount': target_amount,
-                        'success': False
-                    })
-            
-            # 결과 로깅
-            success_sell = sum(1 for r in sell_results if r.get('success'))
-            success_buy = sum(1 for r in buy_results if r.get('success'))
-            
-            self.logger.info(
-                f"✅ 리밸런싱 실행 완료: "
-                f"매도 {success_sell}/{len(sell_results)}건 성공, "
-                f"매수 {success_buy}/{len(buy_results)}건 성공"
-            )
-            
-            # 텔레그램 상세 알림
-            await self._send_rebalancing_result_notification(plan, sell_results, buy_results)
-            
-        except Exception as e:
-            self.logger.error(f"❌ 리밸런싱 실행 오류: {e}")
-            await self.telegram.notify_error("Rebalancing Execution", e)
+        await self.rebalancing_executor.execute_rebalancing(plan)
     
     async def _system_monitoring_task(self):
         """시스템 모니터링 태스크"""
@@ -812,7 +588,7 @@ class DayTradingBot:
                         price_obj = self.api_manager.get_current_price(stock_code)
                         if price_obj:
                             sell_price = float(price_obj.current_price)
-                    sell_price = self._round_to_tick(sell_price)
+                    sell_price = round_to_tick(sell_price)
                     # 상태 전환 후 시장가 매도 주문 실행
                     moved = self.trading_manager.move_to_sell_candidate(stock_code, "장마감 일괄청산")
                     if moved:
@@ -932,221 +708,39 @@ class DayTradingBot:
     async def _run_quant_screening(self):
         """일일 퀀트 스크리닝 실행 (8단계 기준)"""
         try:
-            self.logger.info("📊 15:40 퀀트 스크리닝 시작")
-            loop = asyncio.get_event_loop()
-            
-            # 오류 재시도 포함된 스크리닝 실행
-            result = await loop.run_in_executor(
-                None,
-                self.quant_screening_service.run_daily_screening,
-                None,  # calc_date (오늘)
-                PORTFOLIO_SIZE,
-                QUANT_SCREENING_MAX_RETRIES
-            )
-            
+            result = await self.screening_task_runner.run_quant_screening()
+            # 성공/실패 여부와 무관하게 날짜 기록 (같은 날 재시도 방지)
+            self._last_quant_screening_date = now_kst().date()
             if result:
-                self._last_quant_screening_date = now_kst().date()
-                self.logger.info("✅ 퀀트 스크리닝 완료")
-                
-                # 🆕 선정된 종목을 intraday_manager에 추가 (장 마감 후 데이터 저장용)
-                portfolio = self.db_manager.get_quant_portfolio(now_kst().strftime('%Y%m%d'), limit=PORTFOLIO_SIZE)
-                if portfolio and hasattr(self, 'intraday_manager') and self.intraday_manager:
-                    added_count = 0
-                    for row in portfolio:
-                        try:
-                            stock_code = row['stock_code']
-                            stock_name = row['stock_name']
-                            reason = f"퀀트 스크리닝 {row['rank']}위 ({row['total_score']:.1f}점)"
-                            
-                            success = await self.intraday_manager.add_selected_stock(
-                                stock_code=stock_code,
-                                stock_name=stock_name,
-                                selection_reason=reason
-                            )
-                            if success:
-                                added_count += 1
-                        except Exception as add_err:
-                            self.logger.warning(f"⚠️ {row.get('stock_code', '?')} intraday_manager 추가 실패: {add_err}")
-                    
-                    self.logger.info(f"📌 스크리닝 종목 {added_count}/{len(portfolio)}개 intraday_manager에 추가 완료")
-                
-                # 텔레그램 알림
-                if self.telegram:
-                    # 상위 종목 정보 포함하여 알림
-                    if portfolio:
-                        message = "📊 퀀트 스크리닝 완료\n\n상위 5개 종목:\n"
-                        for row in portfolio[:5]:
-                            message += f"{row['rank']}. {row['stock_name']} ({row['stock_code']}) - {row['total_score']:.1f}점\n"
-                        await self.telegram.notify_system_status(message)
-                    else:
-                        await self.telegram.notify_system_status("퀀트 스크리닝 완료")
+                self.logger.info("✅ 퀀트 스크리닝 성공")
             else:
-                self.logger.error("❌ 퀀트 스크리닝 실패 (재시도 모두 실패)")
-                if self.telegram:
-                    await self.telegram.notify_error("Quant Screening", "스크리닝 실패 (재시도 3회 모두 실패)")
-        except Exception as e:
-            self.logger.error(f"❌ 퀀트 스크리닝 예외 발생: {e}")
-            if self.telegram:
-                await self.telegram.notify_error("Quant Screening", e)
+                self.logger.warning("⚠️ 퀀트 스크리닝 실패 (오늘은 재시도하지 않음)")
         finally:
             self._quant_screening_task = None
     
     async def _run_ml_data_collection(self):
         """ML 데이터 수집 실행 (15:30)"""
         try:
-            self.logger.info("📊 15:30 ML 데이터 수집 시작")
             self._ml_data_collection_completed = False
-            
-            # 퀀트 포트폴리오 상위 종목들 가져오기 (오늘 또는 최근)
-            today = now_kst().strftime('%Y%m%d')
-            portfolio = self.db_manager.get_quant_portfolio(today, limit=PORTFOLIO_SIZE)
-
-            candidates = None
-            if not portfolio:
-                # 포트폴리오가 없으면 후보 종목들 사용
-                candidates = await self.candidate_selector.get_quant_candidates(limit=PORTFOLIO_SIZE)
-                stock_codes = [c.code for c in candidates[:PORTFOLIO_SIZE]] if candidates else []
-
-                # 후보 종목이 선정되었으면 데이터베이스에 저장
-                if candidates:
-                    try:
-                        self.db_manager.save_candidate_stocks(candidates)
-                        self.logger.info(f"✅ 후보 종목 {len(candidates)}개 데이터베이스 저장 완료")
-                    except Exception as db_err:
-                        self.logger.error(f"❌ 후보 종목 DB 저장 오류: {db_err}")
-            else:
-                stock_codes = [row['stock_code'] for row in portfolio]
-
-            # 🆕 보유 종목도 일봉 데이터 수집 대상에 추가
-            try:
-                holdings = self.db_manager.get_virtual_open_positions()
-                if not holdings.empty:
-                    holding_codes = holdings['stock_code'].unique().tolist()
-                    # 중복 제거하며 추가
-                    for code in holding_codes:
-                        if code not in stock_codes:
-                            stock_codes.append(code)
-                    self.logger.info(f"📊 보유 종목 {len(holding_codes)}개 추가 (일봉 데이터 수집 대상)")
-            except Exception as holding_err:
-                self.logger.warning(f"⚠️ 보유 종목 조회 실패: {holding_err}")
-
-            if not stock_codes:
-                self.logger.warning("⚠️ ML 데이터 수집할 종목이 없습니다")
-                return
-            
-            self.logger.info(f"📊 ML 데이터 수집 대상: {len(stock_codes)}개 종목")
-            
-            # 데이터 수집 실행 (비동기로 실행)
-            loop = asyncio.get_event_loop()
-            
-            # 가격 데이터 수집
-            price_results = await loop.run_in_executor(
-                None,
-                self.ml_data_collector.collect_all_candidates,
-                stock_codes,
-                True,  # collect_price
-                False  # collect_financial (별도 실행)
+            result = await self.screening_task_runner.run_ml_data_collection(
+                verify_callback=self._verify_daily_data_completeness
             )
-            
-            # 재무 데이터 수집
-            financial_results = await loop.run_in_executor(
-                None,
-                self.ml_data_collector.collect_all_candidates,
-                stock_codes,
-                False,  # collect_price
-                True   # collect_financial
-            )
-            
-            # 결과 요약
-            price_success = sum(1 for v in price_results.values() if v)
-            financial_success = sum(1 for v in financial_results.values() if v)
-            
-            self.logger.info(f"✅ ML 데이터 수집 완료: 가격 {price_success}/{len(stock_codes)}개, 재무 {financial_success}/{len(stock_codes)}개")
-
-            # ✅ 추가: 데이터 검증 (당일 일봉 데이터 저장 여부 확인)
-            data_verified = await self._verify_daily_data_completeness()
-
-            # 데이터 수집 완료 플래그 설정
-            self._last_ml_data_collection_date = now_kst().date()
-            self._ml_data_collection_completed = True
-
-            if self.telegram:
-                verification_msg = "✅ 당일 데이터 저장 확인" if data_verified else "⚠️ 당일 데이터 미확인"
-                await self.telegram.notify_system_status(
-                    f"📊 ML 데이터 수집 완료\n"
-                    f"가격 데이터: {price_success}/{len(stock_codes)}개\n"
-                    f"재무 데이터: {financial_success}/{len(stock_codes)}개\n"
-                    f"{verification_msg}"
-                )
-            
-        except Exception as e:
-            self.logger.error(f"❌ ML 데이터 수집 예외 발생: {e}")
-            import traceback
-            traceback.print_exc()
-            if self.telegram:
-                await self.telegram.notify_error("ML Data Collection", e)
+            if result:
+                self._last_ml_data_collection_date = now_kst().date()
+                self._ml_data_collection_completed = True
         finally:
             self._ml_data_collection_task = None
     
     async def _run_ml_screening(self):
         """ML 멀티팩터 스크리닝 실행 (15:40)"""
         try:
-            self.logger.info("🔍 15:40 ML 멀티팩터 스크리닝 시작")
-            loop = asyncio.get_event_loop()
-            
-            # ML 스크리닝 실행
-            result = await self.ml_screening_service.run_daily_screening(
-                date=None,  # 오늘
-                top_n=30   # 상위 30개 (퀀트 포트폴리오와 동일하게)
-            )
-            
-            if result and result.get('success'):
-                self._last_ml_screening_date = now_kst().date()
-                self.logger.info("✅ ML 스크리닝 완료")
-                
-                # 🆕 선정된 종목을 intraday_manager에 추가 (장 마감 후 데이터 저장용)
-                portfolio = result.get('portfolio', [])
-                if portfolio and hasattr(self, 'intraday_manager') and self.intraday_manager:
-                    added_count = 0
-                    for stock in portfolio:
-                        try:
-                            stock_code = stock.get('stock_code')
-                            stock_name = stock.get('stock_name', '')
-                            total_score = stock.get('total_score', 0)
-                            reason = f"ML 스크리닝 ({total_score:.1f}점)"
-                            
-                            if stock_code:
-                                success = await self.intraday_manager.add_selected_stock(
-                                    stock_code=stock_code,
-                                    stock_name=stock_name,
-                                    selection_reason=reason
-                                )
-                                if success:
-                                    added_count += 1
-                        except Exception as add_err:
-                            self.logger.warning(f"⚠️ {stock.get('stock_code', '?')} intraday_manager 추가 실패: {add_err}")
-                    
-                    self.logger.info(f"📌 ML 스크리닝 종목 {added_count}/{len(portfolio)}개 intraday_manager에 추가 완료")
-                
-                if self.telegram:
-                    if portfolio:
-                        message = "🔍 ML 멀티팩터 스크리닝 완료\n\n상위 10개 종목:\n"
-                        for i, stock in enumerate(portfolio[:10], 1):
-                            message += f"{i}. {stock.get('stock_name', 'N/A')} ({stock.get('stock_code', 'N/A')}) - {stock.get('total_score', 0):.1f}점\n"
-                        await self.telegram.notify_system_status(message)
-                    else:
-                        await self.telegram.notify_system_status("ML 스크리닝 완료")
+            result = await self.screening_task_runner.run_ml_screening()
+            # 성공/실패 여부와 무관하게 날짜 기록 (같은 날 재시도 방지)
+            self._last_ml_screening_date = now_kst().date()
+            if result:
+                self.logger.info("✅ ML 스크리닝 성공")
             else:
-                self.logger.error("❌ ML 스크리닝 실패")
-                if self.telegram:
-                    await self.telegram.notify_error("ML Screening", "스크리닝 실패")
-                    
-        except Exception as e:
-            self.logger.error(f"❌ ML 스크리닝 예외 발생: {e}")
-            import traceback
-            traceback.print_exc()
-            if self.telegram:
-                await self.telegram.notify_error("ML Screening", e)
+                self.logger.warning("⚠️ ML 스크리닝 실패 (오늘은 재시도하지 않음)")
         finally:
             self._ml_screening_task = None
     async def _refresh_api(self):
@@ -1169,314 +763,13 @@ class DayTradingBot:
             await self.telegram.notify_error("API Refresh", e)
             return False
     
-    async def _wait_for_sell_orders_completion(self, sell_results: List[Dict], max_wait_seconds: int = 300):
-        """매도 주문 체결 완료 대기"""
-        try:
-            from utils.korean_time import now_kst
-            
-            start_time = now_kst()
-            check_interval = ORDER_CHECK_INTERVAL
-            pending_orders = [r for r in sell_results if r.get('success') and r.get('order_id')]
-            
-            if not pending_orders:
-                return
-            
-            self.logger.info(f"⏳ 매도 주문 체결 확인: {len(pending_orders)}건 대기 중...")
-            
-            while (now_kst() - start_time).total_seconds() < max_wait_seconds:
-                all_filled = True
-                
-                for result in pending_orders:
-                    order_id = result.get('order_id')
-                    if not order_id:
-                        continue
-                    
-                    # 주문 상태 확인
-                    status_data = self.api_manager.get_order_status(order_id)
-                    if status_data:
-                        filled_qty = int(str(status_data.get('tot_ccld_qty', 0)).replace(',', '').strip() or 0)
-                        remaining_qty = int(str(status_data.get('rmn_qty', 0)).replace(',', '').strip() or 0)
-                        order_qty = result.get('quantity', 0)
-                        
-                        if remaining_qty > 0:
-                            all_filled = False
-                            self.logger.debug(f"⏳ {result['stock_code']} 매도 주문 대기 중: {filled_qty}/{order_qty}주 체결, {remaining_qty}주 잔여")
-                        else:
-                            result['filled_quantity'] = filled_qty
-                            self.logger.info(f"✅ {result['stock_code']} 매도 주문 체결 완료: {filled_qty}주")
-                
-                if all_filled:
-                    self.logger.info(f"✅ 모든 매도 주문 체결 완료")
-                    return
-                
-                await asyncio.sleep(check_interval)
-            
-            # 타임아웃
-            self.logger.warning(f"⚠️ 매도 주문 체결 대기 타임아웃 ({max_wait_seconds}초)")
-            for result in pending_orders:
-                if not result.get('filled_quantity'):
-                    self.logger.warning(f"⚠️ {result['stock_code']} 매도 주문 미체결 상태로 진행")
-            
-        except Exception as e:
-            self.logger.error(f"❌ 매도 주문 체결 확인 오류: {e}")
-    
-    async def _update_keep_list_profit_loss(self, keep_list: List[Dict]):
-        """유지 대상 종목의 목표 익절/손절률 갱신"""
-        try:
-            if not keep_list:
-                return
-            
-            self.logger.info(f"🔄 유지 대상 종목 목표 익절/손절률 갱신: {len(keep_list)}개")
-            updated_count = 0
-            
-            for keep_item in keep_list:
-                stock_code = keep_item['stock_code']
-                target_profit_rate = keep_item.get('target_profit_rate', 0.15)
-                stop_loss_rate = keep_item.get('stop_loss_rate', 0.10)
-                
-                trading_stock = self.trading_manager.get_trading_stock(stock_code)
-                if trading_stock:
-                    old_profit = trading_stock.target_profit_rate
-                    old_loss = trading_stock.stop_loss_rate
-                    
-                    trading_stock.target_profit_rate = target_profit_rate
-                    trading_stock.stop_loss_rate = stop_loss_rate
-                    updated_count += 1
-                    
-                    if abs(old_profit - target_profit_rate) > 0.001 or abs(old_loss - stop_loss_rate) > 0.001:
-                        self.logger.info(
-                            f"📊 {stock_code} 목표 익절/손절률 갱신: "
-                            f"익절 {old_profit*100:.1f}% → {target_profit_rate*100:.1f}%, "
-                            f"손절 {old_loss*100:.1f}% → {stop_loss_rate*100:.1f}% "
-                            f"(순위: {keep_item.get('rank', '?')}위, 점수: {keep_item.get('total_score', 0):.1f})"
-                        )
-                else:
-                    self.logger.warning(f"⚠️ {stock_code} TradingStock 객체를 찾을 수 없음 (목표 익절/손절률 갱신 실패)")
-            
-            self.logger.info(f"✅ 유지 대상 목표 익절/손절률 갱신 완료: {updated_count}/{len(keep_list)}개")
-            
-        except Exception as e:
-            self.logger.error(f"❌ 유지 대상 목표 익절/손절률 갱신 오류: {e}")
-    
-    async def _send_rebalancing_result_notification(self, plan: Dict, sell_results: List[Dict], buy_results: List[Dict]):
-        """리밸런싱 결과 상세 알림"""
-        try:
-            if not self.telegram:
-                return
-            
-            calc_date = plan.get('calc_date', '')
-            keep_list = plan.get('keep_list', [])
-            
-            success_sell = sum(1 for r in sell_results if r.get('success'))
-            success_buy = sum(1 for r in buy_results if r.get('success'))
-            
-            message = f"🔄 리밸런싱 완료 ({calc_date})\n\n"
-            message += f"📊 요약:\n"
-            message += f"  • 매도: {success_sell}/{len(sell_results)}건 성공\n"
-            message += f"  • 매수: {success_buy}/{len(buy_results)}건 성공\n"
-            message += f"  • 유지: {len(keep_list)}건\n\n"
-            
-            if sell_results:
-                message += f"📤 매도 종목 ({len(sell_results)}건):\n"
-                for r in sell_results[:10]:  # 최대 10개
-                    status = "✅" if r.get('success') else "❌"
-                    filled = r.get('filled_quantity', r.get('quantity', 0))
-                    message += f"  {status} {r['stock_code']}({r.get('stock_name', '')}) {filled}주\n"
-                if len(sell_results) > 10:
-                    message += f"  ... 외 {len(sell_results) - 10}건\n"
-                message += "\n"
-            
-            if buy_results:
-                message += f"📥 매수 종목 ({len(buy_results)}건):\n"
-                for r in buy_results[:10]:  # 최대 10개
-                    status = "✅" if r.get('success') else "❌"
-                    qty = r.get('quantity', 0)
-                    amount = r.get('target_amount', 0)
-                    message += f"  {status} {r['stock_code']}({r.get('stock_name', '')}) {qty}주 ({amount:,.0f}원)\n"
-                if len(buy_results) > 10:
-                    message += f"  ... 외 {len(buy_results) - 10}건\n"
-                message += "\n"
-            
-            if keep_list:
-                message += f"📌 유지 종목 ({len(keep_list)}건):\n"
-                for k in keep_list[:5]:  # 최대 5개
-                    message += f"  • {k['stock_code']}({k.get('stock_name', '')}) - {k.get('rank', 'N/A')}위\n"
-                if len(keep_list) > 5:
-                    message += f"  ... 외 {len(keep_list) - 5}건\n"
-            
-            await self.telegram.notify_system_status(message)
-            
-        except Exception as e:
-            self.logger.error(f"❌ 리밸런싱 결과 알림 오류: {e}")
-    
     async def _restore_todays_candidates(self):
         """DB에서 후보 종목 및 보유 종목 복원"""
-        try:
-            import sqlite3
-            from pathlib import Path
-
-            # DB 경로
-            db_path = Path(__file__).parent / "data" / "robotrader.db"
-            if not db_path.exists():
-                self.logger.info("📊 DB 파일 없음 - 종목 복원 건너뜀")
-                return
-
-            # 오늘 날짜
-            today = now_kst().strftime('%Y-%m-%d')
-
-            # 1. 오늘 날짜의 후보 종목 복원
-            with sqlite3.connect(str(db_path)) as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    SELECT DISTINCT stock_code, stock_name, score, reasons
-                    FROM candidate_stocks
-                    WHERE DATE(selection_date) = ?
-                    ORDER BY score DESC
-                ''', (today,))
-
-                rows = cursor.fetchall()
-
-            if not rows:
-                self.logger.info(f"📊 오늘({today}) 후보 종목 없음")
-            else:
-                self.logger.info(f"🔄 오늘({today}) 후보 종목 {len(rows)}개 복원 시작")
-            
-            restored_count = 0
-            for row in rows:
-                stock_code = row[0]
-                stock_name = row[1] or f"Stock_{stock_code}"
-                score = row[2] or 0.0
-                reason = row[3] or "DB 복원"
-
-                # 전날 종가 조회 (공통 메서드 사용)
-                prev_close = self._get_previous_close_price(stock_code)
-                
-                # 거래 상태 관리자에 추가
-                success = await self.trading_manager.add_selected_stock(
-                    stock_code=stock_code,
-                    stock_name=stock_name,
-                    selection_reason=f"DB복원: {reason} (점수: {score})",
-                    prev_close=prev_close
-                )
-                
-                if success:
-                    restored_count += 1
-
-            if rows:
-                self.logger.info(f"✅ 오늘 후보 종목 {restored_count}/{len(rows)}개 복원 완료")
-
-            # 2. 보유 종목 복원 (매도 판단을 위해 - 포지션 정보 포함)
-            try:
-                holdings = self.db_manager.get_virtual_open_positions()
-                if not holdings.empty:
-                    self.logger.info(f"🔄 보유 종목 {len(holdings)}개 복원 시작")
-                    holding_restored = 0
-
-                    for _, holding in holdings.iterrows():
-                        stock_code = holding['stock_code']
-                        stock_name = holding['stock_name']
-                        quantity = int(holding['quantity'])
-                        buy_price = float(holding['buy_price'])
-                        target_profit_rate = holding.get('target_profit_rate', 0.15)
-                        stop_loss_rate = holding.get('stop_loss_rate', 0.10)
-
-                        # 전날 종가 조회 (공통 메서드 사용)
-                        prev_close = self._get_previous_close_price(stock_code)
-
-                        # 거래 상태 관리자에 추가
-                        success = await self.trading_manager.add_selected_stock(
-                            stock_code=stock_code,
-                            stock_name=stock_name,
-                            selection_reason=f"보유 종목 복원 ({quantity}주 @{buy_price:,.0f}원)",
-                            prev_close=prev_close
-                        )
-
-                        if success:
-                            # 포지션 정보 설정
-                            trading_stock = self.trading_manager.get_trading_stock(stock_code)
-                            if trading_stock:
-                                # 포지션 정보 복원
-                                trading_stock.set_position(quantity, buy_price)
-                                trading_stock.target_profit_rate = target_profit_rate
-                                trading_stock.stop_loss_rate = stop_loss_rate
-
-                                # 상태를 POSITIONED로 설정
-                                self.trading_manager._change_stock_state(
-                                    stock_code,
-                                    StockState.POSITIONED,
-                                    f"DB 복원: {quantity}주 @{buy_price:,.0f}원 (익절:{target_profit_rate*100:.1f}% 손절:{stop_loss_rate*100:.1f}%)"
-                                )
-
-                                holding_restored += 1
-                                self.logger.debug(
-                                    f"📊 {stock_code} 포지션 복원: {quantity}주 @{buy_price:,.0f}원, "
-                                    f"익절가 {buy_price*(1+target_profit_rate):,.0f}원, "
-                                    f"손절가 {buy_price*(1-stop_loss_rate):,.0f}원"
-                                )
-
-                    self.logger.info(f"✅ 보유 종목 {holding_restored}/{len(holdings)}개 복원 완료")
-                else:
-                    self.logger.info("📊 보유 종목 없음")
-
-            except Exception as holding_err:
-                self.logger.error(f"❌ 보유 종목 복원 실패: {holding_err}")
-
-        except Exception as e:
-            self.logger.error(f"❌ 종목 복원 실패: {e}")
+        await self.state_restoration_helper.restore_todays_candidates()
    
     async def _check_condition_search(self):
         """장중 퀀트 후보 스크리닝 결과 반영"""
-        try:
-            # 리밸런싱 모드일 때는 실행하지 않음 (순수 리밸런싱 방식)
-            if getattr(self.config, 'rebalancing_mode', False):
-                self.logger.debug("ℹ️ 리밸런싱 모드: 장중 조건검색 체크 스킵 (09:05 리밸런싱으로만 포지션 구성)")
-                return
-            
-            quant_candidates = await self.candidate_selector.get_quant_candidates(limit=QUANT_CANDIDATE_LIMIT)
-
-            if not quant_candidates:
-                self.logger.debug("ℹ️ 퀀트 스크리닝: 후보 종목 없음")
-                return
-
-            candidates_to_save = []
-
-            for candidate in quant_candidates:
-                stock_code = candidate.code
-                stock_name = candidate.name
-                prev_close = candidate.prev_close if candidate.prev_close > 0 else self._get_previous_close_price(stock_code)
-
-                selection_reason = candidate.reason or f"퀀트 스코어 {candidate.score:.1f}점"
-
-                success = await self.trading_manager.add_selected_stock(
-                    stock_code=stock_code,
-                    stock_name=stock_name,
-                    selection_reason=selection_reason,
-                    prev_close=prev_close
-                )
-
-                if success:
-                    candidates_to_save.append(
-                        CandidateStock(
-                            code=stock_code,
-                            name=stock_name,
-                            market=candidate.market,
-                            score=candidate.score,
-                            reason=selection_reason,
-                            prev_close=prev_close
-                        )
-                    )
-
-            if candidates_to_save:
-                try:
-                    self.db_manager.save_candidate_stocks(candidates_to_save)
-                except Exception as db_err:
-                    self.logger.error(f"❌ 후보 종목 DB 저장 오류: {db_err}")
-            else:
-                self.logger.debug("ℹ️ 퀀트 스크리닝: 추가할 종목 없음")
-            
-        except Exception as e:
-            self.logger.error(f"❌ 장중 조건검색 체크 오류: {e}")
-            await self.telegram.notify_error("Condition Search", e)
+        await self.state_restoration_helper.check_condition_search()
 
     async def _verify_daily_data_completeness(self) -> bool:
         """
