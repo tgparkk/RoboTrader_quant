@@ -116,16 +116,25 @@ class QuantRebalancingService:
             # 예: 12/3 09:05 리밸런싱 시 → 12/2 15:40에 생성된 포트폴리오 사용
             portfolio_date = calc_date
             target_portfolio = self.db_manager.get_quant_portfolio(portfolio_date, limit=self.target_portfolio_size)
-            
-            # 오늘 날짜로 포트폴리오가 없으면 전날 것을 시도
+
+            # 오늘 날짜로 포트폴리오가 없으면 최대 7일 이전까지 역순 검색 (주말/공휴일 고려)
             if not target_portfolio:
-                previous_date = (datetime.strptime(calc_date, '%Y%m%d') - timedelta(days=1)).strftime('%Y%m%d')
-                self.logger.info(f"ℹ️ 오늘({calc_date}) 포트폴리오 없음 → 전날({previous_date}) 조회 시도")
-                target_portfolio = self.db_manager.get_quant_portfolio(previous_date, limit=self.target_portfolio_size)
-                portfolio_date = previous_date
-            
+                self.logger.info(f"ℹ️ 오늘({calc_date}) 포트폴리오 없음 → 최근 7일 이내 검색 시작")
+                current_date = datetime.strptime(calc_date, '%Y%m%d')
+
+                for days_back in range(1, 8):  # 1일 전부터 7일 전까지
+                    previous_date = (current_date - timedelta(days=days_back)).strftime('%Y%m%d')
+                    target_portfolio = self.db_manager.get_quant_portfolio(previous_date, limit=self.target_portfolio_size)
+
+                    if target_portfolio:
+                        portfolio_date = previous_date
+                        self.logger.info(f"✅ {days_back}일 전 포트폴리오 발견: {previous_date} ({len(target_portfolio)}개 종목)")
+                        break
+                    else:
+                        self.logger.debug(f"   {previous_date}: 포트폴리오 없음")
+
             if not target_portfolio:
-                self.logger.warning(f"⚠️ 목표 포트폴리오 데이터 없음: {calc_date} 및 전날")
+                self.logger.warning(f"⚠️ 목표 포트폴리오 데이터 없음: {calc_date} 기준 최근 7일 이내")
                 return {'sell_list': [], 'buy_list': [], 'keep_list': []}
             
             self.logger.info(f"✅ 목표 포트폴리오 로드: {portfolio_date} ({len(target_portfolio)}개 종목)")

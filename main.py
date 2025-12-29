@@ -709,8 +709,12 @@ class DayTradingBot:
         """일일 퀀트 스크리닝 실행 (8단계 기준)"""
         try:
             result = await self.screening_task_runner.run_quant_screening()
+            # 성공/실패 여부와 무관하게 날짜 기록 (같은 날 재시도 방지)
+            self._last_quant_screening_date = now_kst().date()
             if result:
-                self._last_quant_screening_date = now_kst().date()
+                self.logger.info("✅ 퀀트 스크리닝 성공")
+            else:
+                self.logger.warning("⚠️ 퀀트 스크리닝 실패 (오늘은 재시도하지 않음)")
         finally:
             self._quant_screening_task = None
     
@@ -731,8 +735,12 @@ class DayTradingBot:
         """ML 멀티팩터 스크리닝 실행 (15:40)"""
         try:
             result = await self.screening_task_runner.run_ml_screening()
+            # 성공/실패 여부와 무관하게 날짜 기록 (같은 날 재시도 방지)
+            self._last_ml_screening_date = now_kst().date()
             if result:
-                self._last_ml_screening_date = now_kst().date()
+                self.logger.info("✅ ML 스크리닝 성공")
+            else:
+                self.logger.warning("⚠️ ML 스크리닝 실패 (오늘은 재시도하지 않음)")
         finally:
             self._ml_screening_task = None
     async def _refresh_api(self):
