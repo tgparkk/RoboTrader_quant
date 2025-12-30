@@ -42,7 +42,9 @@
       "Bash(find:*)",
       "Bash(git merge refactor-main-py-phase1 --no-ff -m \"$\\(cat <<''EOF''\nMerge refactor-main-py-phase1: main.py 리팩토링 및 주요 버그 수정\n\n## Phase 1-7 리팩토링 완료\n\n### 코드 구조 개선\n- main.py: 1,732 → 1,017 lines \\(-41%\\)\n- 7개 헬퍼 클래스로 분리\n  - RebalancingNotificationHelper\n  - OrderWaitHelper\n  - KeepListUpdater\n  - RebalancingExecutor\n  - ScreeningTaskRunner\n  - StateRestorationHelper\n\n### 문서화 추가\n- SYSTEM_FLOW.md: 전체 시스템 흐름 상세 설명\n- README.md: 데이터 관리 및 동적 조정 섹션 추가\n- 섹션 10: 데이터 관리 및 동적 손익비 조정 메커니즘\n\n## 주요 버그 수정 \\(3건\\)\n\n### 1. 🔴 리밸런싱 주말/공휴일 처리 \\(Critical\\)\n- 문제: 월요일 리밸런싱 시 전날\\(토요일\\) 포트폴리오만 조회 → 실패\n- 해결: 최대 7일 이전까지 역순 검색\n- 영향: 월요일/연휴 다음날 정상 리밸런싱 가능\n\n### 2. ⚠️ 일일 리포트 SQL 오류 \\(Medium\\)\n- 문제: 잘못된 컬럼명\\(buy_price, trade_type\\) 사용 → 생성 실패\n- 해결: 올바른 컬럼명\\(price, action\\)으로 수정\n- 영향: 15:35 일일 리포트 정상 생성\n\n### 3. ⚠️ 스크리닝 반복 실패 로그 \\(Medium\\)\n- 문제: 실패 시 5초마다 무한 재시도\n- 해결: 성공/실패 무관하게 날짜 기록, 1일 1회만 실행\n- 영향: 불필요한 로그 반복 방지\n\n## 변경 파일\n- core/helpers/*.py \\(신규 7개\\)\n- core/quant/quant_rebalancing_service.py\n- scripts/daily_trading_summary.py\n- main.py\n- SYSTEM_FLOW.md \\(신규\\)\n- README.md\n\n## 테스트 완료\n- Phase 1-7 리팩토링: ✅ 정상 동작 확인\n- 버그 수정: ✅ 12/29\\(월\\) 로그 분석 완료\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(git stash:*)",
-      "Bash(git reset:*)"
+      "Bash(git reset:*)",
+      "Bash(cp:*)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []

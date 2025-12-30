@@ -495,9 +495,10 @@ class DayTradingBot:
         try:
             self.logger.info("🔥 DEBUG: _system_monitoring_task 시작됨")  # 디버깅용
             self.logger.info("📡 시스템 모니터링 태스크 시작")
-            
+
             last_api_refresh = now_kst()
             last_market_check = now_kst()
+            last_portfolio_snapshot = now_kst()
 
             self.logger.info("🔥 DEBUG: while 루프 진입 시도")  # 디버깅용
             while self.is_running:
@@ -543,12 +544,23 @@ class DayTradingBot:
                             self.logger.info("✅ 일일 매매 리포트 생성 완료")
                         except Exception as report_err:
                             self.logger.error(f"❌ 일일 매매 리포트 생성 오류: {report_err}")
-                
+
                 #             self.logger.info("✅ 장 마감 후 차트 생성 완료 (1회 실행 완료)")
-                
+
+                # 30분마다 포트폴리오 스냅샷 저장 (장중에만)
+                if (current_time - last_portfolio_snapshot).total_seconds() >= 30 * 60:  # 30분
+                    if is_market_open():
+                        self.logger.info(f"📸 포트폴리오 스냅샷 저장 ({current_time.strftime('%H:%M:%S')})")
+                        try:
+                            from scripts.save_portfolio_snapshot import save_portfolio_snapshot
+                            await asyncio.to_thread(save_portfolio_snapshot)
+                        except Exception as snapshot_err:
+                            self.logger.error(f"❌ 포트폴리오 스냅샷 저장 오류: {snapshot_err}")
+                    last_portfolio_snapshot = current_time
+
                 # 시스템 모니터링 루프 대기 (5초 주기)
-                await asyncio.sleep(5)  
-                
+                await asyncio.sleep(5)
+
                 # 30분마다 시스템 상태 로깅
                 if (current_time - last_market_check).total_seconds() >= 30 * 60:  # 30분
                     await self._log_system_status()
