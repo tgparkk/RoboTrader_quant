@@ -574,6 +574,14 @@ class TradingStockManager:
         try:
             positioned_stocks = list(self.stocks_by_state[StockState.POSITIONED].values())
 
+            if not positioned_stocks:
+                return
+
+            # 최초 1회만 로깅 (너무 많은 로그 방지)
+            if not hasattr(self, '_sell_check_logged'):
+                self.logger.info(f"🔍 보유 종목 손익절 체크 시작: {len(positioned_stocks)}개 종목")
+                self._sell_check_logged = True
+
             for trading_stock in positioned_stocks:
                 if not trading_stock.position:
                     continue
@@ -597,12 +605,34 @@ class TradingStockManager:
         try:
             stock_code = trading_stock.stock_code
 
-            # 현재가 조회
-            price_data = self.data_collector.get_stock(stock_code)
-            if not price_data or price_data.last_price <= 0:
-                return
+            # 현재가 조회 - intraday_manager 사용 (리밸런싱 모드 대응)
+            current_price = None
 
-            current_price = price_data.last_price
+            # 1. 캐시된 현재가 먼저 시도
+            current_price_info = self.intraday_manager.get_cached_current_price(stock_code)
+            if current_price_info:
+                current_price = current_price_info.get('current_price')
+
+            # 2. 캐시 없으면 API 직접 호출
+            if current_price is None:
+                try:
+                    current_price_info = self.intraday_manager.get_current_price_for_sell(stock_code)
+                    if current_price_info:
+                        current_price = current_price_info.get('current_price')
+                except Exception as api_err:
+                    self.logger.warning(f"⚠️ {stock_code} 현재가 API 조회 실패: {api_err}")
+
+            # 3. data_collector fallback (후보 종목용)
+            if current_price is None:
+                price_data = self.data_collector.get_stock(stock_code)
+                if price_data and price_data.last_price > 0:
+                    current_price = price_data.last_price
+
+            # 현재가 조회 실패 시 종료
+            if current_price is None or current_price <= 0:
+                # 주기적으로 발생할 수 있으므로 DEBUG 레벨로 로깅
+                self.logger.debug(f"⚠️ {stock_code} 현재가 조회 실패 - 손익절 체크 스킵")
+                return
 
             # 간단한 손익절 체크
             if trading_stock.position:

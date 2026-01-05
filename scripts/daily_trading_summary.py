@@ -247,11 +247,13 @@ def print_today_trading_summary():
         print()
 
         cursor.execute('''
-            SELECT rank, stock_code, stock_name, total_score,
-                   value_score, quality_score, momentum_score, growth_score
-            FROM quant_portfolio
-            WHERE calc_date = (SELECT MAX(calc_date) FROM quant_portfolio)
-            ORDER BY rank
+            SELECT p.rank, p.stock_code, p.stock_name, p.total_score,
+                   f.value_score, f.quality_score, f.momentum_score, f.growth_score
+            FROM quant_portfolio p
+            LEFT JOIN quant_factors f
+                ON p.calc_date = f.calc_date AND p.stock_code = f.stock_code
+            WHERE p.calc_date = (SELECT MAX(calc_date) FROM quant_portfolio)
+            ORDER BY p.rank
             LIMIT 10
         ''')
 
