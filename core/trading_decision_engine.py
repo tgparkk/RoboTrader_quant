@@ -471,22 +471,25 @@ class TradingDecisionEngine:
             self.logger.error(f"❌ {trading_stock.stock_code} 실제 매도 처리 오류: {e}")
             return False
     
-    async def execute_virtual_sell(self, trading_stock, combined_data, sell_reason):
+    async def execute_virtual_sell(self, trading_stock, sell_price, sell_reason):
         """가상 매도 실행"""
         try:
             stock_code = trading_stock.stock_code
             stock_name = trading_stock.stock_name
-            
-            # 🆕 캐시된 실시간 현재가 사용 (매도 실행용)
-            current_price_info = self.intraday_manager.get_cached_current_price(stock_code)
-            
-            if current_price_info is not None:
-                current_price = current_price_info['current_price']
-                self.logger.debug(f"📈 {stock_code} 실시간 현재가로 매도 실행: {current_price:,.0f}원")
+
+            # 전달받은 sell_price가 있으면 우선 사용
+            if sell_price and sell_price > 0:
+                current_price = sell_price
+                self.logger.debug(f"📈 {stock_code} 전달받은 가격으로 매도 실행: {current_price:,.0f}원")
             else:
-                # 현재가 정보 없으면 분봉 데이터의 마지막 가격 사용 (폴백)
-                current_price = self._safe_float_convert(combined_data['close'].iloc[-1])
-                self.logger.warning(f"📊 {stock_code} 분봉 데이터로 매도 실행: {current_price:,.0f}원 (실시간 현재가 없음)")
+                # sell_price가 없으면 캐시된 실시간 현재가 사용
+                current_price_info = self.intraday_manager.get_cached_current_price(stock_code)
+                if current_price_info is not None:
+                    current_price = current_price_info['current_price']
+                    self.logger.debug(f"📈 {stock_code} 실시간 현재가로 매도 실행: {current_price:,.0f}원")
+                else:
+                    self.logger.error(f"❌ {stock_code} 매도 가격 정보 없음")
+                    return False
             
             # 가상 매수 기록 정보 가져오기
             buy_record_id = getattr(trading_stock, '_virtual_buy_record_id', None)

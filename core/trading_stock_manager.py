@@ -636,7 +636,7 @@ class TradingStockManager:
 
             # 간단한 손익절 체크
             if trading_stock.position:
-                buy_price = trading_stock.position.buy_price
+                buy_price = trading_stock.position.avg_price
                 profit_rate = (current_price - buy_price) / buy_price
 
                 # 목표 익절률 체크
