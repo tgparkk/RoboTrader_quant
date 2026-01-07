@@ -665,10 +665,10 @@ class TradingStockManager:
 
             # decision_engine을 통해 매도 실행
             if self.decision_engine:
-                # 가상매매 모드 확인
-                from config.settings import load_config
-                config = load_config()
-                if getattr(config, 'paper_trading', False):
+                # 가상매매 모드 확인 (TradingConfig 객체 사용)
+                from config.settings import load_trading_config
+                config = load_trading_config()
+                if config.paper_trading:
                     # 가상 매도 실행
                     success = await self.decision_engine.execute_virtual_sell(
                         trading_stock,
