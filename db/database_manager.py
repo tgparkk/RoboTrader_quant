@@ -1135,8 +1135,8 @@ class DatabaseManager:
             self.logger.error(f"가상 매매 미매칭 매수 조회 실패: {e}")
             return None
     
-    def save_virtual_buy(self, stock_code: str, stock_name: str, price: float, 
-                        quantity: int, strategy: str, reason: str, 
+    def save_virtual_buy(self, stock_code: str, stock_name: str, price: float,
+                        quantity: int, strategy: str, reason: str,
                         timestamp: datetime = None,
                         target_profit_rate: float = None,
                         stop_loss_rate: float = None) -> Optional[int]:
@@ -1144,29 +1144,41 @@ class DatabaseManager:
         try:
             if timestamp is None:
                 timestamp = now_kst()
-            
+
+            # 타입 안전성 보장: numpy 타입을 Python 기본 타입으로 변환
+            quantity = int(quantity)
+            price = float(price)
+            if target_profit_rate is not None:
+                target_profit_rate = float(target_profit_rate)
+            if stop_loss_rate is not None:
+                stop_loss_rate = float(stop_loss_rate)
+
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                
+
+                # timestamp를 Unix epoch (정수)로 변환
+                timestamp_unix = int(timestamp.timestamp())
+                created_at_unix = int(now_kst().timestamp())
+
                 cursor.execute('''
-                    INSERT INTO virtual_trading_records 
-                    (stock_code, stock_name, action, quantity, price, timestamp, strategy, reason, is_test, 
+                    INSERT INTO virtual_trading_records
+                    (stock_code, stock_name, action, quantity, price, timestamp, strategy, reason, is_test,
                      target_profit_rate, stop_loss_rate, created_at)
                     VALUES (?, ?, 'BUY', ?, ?, ?, ?, ?, 1, ?, ?, ?)
-                ''', (stock_code, stock_name, quantity, price, timestamp.strftime('%Y-%m-%d %H:%M:%S'), 
-                      strategy, reason, target_profit_rate, stop_loss_rate, 
-                      now_kst().strftime('%Y-%m-%d %H:%M:%S')))
-                
+                ''', (stock_code, stock_name, quantity, price, timestamp_unix,
+                      strategy, reason, target_profit_rate, stop_loss_rate,
+                      created_at_unix))
+
                 buy_record_id = cursor.lastrowid
                 conn.commit()
-                
+
                 profit_info = ""
                 if target_profit_rate is not None and stop_loss_rate is not None:
                     profit_info = f" (익절: {target_profit_rate*100:.1f}%, 손절: {stop_loss_rate*100:.1f}%)"
-                
+
                 self.logger.info(f"🔥 가상 매수 기록 저장: {stock_code}({stock_name}) {quantity}주 @{price:,.0f}원 - {strategy}{profit_info}")
                 return buy_record_id
-                
+
         except Exception as e:
             self.logger.error(f"가상 매수 기록 저장 실패: {e}")
             return None
@@ -1178,6 +1190,11 @@ class DatabaseManager:
         try:
             if timestamp is None:
                 timestamp = now_kst()
+
+            # 타입 안전성 보장: numpy.int64 등을 Python int로 변환
+            buy_record_id = int(buy_record_id) if buy_record_id is not None else None
+            quantity = int(quantity)
+            price = float(price)
 
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -1230,22 +1247,26 @@ class DatabaseManager:
                 # 손익 계산
                 profit_loss = (price - buy_price) * quantity
                 profit_rate = (price - buy_price) / buy_price  # 소수 형태로 저장 (0.05 = 5%)
-                
+
+                # timestamp를 Unix epoch (정수)로 변환
+                timestamp_unix = int(timestamp.timestamp())
+                created_at_unix = int(now_kst().timestamp())
+
                 cursor.execute('''
-                    INSERT INTO virtual_trading_records 
-                    (stock_code, stock_name, action, quantity, price, timestamp, strategy, reason, 
+                    INSERT INTO virtual_trading_records
+                    (stock_code, stock_name, action, quantity, price, timestamp, strategy, reason,
                      is_test, profit_loss, profit_rate, buy_record_id, created_at)
                     VALUES (?, ?, 'SELL', ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
-                ''', (stock_code, stock_name, quantity, price, timestamp.strftime('%Y-%m-%d %H:%M:%S'), 
-                      strategy, reason, profit_loss, profit_rate, buy_record_id, now_kst().strftime('%Y-%m-%d %H:%M:%S')))
-                
+                ''', (stock_code, stock_name, quantity, price, timestamp_unix,
+                      strategy, reason, profit_loss, profit_rate, buy_record_id, created_at_unix))
+
                 conn.commit()
-                
+
                 profit_sign = "+" if profit_loss >= 0 else ""
                 self.logger.info(f"📉 가상 매도 기록 저장: {stock_code}({stock_name}) {quantity}주 @{price:,.0f}원 - "
                                f"손익: {profit_sign}{profit_loss:,.0f}원 ({profit_rate:+.2f}%) - {strategy}")
                 return True
-                
+
         except Exception as e:
             self.logger.error(f"가상 매도 기록 저장 실패: {e}")
             return False
