@@ -11,7 +11,7 @@ sys.path.insert(0, project_root)
 from utils.korean_time import now_kst, is_market_open
 from utils.logger import setup_logger
 from db.database_manager import DatabaseManager
-from api.kis_api_manager import KISApiManager
+from api.kis_api_manager import KISAPIManager
 import time
 
 logger = setup_logger(__name__)
@@ -23,7 +23,7 @@ def get_api_manager():
     """API 매니저 싱글톤"""
     global _api_manager
     if _api_manager is None:
-        _api_manager = KISApiManager()
+        _api_manager = KISAPIManager()
     return _api_manager
 
 

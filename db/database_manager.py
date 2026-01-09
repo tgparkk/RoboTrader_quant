@@ -1298,9 +1298,11 @@ class DatabaseManager:
                 '''
                 
                 df = pd.read_sql_query(query, conn)
-                if not df.empty:
-                    df['buy_time'] = pd.to_datetime(df['buy_time'], format='ISO8601', utc=True)
-                
+                if not df.empty and 'buy_time' in df.columns:
+                    # DB timestamp는 Unix epoch(초) 또는 문자열로 저장됨
+                    # pandas는 숫자형은 자동으로 Unix timestamp로 인식
+                    df['buy_time'] = pd.to_datetime(df['buy_time'], unit='s', utc=True, errors='coerce')
+
                 return df
                 
         except Exception as e:

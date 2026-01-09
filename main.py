@@ -455,20 +455,15 @@ class DayTradingBot:
                                 
                                 # 리밸런싱 실행 (매도/매수 또는 유지 대상 목표 익절/손절률 갱신)
                                 if plan:
-                                    keep_list = plan.get('keep_list', [])
                                     if plan.get('sell_list') or plan.get('buy_list'):
-                                        # 매도/매수 실행 (유지 대상 갱신 포함)
+                                        # 매도/매수 실행
                                         await self._execute_rebalancing_async(plan)
                                         self._last_rebalancing_date = today_str
                                         self.logger.info(f"✅ 리밸런싱 완료: {today_str}")
-                                    elif keep_list:
-                                        # 유지 대상만 있는 경우 목표 익절/손절률만 갱신
-                                        await self._update_keep_list_profit_loss(keep_list)
-                                        self._last_rebalancing_date = today_str
-                                        self.logger.info(f"✅ 유지 대상 목표 익절/손절률 갱신 완료: {today_str}")
                                     else:
-                                        self.logger.info(f"ℹ️ 리밸런싱 불필요: 목표 포트와 동일")
+                                        # 유지 대상만 있는 경우 (매도/매수 없음)
                                         self._last_rebalancing_date = today_str
+                                        self.logger.info(f"✅ 리밸런싱 완료: 유지 {len(plan.get('keep_list', []))}개")
                                 else:
                                     self.logger.info(f"ℹ️ 리밸런싱 불필요: 목표 포트와 동일")
                                     self._last_rebalancing_date = today_str
