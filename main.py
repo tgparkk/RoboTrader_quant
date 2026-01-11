@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import List, Dict
 import pandas as pd
 
+# Windows 콘솔 UTF-8 인코딩 설정 (이모지 출력 지원)
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+
 # 프로젝트 경로 추가
 sys.path.append(str(Path(__file__).parent))
 
