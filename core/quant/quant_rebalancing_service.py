@@ -134,8 +134,24 @@ class QuantRebalancingService:
                         self.logger.debug(f"   {previous_date}: 포트폴리오 없음")
 
             if not target_portfolio:
-                self.logger.warning(f"⚠️ 목표 포트폴리오 데이터 없음: {calc_date} 기준 최근 7일 이내")
-                return {'sell_list': [], 'buy_list': [], 'keep_list': []}
+                self.logger.error(f"❌ 목표 포트폴리오 데이터 없음: {calc_date} 기준 최근 7일 이내")
+                self.logger.warning(f"⚠️ 긴급 조치: 현재 보유 종목 전체 매도 (데이터 부재로 인한 안전 조치)")
+
+                # 포트폴리오 데이터가 없으면 모든 보유 종목 매도 (안전 조치)
+                emergency_sell_list = []
+                for holding in current_holdings:
+                    emergency_sell_list.append({
+                        'stock_code': holding['stock_code'],
+                        'stock_name': holding.get('stock_name', ''),
+                        'quantity': holding.get('quantity', 0),
+                        'reason': '포트폴리오 데이터 부재 (긴급 매도)'
+                    })
+
+                return {
+                    'sell_list': emergency_sell_list,
+                    'buy_list': [],
+                    'keep_list': []
+                }
             
             self.logger.info(f"✅ 목표 포트폴리오 로드: {portfolio_date} ({len(target_portfolio)}개 종목)")
 
@@ -291,8 +307,8 @@ class QuantRebalancingService:
                                 'stock_name': holding.get('stock_name', ''),
                                 'rank': factors_data.get('factor_rank', 999),
                                 'total_score': factors_data.get('total_score', 0),
-                                'target_profit_rate': 0.05,  # 기본값
-                                'stop_loss_rate': -0.05  # 기본값
+                                'target_profit_rate': 0.05,  # 기본값 (5% 익절)
+                                'stop_loss_rate': 0.05  # 기본값 (5% 손절) - 양수로 수정
                             })
             
             self.logger.info(

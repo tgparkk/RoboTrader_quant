@@ -605,28 +605,30 @@ class TradingStockManager:
         try:
             stock_code = trading_stock.stock_code
 
-            # 현재가 조회 - intraday_manager 사용 (리밸런싱 모드 대응)
+            # 현재가 조회 - 손익절 정확성을 위해 API 직접 호출 우선
             current_price = None
 
-            # 1. 캐시된 현재가 먼저 시도
-            current_price_info = self.intraday_manager.get_cached_current_price(stock_code)
-            if current_price_info:
-                current_price = current_price_info.get('current_price')
+            # 1. API 직접 호출 (최신 가격, 손익절 판단에 가장 정확)
+            try:
+                current_price_info = self.intraday_manager.get_current_price_for_sell(stock_code)
+                if current_price_info:
+                    current_price = current_price_info.get('current_price')
+            except Exception as api_err:
+                self.logger.warning(f"⚠️ {stock_code} 현재가 API 조회 실패: {api_err}")
 
-            # 2. 캐시 없으면 API 직접 호출
+            # 2. 캐시된 현재가 폴백 (API 실패 시)
             if current_price is None:
-                try:
-                    current_price_info = self.intraday_manager.get_current_price_for_sell(stock_code)
-                    if current_price_info:
-                        current_price = current_price_info.get('current_price')
-                except Exception as api_err:
-                    self.logger.warning(f"⚠️ {stock_code} 현재가 API 조회 실패: {api_err}")
+                current_price_info = self.intraday_manager.get_cached_current_price(stock_code)
+                if current_price_info:
+                    current_price = current_price_info.get('current_price')
+                    self.logger.debug(f"📊 {stock_code} 캐시된 현재가 사용: {current_price:,.0f}원")
 
-            # 3. data_collector fallback (후보 종목용)
+            # 3. data_collector fallback (최종 수단)
             if current_price is None:
                 price_data = self.data_collector.get_stock(stock_code)
                 if price_data and price_data.last_price > 0:
                     current_price = price_data.last_price
+                    self.logger.debug(f"📊 {stock_code} data_collector 현재가 사용: {current_price:,.0f}원")
 
             # 현재가 조회 실패 시 종료
             if current_price is None or current_price <= 0:

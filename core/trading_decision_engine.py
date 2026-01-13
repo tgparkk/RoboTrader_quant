@@ -57,6 +57,9 @@ class TradingDecisionEngine:
         self.trend_analyzer = TrendMomentumAnalyzer()
         self.use_trend_based_exit = True  # 추세 기반 청산 활성화 플래그
 
+        # 패턴 로거 초기화 (미래 사용 예정)
+        self.pattern_logger = None
+
         # 쿨다운은 TradingStock 모델에서 관리 (is_buy_cooldown_active 메서드 사용)
 
         self.logger.info("🧠 매매 판단 엔진 초기화 완료 (추세 기반 청산: ON)")
@@ -545,42 +548,42 @@ class TradingDecisionEngine:
                     reason=sell_reason,
                     buy_record_id=buy_record_id
                 )
-                
+
                 if success:
+                    try:
+                        # 손익 계산 (로깅용)
+                        profit_loss = (current_price - buy_price) * quantity if buy_price and buy_price > 0 else 0
+                        profit_rate = ((current_price - buy_price) / buy_price) * 100 if buy_price and buy_price > 0 else 0
+                        profit_sign = "+" if profit_loss >= 0 else ""
 
-                    # 손익 계산 (로깅용)
-                    profit_loss = (current_price - buy_price) * quantity if buy_price and buy_price > 0 else 0
-                    profit_rate = ((current_price - buy_price) / buy_price) * 100 if buy_price and buy_price > 0 else 0
-                    profit_sign = "+" if profit_loss >= 0 else ""
+                        # 📊 패턴 데이터 매매 결과 업데이트
+                        if self.pattern_logger and hasattr(trading_stock, 'last_pattern_id') and trading_stock.last_pattern_id:
+                            try:
+                                self.pattern_logger.update_trade_result(
+                                    pattern_id=trading_stock.last_pattern_id,
+                                    trade_executed=True,
+                                    profit_rate=profit_rate,
+                                    sell_reason=sell_reason
+                                )
+                                self.logger.debug(f"📝 패턴 매매 결과 업데이트 완료: {trading_stock.last_pattern_id}")
+                            except Exception as log_err:
+                                self.logger.warning(f"⚠️ 패턴 매매 결과 업데이트 실패: {log_err}")
 
-                    # 📊 패턴 데이터 매매 결과 업데이트
-                    if self.pattern_logger and hasattr(trading_stock, 'last_pattern_id') and trading_stock.last_pattern_id:
-                        try:
-                            self.pattern_logger.update_trade_result(
-                                pattern_id=trading_stock.last_pattern_id,
-                                trade_executed=True,
-                                profit_rate=profit_rate,
-                                sell_reason=sell_reason
-                            )
-                            self.logger.debug(f"📝 패턴 매매 결과 업데이트 완료: {trading_stock.last_pattern_id}")
-                        except Exception as log_err:
-                            self.logger.warning(f"⚠️ 패턴 매매 결과 업데이트 실패: {log_err}")
-
-                    # 가상 포지션 정보 정리
-                    trading_stock.clear_virtual_buy_info()
-
-                    # 포지션 정리
-                    trading_stock.clear_position()
-
-                    # 텔레그램 알림
-                    if self.telegram:
-                        await self.telegram.notify_signal_detected({
-                            'stock_code': stock_code,
-                            'stock_name': stock_name,
-                            'signal_type': '🔵 매도',
-                            'price': current_price,
-                            'reason': f"{strategy} - {sell_reason} (손익: {profit_sign}{profit_loss:,.0f}원)"
-                        })
+                        # 텔레그램 알림
+                        if self.telegram:
+                            await self.telegram.notify_signal_detected({
+                                'stock_code': stock_code,
+                                'stock_name': stock_name,
+                                'signal_type': '🔵 매도',
+                                'price': current_price,
+                                'reason': f"{strategy} - {sell_reason} (손익: {profit_sign}{profit_loss:,.0f}원)"
+                            })
+                    finally:
+                        # ⚠️ 매도 성공 시 반드시 실행되어야 하는 정리 작업
+                        # 가상 포지션 정보 정리
+                        trading_stock.clear_virtual_buy_info()
+                        # 포지션 정리 (중복 매도 방지)
+                        trading_stock.clear_position()
             
         except Exception as e:
             self.logger.error(f"❌ 가상 매도 실행 오류: {e}")

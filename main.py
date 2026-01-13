@@ -527,12 +527,13 @@ class DayTradingBot:
                             self._quant_screening_task = asyncio.create_task(self._run_quant_screening())
 
                         # 08:55 ML 스크리닝 실행 (ML 데이터 수집 완료 후)
-                        if (self._last_ml_data_collection_date == current_time.date() and
-                            self._ml_data_collection_completed and
-                            self._last_ml_screening_date != current_time.date() and
-                            self._ml_screening_task is None):
-                            self.logger.info(f"🔍 08:55+ ML 스크리닝 스케줄 트리거 ({current_time.strftime('%H:%M:%S')})")
-                            self._ml_screening_task = asyncio.create_task(self._run_ml_screening())
+                        # ⚠️ 현재 비활성화 (미래 사용 예정)
+                        # if (self._last_ml_data_collection_date == current_time.date() and
+                        #     self._ml_data_collection_completed and
+                        #     self._last_ml_screening_date != current_time.date() and
+                        #     self._ml_screening_task is None):
+                        #     self.logger.info(f"🔍 08:55+ ML 스크리닝 스케줄 트리거 ({current_time.strftime('%H:%M:%S')})")
+                        #     self._ml_screening_task = asyncio.create_task(self._run_ml_screening())
 
                 # 15:35 장 마감 후 일일 매매 리포트 생성
                 if (current_time.hour == 15 and current_time.minute >= 35):

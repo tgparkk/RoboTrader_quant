@@ -219,16 +219,14 @@ class IntradayStockManager:
             
             # 일봉 데이터 조회 (최근 30일)
             daily_data = self.api_manager.get_ohlcv_data(stock_code, "D", 30)
-            
+
             if daily_data is None or daily_data.empty:
-                self.logger.warning(f"⚠️ {stock_code} 일봉 데이터 조회 실패")
-                # 실패해도 종목은 추가 (일봉 데이터는 나중에 재시도 가능)
+                self.logger.error(f"❌ {stock_code} 일봉 데이터 조회 실패 - 종목 추가 중단")
+                # 일봉 데이터 없이는 리밸런싱 불가능 (목표 익절/손절률 계산 불가)
                 with self._lock:
                     if stock_code in self.selected_stocks:
-                        self.selected_stocks[stock_code].daily_data = pd.DataFrame()
-                        self.selected_stocks[stock_code].data_complete = True
-                        self.selected_stocks[stock_code].last_update = now_kst()
-                return True  # 종목은 추가하되 데이터는 빈 DataFrame
+                        del self.selected_stocks[stock_code]
+                return False  # 실패 반환
             
             # 메모리에 저장
             with self._lock:
@@ -247,14 +245,11 @@ class IntradayStockManager:
             
         except Exception as e:
             self.logger.error(f"❌ {stock_code} 일봉 데이터 수집 오류: {e}")
-            # 오류 발생 시에도 종목은 추가 (데이터는 나중에 재시도)
+            # 오류 발생 시 종목 제거 (데이터 없이는 매매 불가)
             with self._lock:
                 if stock_code in self.selected_stocks:
-                    self.selected_stocks[stock_code].daily_data = pd.DataFrame()
-                    self.selected_stocks[stock_code].historical_data = pd.DataFrame()
-                    self.selected_stocks[stock_code].data_complete = True
-                    self.selected_stocks[stock_code].last_update = now_kst()
-            return True
+                    del self.selected_stocks[stock_code]
+            return False
     
     async def _save_daily_to_db(self, stock_code: str, daily_data: pd.DataFrame) -> bool:
         """
