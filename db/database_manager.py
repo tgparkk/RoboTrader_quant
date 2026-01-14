@@ -1199,6 +1199,21 @@ class DatabaseManager:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
+                # 중복 매도 방지: 해당 buy_record_id로 이미 매도된 기록이 있는지 확인
+                if buy_record_id is not None:
+                    cursor.execute('''
+                        SELECT id, quantity, datetime(timestamp, 'unixepoch', 'localtime') as sell_time
+                        FROM virtual_trading_records
+                        WHERE buy_record_id = ? AND action = 'SELL'
+                    ''', (buy_record_id,))
+                    existing_sell = cursor.fetchone()
+                    if existing_sell:
+                        self.logger.warning(
+                            f"⚠️ {stock_code} 중복 매도 방지: buy_record_id={buy_record_id}는 "
+                            f"이미 매도됨 (sell_id={existing_sell[0]}, {existing_sell[1]}주, {existing_sell[2]})"
+                        )
+                        return False
+
                 # 해당 종목의 모든 미체결 매수 기록을 조회하여 평균 매수가 계산
                 cursor.execute('''
                     SELECT
