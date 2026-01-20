@@ -1,12 +1,269 @@
 ---
-description:
+description: 일일 분석 및 모니터링 도구
 globs:
-alwaysApply: true
+alwaysApply: false
 ---
 
-데이터 위치:
-일봉은 \RoboTrader\cache\daily
-분봉은 \RoboTrader\cache\minute_data 
-(분봉은 종목별로 일별로 있고, 일봉은 종목별로 파일이 있고 하나의 파일일안에 여러일자가 있음)
+# 📊 일일 분석 및 모니터링
 
-종목은 \RoboTrader\data\robotrader.db 의 candidate_stocks 테이블에 있고요. selection_date 기준으로 날짜별로 구분할수 있어요.
+## 일일 분석 도구
+
+### 1. 일일 매매 분석
+
+**실행 방법**:
+```bash
+# 오늘 분석
+python daily_analysis.py
+
+# 특정 날짜 분석
+python daily_analysis.py 2026-01-20
+```
+
+**분석 항목**:
+1. **오늘 매수 내역**
+   - 종목별 매수 수량, 가격
+   - 총 매수 금액
+   - 테스트/실전 구분
+
+2. **오늘 매도 내역**
+   - 종목별 매도 수량, 가격
+   - 손익 및 수익률
+   - 승률 통계
+
+3. **현재 보유 종목**
+   - 종목별 평가금액
+   - 익절/손절 목표
+   - 매수일자
+
+4. **누적 실적**
+   - 전체 기간 매도 거래
+   - 실현 손익
+   - 승/패 통계
+
+5. **최신 퀀트 포트폴리오**
+   - Top 10 종목
+   - 퀀트 점수
+
+**코드**: `daily_analysis.py`
+
+### 2. DB 상태 점검
+
+**실행 방법**:
+```bash
+python check_virtual_trading_db.py
+```
+
+**점검 항목**:
+1. is_test 플래그별 거래 통계
+2. 오늘 거래 내역 (테스트/실전 구분)
+3. 최근 10건 거래 내역
+4. 현재 보유 종목
+5. 전체 가상매매 통계
+
+**코드**: `check_virtual_trading_db.py`
+
+### 3. 통합 분석 (배치 스크립트)
+
+**Windows 배치 파일**:
+```batch
+# 더블클릭으로 실행
+매일_분석_실행.bat
+```
+
+**실행 내용**:
+1. `daily_analysis.py` 실행
+2. `check_virtual_trading_db.py` 실행
+3. 결과를 콘솔에 출력
+
+**코드**: `매일_분석_실행.bat`
+
+## 자동 생성 리포트
+
+### after_market_report.py
+
+**실행 시각**: 매일 15:35 자동
+
+**리포트 내용**:
+- 오늘의 매매 내역
+- 현재 보유 종목
+- 누적 손익
+- 퀀트 포트폴리오 현황
+
+**수동 실행**:
+```bash
+python after_market_report.py
+```
+
+**코드**: `after_market_report.py`
+
+### daily_trading_summary
+
+**Python 모듈**:
+```python
+from scripts.daily_trading_summary import print_today_trading_summary
+
+# 오늘 매매 요약 출력
+print_today_trading_summary()
+```
+
+**코드**: `scripts/daily_trading_summary.py`
+
+## 데이터 품질 점검
+
+### check_data_quality.py
+
+**실행 방법**:
+```bash
+python scripts/check_data_quality.py
+```
+
+**점검 항목**:
+1. **일봉 데이터 검증**
+   - OHLC 관계 (open ≤ high, low ≤ close)
+   - 급격한 가격 변동 감지 (50% 이상)
+   - 결측값 확인
+
+2. **재무 데이터 검증**
+   - PER, PBR, ROE 범위 확인
+   - NULL 값 비율
+   - 이상치 탐지
+
+3. **퀀트 팩터 검증**
+   - 팩터 점수 범위 (0~100)
+   - 순위 일관성
+   - 점수 분포
+
+**코드**: `scripts/check_data_quality.py`
+
+## 로그 분석
+
+### 로그 파일 위치
+
+```
+logs/
+├── robotrader_quant_YYYYMMDD_HHMMSS.log  # 메인 로그
+└── trading_YYYYMMDD.log                   # 매매 로그
+```
+
+### 주요 로그 패턴
+
+**매수 로그**:
+```
+[매수] 005930 삼성전자 100주 @70,000원
+  목표: 익절 20% (84,000원), 손절 8% (64,400원)
+  전략: Quant Rebalancing (S등급)
+```
+
+**매도 로그**:
+```
+[매도] 005930 삼성전자 100주 @84,000원
+  손익: +1,400,000원 (+20.0%)
+  사유: 익절 도달
+```
+
+**리밸런싱 로그**:
+```
+[리밸런싱] 09:05 실행
+  매도: 5종목 (C, D, E 탈락)
+  매수: 5종목 (F, G, H 신규)
+  유지: 20종목 (목표 갱신)
+```
+
+## 성과 분석
+
+### 주요 지표
+
+1. **수익률**
+   - 실현 수익률: 매도 완료 건
+   - 미실현 수익률: 보유 중 포지션
+   - 누적 수익률: 전체 기간
+
+2. **승률**
+   - 승: 수익 거래 / 전체 거래
+   - 평균 수익: 승 거래 평균 수익률
+   - 평균 손실: 패 거래 평균 손실률
+
+3. **리스크 지표**
+   - 최대 손실 (MDD)
+   - 변동성 (Volatility)
+   - Sharpe Ratio
+
+### DB 쿼리 예시
+
+**실현 손익 조회**:
+```sql
+SELECT 
+    SUM(profit_loss) as total_profit,
+    COUNT(*) as trade_count,
+    AVG(profit_rate) as avg_return,
+    COUNT(CASE WHEN profit_loss > 0 THEN 1 END) * 100.0 / COUNT(*) as win_rate
+FROM virtual_trading_records
+WHERE action = 'SELL' 
+    AND is_test = 1
+```
+
+**보유 종목 평가**:
+```sql
+SELECT 
+    b.stock_code,
+    b.stock_name,
+    b.quantity,
+    b.price as buy_price,
+    b.target_profit_rate,
+    b.stop_loss_rate,
+    b.timestamp
+FROM virtual_trading_records b
+WHERE b.action = 'BUY' 
+    AND b.is_test = 1
+    AND NOT EXISTS (
+        SELECT 1 FROM virtual_trading_records s
+        WHERE s.buy_record_id = b.id 
+          AND s.action = 'SELL'
+    )
+```
+
+## 백테스팅
+
+### quant_monthly_backtest.py
+
+**실행 방법**:
+```bash
+python backtests/quant_monthly_backtest.py
+```
+
+**분석 기간**: 월간 리밸런싱 기준
+
+**출력 지표**:
+- 월별 수익률
+- 누적 수익률
+- 최대 낙폭 (MDD)
+- Sharpe Ratio
+- 승률
+
+**코드**: `backtests/quant_monthly_backtest.py`
+
+## 텔레그램 알림
+
+### 자동 알림 항목
+
+1. **리밸런싱 완료** (09:05)
+2. **매수 체결**
+3. **매도 체결** (익절/손절)
+4. **일일 리포트** (15:35)
+5. **에러 발생**
+
+### 수동 명령
+
+**텔레그램 봇 명령어**:
+```
+/status    - 현재 상태 조회
+/holdings  - 보유 종목 조회
+/profit    - 손익 조회
+/portfolio - 퀀트 포트폴리오
+```
+
+## 참고
+
+- **README.md** - 일일 분석 도구 사용법
+- **README_일일분석.md** - 상세 사용 가이드
+- **SYSTEM_FLOW.md** - 시스템 동작 원리

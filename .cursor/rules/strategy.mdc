@@ -1,66 +1,323 @@
 ---
+description: 시스템 아키텍처 및 코드 구조
+globs:
 alwaysApply: false
 ---
 
--매매 원칙칙-
-눌림목에서 매매
-첫째, 눌림목이 올떄까지 기다리는 '자제력'과 내가 정한 손절가를 이탈하면 원칙대로 손절하는 '손절원칙'
-둘째, 현재 주가가 눌림목일 가능성이 높은 구간인지 아닌지 판별하는 것입니다. 판별 기준은 '이등분선' (이등분선은 당일 고가와 당일 저가를 더한 후 2로 나눈 값). 즉, 당일 등락폭의 '중간' 이라고 이해하면 됌.
+# 🏗️ 시스템 아키텍처
 
-대량 거래량을 동반해 장대양봉으로 마감하는 종목은 대다수 이등분선(중간)을 지키는 경향애 매우 높음.
+## 메인 루프 구조
 
--빠른 시간 안에 20% 초과 상승한 종목들은 웬만해서는 접근 X
+### 6개 병렬 태스크
 
--------------------------------------------------------------------
-#이등분선
- : ((당일 고가 + 당일 저가) / 2), 당일 등락폭의 '중간' (3분봉 으로 주시) ,  캔들들이 이등분선 밑으로 있으면 안됌( 기준을 몇프로로 하지..? 살짝 걸치는거 까지는 허용해야하는데..)
+```python
+# main.py:214-221
+async def run(self):
+    tasks = [
+        self._data_collection_task(),        # Task 1: 실시간 데이터
+        self._order_monitoring_task(),       # Task 2: 주문 체결 확인
+        self.trading_manager.start_monitoring(),  # Task 3: 매매 판단
+        self._system_monitoring_task(),      # Task 4: 스케줄 작업
+        self._telegram_task(),               # Task 5: 알림
+        self._rebalancing_task()             # Task 6: 리밸런싱
+    ]
+    await asyncio.gather(*tasks)
+```
 
-손절 케이스 1 : 이등분선에서 지지를 실패할때 (이등분선 아래 몇프로부터 실패로 보지?)
-손절 케이스 2 : 상승폭보다 하락폭이 길어질 때 (상승폭, 하락폭의 길이 기준은?)
+## 주요 모듈 구조
 
-접근 금지 케이스 1 : 장중 빠르게 20프로 급등한 종목
+### 1. 거래 관리 (Trading)
 
-접근 금지 케이스 2 : 상한가 다음날
-주가가 이등 분선 아래에 있으면 약세, 위에 강세 -> 강세의 구간에서만 트레이딩!
+```
+core/
+├── trading_stock_manager.py      # 종목 상태 관리
+│   ├── TradingStock 클래스: 개별 종목 상태
+│   ├── add_selected_stock(): 종목 추가
+│   ├── start_monitoring(): 1분마다 매도 체크
+│   └── update_stock_data(): 실시간 가격 갱신
+│
+├── trading_decision_engine.py    # 매매 판단 엔진
+│   ├── check_sell_conditions(): 익절/손절 체크
+│   ├── check_buy_conditions(): 매수 조건 체크
+│   └── calculate_position_size(): 포지션 크기 계산
+│
+└── order_manager.py              # 주문 실행
+    ├── place_market_order(): 시장가 주문
+    ├── place_limit_order(): 지정가 주문
+    └── cancel_order(): 주문 취소
+```
 
-접근 금지 케이스 3 :  2개의 마디로 20% 급등한 종목.
-하지만, 주가가 이등분선에서 지지가 되고 있으면 거래 시도해볼만 함
+### 2. 퀀트 전략 (Quant)
 
-* 오전9시~오전10시까지 장 초반을 제외한 트레이딩 할 때는 각 마디의 고점을 돌파한다고 하더라도 '이등분선' 또는 분봉차트 상의 '직전 저점' 등에서 지지를 확인하고 진입하는것이 좋음.
+```
+core/quant/
+├── quant_screening_service.py         # 스크리닝 (08:55)
+│   ├── run_screening(): 메인 실행
+│   ├── calculate_factor_scores(): 팩터 점수 계산
+│   │   ├── Value 팩터: PER, PBR
+│   │   ├── Quality 팩터: ROE, 부채비율
+│   │   ├── Momentum 팩터: 수익률
+│   │   └── Growth 팩터: 매출/이익 성장
+│   └── save_to_db(): quant_portfolio 저장
+│
+├── quant_rebalancing_service.py       # 리밸런싱 계획 (09:05)
+│   ├── plan_rebalancing(): 계획 수립
+│   │   ├── 최신 포트폴리오 조회
+│   │   ├── 현재 보유와 비교
+│   │   └── 매도/매수/유지 리스트 생성
+│   └── get_target_portfolio(): 목표 포트폴리오
+│
+└── target_profit_loss_calculator.py   # 익절/손절률 계산
+    ├── calculate(): 메인 계산
+    ├── _calculate_composite_score(): 복합 점수
+    │   └── rank*0.4 + total*0.3 + momentum*0.3
+    └── _determine_targets(): 등급별 목표
+        ├── S등급 (80+): 익절 20%, 손절 8%
+        ├── A등급 (65-80): 익절 17%, 손절 9%
+        └── B등급 (50-65): 익절 15%, 손절 10%
+```
 
-------------------------------------------------------------------
- #가격박스
-가격박스는 1분봉에서 활용,
-매매법 :
-주가 하락 시, '박스하한선'에서 지지를 확인하고 매수.
-또는 지지 확인 후 '박스중심선' 돌파 시 매수.
-주가 상승 시에는 '박스상한선'에서 매도.
-'박스하한선' 에서  10분 내외로 반응이 없으면 즉각 손절
-아니면,
-안전하게 '박스하한선' 에서 지지를 확인하고 안전하게 '박스중심선' 돌파 시 매수.
-가장 확률이 높은 자리는 첫' 박스하한선'
-------------------------------------------------------------------
- #볼린저 밴드
-볼린저 밴드는 3분봉이나 5분봉차트로 보는게 좋음.
-수치는 기본 수치인 (20,2).
-선행조건은 주가가 이등분선 위에 있어야 합니다, 그 상태에서 볼린저밴드가 밀집이 되고 (밀집의 기준은?) 주가가 볼린저밴드의 '상한선'을 돌파할 때 매수합니다.
-또한 볼린저밴드의 폭이 넓어질 때, 첫 '하한선' 에 닿은 자리에서도 매수 가능합니다. 다만, '하한선' 에서 지지를 하지 못한다면 손절로 대응.
--
+### 3. 헬퍼 모듈 (Helpers)
 
-조합 1 : 가격박스 + 이등분선
+```
+core/helpers/
+├── rebalancing_executor.py           # 리밸런싱 실행
+│   ├── execute_rebalancing(): 메인 실행
+│   ├── _execute_sells(): 매도 실행
+│   ├── _update_keep_list(): 유지 종목 갱신
+│   └── _execute_buys(): 매수 실행
+│
+├── screening_task_runner.py          # 스크리닝 태스크
+│   ├── run_quant_screening(): 퀀트 스크리닝
+│   └── run_ml_screening(): ML 스크리닝
+│
+├── state_restoration_helper.py       # 상태 복원
+│   ├── restore_candidate_stocks(): 후보 종목 복원
+│   └── restore_positions(): 포지션 복원
+│       └── DB에서 target_profit_rate, stop_loss_rate 복원
+│
+└── keep_list_updater.py               # 유지 종목 갱신
+    └── update_keep_list(): 익절/손절률 갱신
+```
 
-조합 2 : 볼린저 밴드 + 이등분선
+### 4. API 관리 (API)
 
-* 볼린저밴드 보조지표를 사용할 때, 매매의 기준
-** 밴드 폭 밀집
-1.상한선 돌파 시 매수
-2.상한선 돌파를 확인하고 조정 시 매수(상한선을 돌파했던 양봉의 3/4 지점 또는 2/4 지점에서 매수)
-** 밴드 폭 확장
-1.첫 하한선 지지 시 매수
-** 손절
-1.상한선 돌파, 돌파 확인 후 매수 -> 상한선을 돌파했던 양봉의 저가 또는 볼린저밴드 중심선 이탈 시
-2. 하한선 지지 확인 후 매수 -> 하한선을 지지했던 캔들의 저가 이탈 시
-3. 매수대비 -3% 손실률 발생 시
-수익실현 : 매수대비 3% 이상 수익률 발생 시
-------------------------------------------------------------------
-상한가를 갔다온 종목은 거래 제외
+```
+api/
+├── kis_api_manager.py                # 통합 관리자
+│   └── 모든 API 호출 통합 인터페이스
+│
+├── kis_auth.py                       # 인증 + Rate Limit
+│   ├── get_access_token(): 토큰 발급
+│   └── RateLimiter: 초당 16회 제한
+│
+├── kis_order_api.py                  # 주문 API
+│   ├── place_order(): 주문 실행
+│   ├── get_order_status(): 주문 조회
+│   └── cancel_order(): 주문 취소
+│
+├── kis_market_api.py                 # 시장 데이터 API
+│   ├── get_current_price(): 현재가
+│   ├── get_daily_prices(): 일봉
+│   └── get_minute_prices(): 분봉
+│
+└── kis_financial_api.py              # 재무 데이터 API
+    ├── get_financial_ratio(): 재무비율
+    ├── get_income_statement(): 손익계산서
+    └── get_balance_sheet(): 대차대조표
+```
+
+### 5. 데이터베이스 (Database)
+
+```
+db/
+├── database_manager.py               # 메인 DB 관리자
+│   ├── save_daily_prices(): 일봉 저장
+│   ├── save_financial_data(): 재무 저장
+│   ├── save_virtual_buy(): 매수 기록
+│   │   └── target_profit_rate, stop_loss_rate 저장
+│   ├── save_virtual_sell(): 매도 기록
+│   └── get_open_positions(): 미체결 포지션 조회
+│
+└── quant_db_manager.py               # 퀀트 전용 DB
+    ├── save_quant_portfolio(): 포트폴리오 저장
+    ├── save_factor_scores(): 팩터 점수 저장
+    ├── get_quant_portfolio(): 포트폴리오 조회
+    └── get_factor_scores(): 팩터 점수 조회
+```
+
+### 6. 데이터 수집 (Data Collection)
+
+```
+core/
+├── ml_data_collector.py              # ML 데이터 수집 (08:30)
+│   ├── collect_ml_data(): 메인 실행
+│   ├── _collect_daily_prices(): 일봉 수집
+│   │   ├── OHLCV 데이터
+│   │   ├── 수익률 계산 (1d, 5d, 20d)
+│   │   └── 변동성 계산 (20d)
+│   └── _collect_financial_data(): 재무 수집
+│       ├── get_financial_ratio()
+│       ├── get_income_statement()
+│       └── get_balance_sheet()
+│
+└── price_collector.py                # 실시간 가격 수집
+    └── collect_realtime_prices(): 장중 가격 갱신
+```
+
+## 핵심 실행 흐름
+
+### 1. 프로그램 시작 (main.py)
+
+```python
+async def main():
+    bot = TradingBot()
+    await bot.initialize()      # API, DB, 텔레그램 연결
+    await bot.restore_state()   # 상태 복원
+    await bot.run()             # 메인 루프 시작
+```
+
+### 2. 상태 복원 (시작 시)
+
+```python
+# core/helpers/state_restoration_helper.py
+async def restore_state():
+    # 1. 후보 종목 복원
+    candidates = db.get_candidate_stocks(today)
+    for stock in candidates:
+        trading_manager.add_selected_stock(stock)
+    
+    # 2. 포지션 복원
+    positions = db.get_open_positions()
+    for pos in positions:
+        trading_stock = trading_manager.get_stock(pos.stock_code)
+        trading_stock.set_position(pos.quantity, pos.buy_price)
+        trading_stock.target_profit_rate = pos.target_profit_rate  # ⭐
+        trading_stock.stop_loss_rate = pos.stop_loss_rate          # ⭐
+```
+
+### 3. 스크리닝 (08:55)
+
+```python
+# core/quant/quant_screening_service.py
+async def run_screening():
+    # 1. 후보 종목 조회
+    candidates = api.get_condition_search()
+    
+    # 2. 팩터 점수 계산
+    for stock in candidates:
+        value_score = calculate_value_score(stock)
+        quality_score = calculate_quality_score(stock)
+        momentum_score = calculate_momentum_score(stock)
+        growth_score = calculate_growth_score(stock)
+        
+        total_score = (
+            value_score * 0.25 +
+            quality_score * 0.25 +
+            momentum_score * 0.30 +
+            growth_score * 0.20
+        )
+    
+    # 3. 상위 30개 선정
+    top_30 = sorted(scores, reverse=True)[:30]
+    
+    # 4. DB 저장
+    db.save_quant_portfolio(top_30)
+    db.save_factor_scores(top_30)
+```
+
+### 4. 리밸런싱 (09:05)
+
+```python
+# core/helpers/rebalancing_executor.py
+async def execute_rebalancing():
+    # 1. 계획 수립
+    plan = rebalancing_service.plan_rebalancing()
+    
+    # 2. 매도 실행
+    for stock in plan.sell_list:
+        order_manager.place_market_order(stock, 'SELL')
+    
+    # 3. 유지 종목 갱신
+    for stock in plan.keep_list:
+        new_profit_rate, new_loss_rate = calculator.calculate(
+            rank=stock.new_rank,
+            total_score=stock.new_score,
+            momentum_score=stock.new_momentum
+        )
+        trading_stock.target_profit_rate = new_profit_rate
+        trading_stock.stop_loss_rate = new_loss_rate
+    
+    # 4. 매수 실행
+    for stock in plan.buy_list:
+        profit_rate, loss_rate = calculator.calculate(...)
+        order_manager.place_market_order(stock, 'BUY')
+        db.save_virtual_buy(
+            stock_code=stock.code,
+            target_profit_rate=profit_rate,  # ⭐ DB 저장
+            stop_loss_rate=loss_rate         # ⭐ DB 저장
+        )
+```
+
+### 5. 장중 모니터링 (1분마다)
+
+```python
+# core/trading_stock_manager.py
+async def start_monitoring():
+    while is_market_open():
+        for stock in portfolio:
+            # 현재가 조회
+            current_price = api.get_current_price(stock.code)
+            
+            # 수익률 계산
+            profit_rate = (current_price - stock.buy_price) / stock.buy_price
+            
+            # 익절 체크
+            if profit_rate >= stock.target_profit_rate:
+                order_manager.place_market_order(stock, 'SELL')
+                db.save_virtual_sell(profit_loss=..., reason="익절")
+            
+            # 손절 체크
+            if profit_rate <= -stock.stop_loss_rate:
+                order_manager.place_market_order(stock, 'SELL')
+                db.save_virtual_sell(profit_loss=..., reason="손절")
+        
+        await asyncio.sleep(60)  # 1분 대기
+```
+
+## 설정 파일
+
+### config/constants.py
+
+```python
+# 포트폴리오
+PORTFOLIO_SIZE = 30
+MAX_POSITION_COUNT = 30
+
+# 리밸런싱
+REBALANCING_TIME = "09:05"
+REBALANCING_PERIOD = "DAILY"
+
+# 데이터 수집
+DATA_COLLECTION_TIME = "08:30"
+SCREENING_TIME = "08:55"
+
+# 리포트
+REPORT_TIME = "15:35"
+```
+
+### config/market_hours.py
+
+```python
+MARKET_OPEN = "09:00"
+MARKET_CLOSE = "15:30"
+PREMARKET_START = "08:30"
+AFTERMARKET_END = "16:00"
+```
+
+## 참고 문서
+
+- **README.md** - 빠른 시작 및 개요
+- **SYSTEM_FLOW.md** - 상세 동작 설명
+- **CLAUDE.md** - 전체 시스템 아키텍처
+- **MAIN_PY_REFACTORING_SAFETY_PLAN.md** - 리팩토링 계획

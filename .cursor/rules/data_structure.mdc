@@ -1,0 +1,229 @@
+---
+description: 데이터 구조 및 저장 위치
+globs:
+alwaysApply: true
+---
+
+# 📊 데이터 구조 및 관리
+
+## 데이터베이스 위치
+
+**메인 DB**: `data/robotrader.db` (SQLite)
+
+## 주요 테이블
+
+### 1. daily_prices (일봉 가격 데이터)
+
+**저장 시각**: 08:30 (전일 데이터)
+
+**용도**: 퀀트 팩터 계산, 백테스팅
+
+```sql
+CREATE TABLE daily_prices (
+    stock_code TEXT,
+    date TEXT,
+    open REAL,
+    high REAL,
+    low REAL,
+    close REAL,
+    volume INTEGER,
+    trading_value REAL,
+    market_cap REAL,
+    returns_1d REAL,    -- 1일 수익률
+    returns_5d REAL,    -- 5일 수익률
+    returns_20d REAL,   -- 20일 수익률
+    volatility_20d REAL -- 20일 변동성
+)
+```
+
+### 2. financial_statements (재무제표)
+
+**저장 시각**: 08:30 (전일 데이터)
+
+**용도**: Value/Quality 팩터 계산
+
+```sql
+CREATE TABLE financial_statements (
+    stock_code TEXT,
+    report_date TEXT,
+    -- 밸류에이션
+    per REAL,              -- PER (주가수익비율)
+    pbr REAL,              -- PBR (주가순자산비율)
+    psr REAL,              -- PSR
+    dividend_yield REAL,   -- 배당수익률
+    -- 수익성
+    roe REAL,              -- ROE (자기자본이익률)
+    operating_margin REAL, -- 영업이익률
+    net_margin REAL,       -- 순이익률
+    -- 재무건전성
+    debt_ratio REAL,       -- 부채비율
+    current_assets REAL,
+    current_liabilities REAL,
+    total_equity REAL,
+    -- 손익
+    revenue REAL,          -- 매출액
+    operating_profit REAL, -- 영업이익
+    net_income REAL,       -- 순이익
+    total_assets REAL      -- 총자산
+)
+```
+
+### 3. quant_portfolio (퀀트 포트폴리오)
+
+**저장 시각**: 08:55 (스크리닝 후)
+
+**용도**: 09:05 리밸런싱
+
+```sql
+CREATE TABLE quant_portfolio (
+    calc_date TEXT,        -- YYYYMMDD
+    stock_code TEXT,
+    stock_name TEXT,
+    rank INTEGER,          -- 순위 (1~30)
+    total_score REAL,      -- 종합 점수
+    selection_reason TEXT
+)
+```
+
+### 4. quant_factor_scores (팩터 점수)
+
+**저장 시각**: 08:55 (스크리닝 후)
+
+**용도**: 익절/손절률 계산
+
+```sql
+CREATE TABLE quant_factor_scores (
+    calc_date TEXT,
+    stock_code TEXT,
+    value_score REAL,      -- Value 팩터 (0~100)
+    momentum_score REAL,   -- Momentum 팩터 (0~100)
+    quality_score REAL,    -- Quality 팩터 (0~100)
+    growth_score REAL,     -- Growth 팩터 (0~100)
+    total_score REAL,      -- 종합 점수
+    factor_rank INTEGER
+)
+```
+
+### 5. virtual_trading_records (매매 기록) ⭐ 핵심
+
+**저장 시각**: 매수/매도 즉시
+
+**용도**: 손익 관리, 포지션 복원
+
+```sql
+CREATE TABLE virtual_trading_records (
+    id INTEGER PRIMARY KEY,
+    action TEXT,           -- 'BUY' or 'SELL'
+    stock_code TEXT,
+    stock_name TEXT,
+    quantity INTEGER,
+    price REAL,
+    timestamp INTEGER,     -- Unix timestamp
+    is_test INTEGER,       -- 0: 실전, 1: 테스트
+    
+    -- 매수 시 저장 (포지션 복원에 핵심!)
+    target_profit_rate REAL,  -- ⭐ 목표 익절률 (0.20 = 20%)
+    stop_loss_rate REAL,      -- ⭐ 목표 손절률 (0.08 = 8%)
+    strategy TEXT,
+    reason TEXT,
+    
+    -- 매도 시 저장
+    buy_record_id INTEGER,    -- 매수 기록 참조
+    profit_loss REAL,         -- 손익금
+    profit_rate REAL          -- 수익률
+)
+```
+
+**중요**: `target_profit_rate`와 `stop_loss_rate`가 DB에 저장되므로, 프로그램 재시작 시에도 동일한 목표로 모니터링 재개 가능!
+
+## 데이터 수집 전략
+
+### 전일 데이터 수집 (08:30)
+
+```
+목적: 리밸런싱은 전날 확정 데이터로 판단
+범위: 전 영업일까지만 수집
+예시:
+  - 12/26(목) 08:30 → 12/25(수) 데이터 수집
+  - 12/27(금) 08:30 → 12/26(목) 데이터 수집
+  - 12/30(월) 08:30 → 12/27(금) 데이터 수집 (주말 제외)
+```
+
+### 수집 대상
+
+1. **퀀트 포트폴리오 30개 종목** (우선)
+2. **현재 보유 종목** (추가)
+
+→ 중복 제거하여 효율적 수집
+
+## 포지션 복원 로직
+
+### 프로그램 재시작 시
+
+```sql
+-- 미체결 포지션 조회
+SELECT 
+    stock_code,
+    stock_name,
+    quantity,
+    price as buy_price,
+    target_profit_rate,  -- ⭐ 복원 핵심
+    stop_loss_rate       -- ⭐ 복원 핵심
+FROM virtual_trading_records b
+WHERE action = 'BUY'
+    AND is_test = 1
+    AND NOT EXISTS (
+        SELECT 1 FROM virtual_trading_records s
+        WHERE s.buy_record_id = b.id 
+          AND s.action = 'SELL'
+    )
+ORDER BY timestamp DESC
+```
+
+**복원 결과**:
+```
+✅ 보유 종목 3개 복원 완료
+📊 005930 포지션 복원: 100주 @70,000원
+   익절가: 84,000원 (20%)
+   손절가: 64,400원 (8%)
+```
+
+## 데이터 활용
+
+### OHLCV 활용
+- **Momentum 팩터**: 1일/5일/20일 수익률
+- **Size 팩터**: 시가총액 필터링 (1,000억 이상)
+- **변동성**: 리스크 평가
+
+### 재무데이터 활용
+- **Value 팩터**: PER, PBR (저평가 선호)
+- **Quality 팩터**: ROE, 부채비율 (우량 선호)
+- **Growth 팩터**: 매출/이익 성장
+
+## 데이터 저장 안정성
+
+### API Rate Limiting
+- 전역 Rate Limiter: 초당 16회
+- 0.2초 간격 API 호출
+- API 차단(Ban) 방지
+
+### 데이터 검증
+- OHLC 관계 검증 (open ≤ high, low ≤ close)
+- 급격한 가격 변동 감지 (50% 이상)
+- 거래량 일관성 확인
+
+### 원자성 보장
+```sql
+-- 1) 레코드 생성 (없을 경우만)
+INSERT OR IGNORE INTO table (...)
+
+-- 2) NULL이 아닌 값만 업데이트 (기존 데이터 보존)
+UPDATE table SET ... WHERE ...
+```
+
+## 참고 코드 위치
+
+- **데이터 수집**: `core/ml_data_collector.py`
+- **DB 관리**: `db/database_manager.py`
+- **퀀트 DB**: `db/quant_db_manager.py`
+- **상태 복원**: `core/helpers/state_restoration_helper.py`

@@ -1,0 +1,141 @@
+---
+description: RoboTrader 퀀트 자동매매 시스템 개요
+globs:
+alwaysApply: true
+---
+
+# 🤖 RoboTrader 퀀트 자동매매 시스템
+
+## 핵심 개념
+
+### 프로그램의 역할
+매일 퀀트 점수를 계산하여 상위 30개 종목을 선정하고, 점수에 따라 차등적으로 자동 매매를 수행합니다.
+
+- **점수 높은 종목** = 높은 기대 = 공격적 목표 (익절 20%, 손절 8%)
+- **점수 낮은 종목** = 낮은 기대 = 보수적 목표 (익절 15%, 손절 10%)
+
+### 일일 스케줄
+
+| 시간 | 동작 |
+|------|------|
+| 08:30 | 📊 전일 데이터 수집 (일봉/재무) |
+| 08:55 | 🔍 스크리닝 (오늘 포트폴리오 생성) |
+| 09:05 | 🔄 리밸런싱 (매도/매수/유지 자동 결정) |
+| 09:06~15:20 | 👀 모니터링 (1분마다 익절/손절 체크) |
+| 15:35 | 📈 일일 리포트 자동 생성 |
+
+## 매매 전략
+
+### 종목 선정 (퀀트 스크리닝)
+8가지 퀀트 팩터로 점수를 계산하여 상위 30개 선정:
+- **Value** (가치): PER, PBR - 저평가 선호
+- **Quality** (품질): ROE, 부채비율 - 우량 선호
+- **Momentum** (모멘텀): 수익률 - 상승 추세 선호
+- **Growth** (성장): 매출/이익 성장
+
+### 매수 전략
+- **리밸런싱 매수**: 09:05에만 실행
+- **신규 편입 종목**: 퀀트 포트폴리오 기반
+- **동등 비중**: 총 자금 / 30개
+- **점수 기반 목표 설정**: S/A/B 등급별 차등
+
+### 매도 전략
+- **익절**: 수익률 >= 목표 익절률 (15~20%)
+- **손절**: 수익률 <= -손절률 (-8~-10%)
+- **리밸런싱 매도**: 포트폴리오 탈락 종목
+- **모니터링**: 1분마다 자동 체크
+
+## 데이터 구조
+
+### 저장 위치
+- **일봉 데이터**: `data/robotrader.db` - `daily_prices` 테이블
+- **재무 데이터**: `data/robotrader.db` - `financial_statements` 테이블
+- **퀀트 포트폴리오**: `data/robotrader.db` - `quant_portfolio` 테이블
+- **매매 기록**: `data/robotrader.db` - `virtual_trading_records` 테이블
+
+### 중요 DB 테이블
+```sql
+-- 매매 기록 (포지션 복원에 핵심)
+virtual_trading_records:
+  - action: 'BUY' or 'SELL'
+  - stock_code, stock_name
+  - quantity, price
+  - target_profit_rate  -- ⭐ 목표 익절률
+  - stop_loss_rate      -- ⭐ 목표 손절률
+  - timestamp
+
+-- 퀀트 포트폴리오 (리밸런싱에 사용)
+quant_portfolio:
+  - calc_date: 계산일 (YYYYMMDD)
+  - stock_code, stock_name
+  - rank: 순위 (1~30)
+  - total_score: 종합 점수
+```
+
+## 핵심 특징
+
+### 완전 자동화
+- 데이터 수집 → 스크리닝 → 리밸런싱 → 손익절 모두 자동
+- 15:35 일일 리포트 자동 생성
+
+### 점수 기반 차등 관리
+| 등급 | 점수 | 익절 | 손절 | 전략 |
+|------|------|------|------|------|
+| S | 80+ | 20% | 8% | 공격적 |
+| A | 65-80 | 17% | 9% | 균형 |
+| B | 50-65 | 15% | 10% | 보수적 |
+
+### 스마트 리밸런싱
+- **매도**: 포트폴리오 탈락 종목
+- **매수**: 신규 편입 종목
+- **유지**: 점수 갱신 (익절/손절률 자동 조정)
+
+### 복원력
+- **프로그램 재시작 시**: DB에서 포지션 자동 복원
+- **익절/손절률 복원**: 매수 시 설정한 목표가 DB에 저장되어 재시작 후에도 동일하게 적용
+
+## 시스템 구조
+
+### 6개 병렬 태스크
+```python
+asyncio.gather(
+    데이터_수집_태스크(),        # 실시간 가격
+    주문_모니터링_태스크(),      # 체결 확인
+    거래_모니터링_태스크(),      # 매수/매도 판단
+    시스템_모니터링_태스크(),    # 스케줄 작업
+    텔레그램_알림_태스크(),      # 알림 전송
+    리밸런싱_태스크()           # 09:05 리밸런싱
+)
+```
+
+## 주요 파일 위치
+
+### 핵심 로직
+- `main.py` - 메인 실행 파일 (1,017 lines)
+- `core/quant/quant_screening_service.py` - 퀀트 스크리닝
+- `core/quant/quant_rebalancing_service.py` - 리밸런싱 계획
+- `core/helpers/rebalancing_executor.py` - 리밸런싱 실행
+- `core/trading_decision_engine.py` - 매수/매도 판단
+- `core/trading_stock_manager.py` - 종목 모니터링
+
+### 데이터 관리
+- `db/database_manager.py` - DB 인터페이스
+- `db/quant_db_manager.py` - 퀀트 전용 DB
+- `core/ml_data_collector.py` - 데이터 수집
+
+### 헬퍼 모듈
+- `core/helpers/screening_task_runner.py` - 스크리닝 태스크
+- `core/helpers/state_restoration_helper.py` - 상태 복원
+- `core/helpers/keep_list_updater.py` - 유지 종목 갱신
+
+### 설정
+- `config/constants.py` - 시스템 상수
+- `config/market_hours.py` - 시장 시간
+- `config/app_config.json` - API 키
+
+## 참고 문서
+
+- **README.md** - 빠른 시작 가이드
+- **SYSTEM_FLOW.md** - 상세 동작 설명 (필독!)
+- **CLAUDE.md** - 시스템 아키텍처
+- **일일 분석**: `daily_analysis.py` - 매일 사용할 분석 도구
