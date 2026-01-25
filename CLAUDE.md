@@ -251,6 +251,215 @@ if 'date' in updated_realtime.columns:
 
 ---
 
+## 리밸런싱 손실 방지 시스템 (2026-01-25)
+
+### 문제 상황
+
+2026-01-23 거래일에 다음과 같은 손실이 발견되었습니다:
+
+- **09:00 장 시작**: 갭하락으로 3개 종목 손절 매도 (에스엘, 현대모비스, 한국무브넥스)
+- **09:05 리밸런싱**: 동일한 3개 종목을 즉시 재매수
+- **결과**: 약 35만원 불필요한 손실 발생
+
+**근본 원인**:
+1. 장 시작 시 갭하락 → 손절 조건 도달 → 자동 매도
+2. 5분 후 리밸런싱 → 퀀트 스코어 높아서 재선정 → 자동 매수
+3. 시스템이 "같은 날 손절한 종목"을 기억하지 못함
+
+### 구현된 4가지 개선 사항
+
+#### 1. 리밸런싱 직전 손절 중단 (09:00-09:05)
+
+**위치**: [core/trading_decision_engine.py:591-628](core/trading_decision_engine.py#L591-L628)
+
+리밸런싱 직전 5분간은 익절만 허용하고 손절은 중단:
+
+```python
+def _check_simple_stop_profit_conditions(self, trading_stock, current_price):
+    """간단한 손절/익절 조건 확인"""
+    from utils.korean_time import now_kst
+    current_time = now_kst()
+
+    # 09:00~09:05 사이에는 손절 체크 안 함 (익절만)
+    is_before_rebalancing = (
+        current_time.hour == 9 and
+        current_time.minute < 5
+    )
+
+    buy_price = trading_stock.position.buy_price
+    profit_rate = (current_price - buy_price) / buy_price
+    target_profit_rate = trading_stock.target_profit_rate
+    stop_loss_rate = trading_stock.stop_loss_rate
+
+    # 익절 조건 확인 (항상 활성)
+    if profit_rate >= target_profit_rate:
+        return True, f"목표 익절 도달 ({profit_rate*100:.1f}% >= {target_profit_rate*100:.1f}%)"
+
+    # 손절 조건 확인 (리밸런싱 전에는 스킵)
+    if not is_before_rebalancing:
+        if profit_rate <= -stop_loss_rate:
+            return True, f"손절 실행 ({profit_rate*100:.1f}% <= -{stop_loss_rate*100:.1f}%)"
+
+    return False, None
+```
+
+**효과**: 갭하락으로 인한 조급한 손절 방지, 리밸런싱에서 재평가 기회 제공
+
+#### 2. 당일 손절 종목 재매수 차단
+
+**위치**:
+- DB 조회: [db/database_manager.py:1438-1475](db/database_manager.py#L1438-L1475)
+- 리밸런싱 적용: [core/helpers/rebalancing_executor.py:254-266](core/helpers/rebalancing_executor.py#L254-L266)
+
+오늘 손절한 종목을 DB에서 조회하여 리밸런싱 시 재매수 금지:
+
+```python
+# database_manager.py
+def get_today_stop_loss_stocks(self, target_date: str = None) -> List[str]:
+    """오늘 손절한 종목 코드 리스트 조회"""
+    if target_date is None:
+        target_date = now_kst().strftime('%Y-%m-%d')
+
+    cursor.execute('''
+        SELECT DISTINCT stock_code
+        FROM virtual_trading_records
+        WHERE action = 'SELL'
+          AND DATE(datetime(timestamp, 'unixepoch', 'localtime')) = ?
+          AND (reason LIKE '%손절%' OR reason LIKE '%stop%loss%')
+    ''', (target_date,))
+
+    return [row[0] for row in cursor.fetchall()]
+
+# rebalancing_executor.py
+today_stop_loss_stocks = self.db_manager.get_today_stop_loss_stocks()
+
+for buy_item in buy_list:
+    stock_code = buy_item['stock_code']
+
+    # 오늘 손절한 종목은 재매수 금지
+    if stock_code in today_stop_loss_stocks:
+        logger.warning(f"⚠️ {stock_code} 매수 스킵: 오늘 손절한 종목 - 재매수 금지")
+        continue
+```
+
+**효과**: 같은 날 손절 후 재매수 완전 차단 (1/23 사례 재발 방지)
+
+#### 3. 2단계 매수 가격 검증
+
+**위치**: [core/helpers/rebalancing_executor.py:47-175](core/helpers/rebalancing_executor.py#L47-L175)
+
+리밸런싱 매수 시 가격 적정성을 2단계로 검증:
+
+**1단계: 절대 가격 밴드 검증**
+- **하한**: 전일 저가의 -5% (급락 방지)
+- **상한**: 전일 종가의 +10% (과열 방지)
+
+**2단계: 시장 대비 상대 강도 검증**
+- 코스피 지수 대비 -5%p 이상 약세 종목 제외
+- 시장 대비 +8%p 이상 강세 종목은 로그 표시
+
+```python
+def _validate_buy_price(self, stock_code: str, current_price: float,
+                        prev_ohlcv: dict, market_change: float = None):
+    """매수가격 적절성 검증 (2단계: 절대값 + 시장 대비)"""
+    prev_close = prev_ohlcv['close']
+    prev_high = prev_ohlcv['high']
+    prev_low = prev_ohlcv['low']
+
+    # 1단계: 절대값 필터
+    lower_band = prev_low * 0.95   # 전일저가 -5%
+    upper_band = prev_close * 1.10 # 전일종가 +10%
+
+    if current_price < lower_band:
+        return False, f"급락 (현재가 < 하한 {lower_band:,}원)"
+
+    if current_price > upper_band:
+        return False, f"과열 (현재가 > 상한 {upper_band:,}원)"
+
+    # 2단계: 시장 대비 상대강도 검증
+    if market_change is not None:
+        stock_change = (current_price - prev_close) / prev_close
+        relative_change = (stock_change - market_change) * 100  # %p
+
+        if relative_change < -5.0:
+            return False, f"시장 대비 약세 (상대 {relative_change:+.1f}%p)"
+
+        if relative_change > 8.0:
+            logger.info(f"📈 {stock_code} 시장 대비 강세 ({relative_change:+.1f}%p)")
+
+    return True, f"검증 통과 (현재 {current_price:,}원)"
+```
+
+**데이터 소스**:
+- 전일 OHLCV: API 조회 (주말/공휴일 자동 처리)
+- 코스피 지수: `get_index_data("0001")` API 호출
+
+**효과**:
+- 급락/급등 종목 매수 방지
+- 시장 대비 뒤처지는 종목 제외
+- 안정적인 매수 타이밍 확보
+
+#### 4. 함수명 정확성 개선
+
+**위치**:
+- [core/helpers/screening_task_runner.py](core/helpers/screening_task_runner.py)
+- [main.py](main.py)
+
+오해의 소지가 있는 함수명 변경:
+
+- ❌ `run_ml_data_collection()` (ML과 무관한 함수)
+- ✅ `run_daily_data_collection()` (일일 데이터 수집)
+
+**변경 대상**:
+- 함수명
+- 변수명 (`_last_ml_data_collection_date` → `_last_daily_data_collection_date`)
+- 로그 메시지
+
+### 테스트 결과
+
+#### 통합 테스트 스크립트
+
+[test_rebalancing_improvements.py](test_rebalancing_improvements.py) - 모든 기능 검증 통과:
+
+1. ✅ 오늘 손절 종목 조회 함수 정상 작동
+2. ✅ 과거 날짜 손절 종목 조회 정상 작동 (1/23 조회: 3개 종목 확인)
+3. ✅ 코스피 지수 조회 및 변동률 계산 정상 작동
+4. ✅ 전일 일봉 조회 및 밴드 계산 정상 작동
+5. ✅ 시간대별 로직 분기 정상 작동
+
+#### 1/23 사례 재현 방지 검증
+
+- **이전**: 010100, 005850, 012330 손절 후 즉시 재매수 → 35만원 손실
+- **개선 후**:
+  - 09:00-09:05 손절 중단 → 조급한 손절 방지
+  - DB 조회로 재매수 차단 → 1/23 종목 리스트 확인됨
+  - 가격 검증 추가 → 급락/과열 종목 필터링
+
+### 예상 효과
+
+1. **직접적 손실 방지**: 같은 날 손절 후 재매수로 인한 손실 제거 (연간 수십만원 절약 추정)
+2. **매수 품질 향상**: 급락/과열 종목 제외로 안정적인 진입
+3. **리밸런싱 효율**: 시장 대비 강세 종목 우선 매수
+4. **시스템 안정성**: 갭 변동에 대한 방어 로직 강화
+
+### API 버그 수정
+
+**문제**: 코스피 변동률 조회 시 잘못된 필드 사용
+**위치**: [core/helpers/rebalancing_executor.py:66](core/helpers/rebalancing_executor.py#L66)
+
+- ❌ `bstp_nmix_prpr` (현재 지수값, 예: 4990.07)
+- ✅ `bstp_nmix_prdy_ctrt` (전일대비율, 예: 0.76)
+
+```python
+# 수정 후
+change_rate = float(index_data.get('bstp_nmix_prdy_ctrt', 0))  # 전일대비율 (%)
+market_change = change_rate / 100  # 소수 형태로 변환 (0.0076)
+```
+
+**참조**: [KIS API 명세서](https://apiportal.koreainvestment.com/apiservice-apiservice?/uapi/domestic-stock/v1/quotations/inquire-index-price)
+
+---
+
 ## 코드 검토 시 주의사항 (학습 교훈)
 
 ### 검증 체크리스트
