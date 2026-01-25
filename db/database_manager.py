@@ -1430,7 +1430,45 @@ class DatabaseManager:
                     }
             
             return stats
-            
+
         except Exception as e:
             self.logger.error(f"가상 매매 통계 조회 실패: {e}")
             return {}
+
+    def get_today_stop_loss_stocks(self, target_date: str = None) -> List[str]:
+        """
+        오늘 손절한 종목 코드 리스트 조회
+
+        Args:
+            target_date: 조회 날짜 (YYYY-MM-DD 형식, None이면 오늘)
+
+        Returns:
+            손절한 종목 코드 리스트
+        """
+        try:
+            if target_date is None:
+                target_date = now_kst().strftime('%Y-%m-%d')
+
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+
+                # 오늘 손절 매도한 종목 조회 (reason에 '손절' 포함)
+                cursor.execute('''
+                    SELECT DISTINCT stock_code
+                    FROM virtual_trading_records
+                    WHERE action = 'SELL'
+                      AND DATE(datetime(timestamp, 'unixepoch', 'localtime')) = ?
+                      AND (reason LIKE '%손절%' OR reason LIKE '%stop%loss%')
+                ''', (target_date,))
+
+                result = cursor.fetchall()
+                stop_loss_stocks = [row[0] for row in result]
+
+                if stop_loss_stocks:
+                    self.logger.info(f"📊 {target_date} 손절 종목: {len(stop_loss_stocks)}개 ({', '.join(stop_loss_stocks)})")
+
+                return stop_loss_stocks
+
+        except Exception as e:
+            self.logger.error(f"오늘 손절 종목 조회 실패: {e}")
+            return []

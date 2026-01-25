@@ -107,8 +107,10 @@ class ScreeningTaskRunner:
                 await self.telegram.notify_error("Quant Screening", e)
             return False
 
-    async def run_ml_data_collection(self, verify_callback=None):
-        """ML 데이터 수집 실행 (08:30 - 전일 데이터)
+    async def run_daily_data_collection(self, verify_callback=None):
+        """일일 데이터 수집 실행 (08:30 - 전일 데이터)
+
+        퀀트 포트폴리오 및 보유 종목의 일봉/재무 데이터를 수집합니다.
 
         Args:
             verify_callback: 데이터 검증 콜백 함수 (선택적)
@@ -150,10 +152,10 @@ class ScreeningTaskRunner:
                 logger.warning(f"⚠️ 보유 종목 조회 실패: {holding_err}")
 
             if not stock_codes:
-                logger.warning("⚠️ ML 데이터 수집할 종목이 없습니다")
+                logger.warning("⚠️ 데이터 수집할 종목이 없습니다")
                 return False
 
-            logger.info(f"📊 ML 데이터 수집 대상: {len(stock_codes)}개 종목")
+            logger.info(f"📊 데이터 수집 대상: {len(stock_codes)}개 종목")
 
             # 데이터 수집 실행 (비동기로 실행)
             loop = asyncio.get_event_loop()
@@ -180,7 +182,7 @@ class ScreeningTaskRunner:
             price_success = sum(1 for v in price_results.values() if v)
             financial_success = sum(1 for v in financial_results.values() if v)
 
-            logger.info(f"✅ ML 데이터 수집 완료: 가격 {price_success}/{len(stock_codes)}개, 재무 {financial_success}/{len(stock_codes)}개")
+            logger.info(f"✅ 일일 데이터 수집 완료: 가격 {price_success}/{len(stock_codes)}개, 재무 {financial_success}/{len(stock_codes)}개")
 
             # ✅ 추가: 데이터 검증 (당일 일봉 데이터 저장 여부 확인)
             data_verified = False
@@ -190,7 +192,7 @@ class ScreeningTaskRunner:
             if self.telegram:
                 verification_msg = "✅ 당일 데이터 저장 확인" if data_verified else "⚠️ 당일 데이터 미확인"
                 await self.telegram.notify_system_status(
-                    f"📊 ML 데이터 수집 완료\n"
+                    f"📊 일일 데이터 수집 완료\n"
                     f"가격 데이터: {price_success}/{len(stock_codes)}개\n"
                     f"재무 데이터: {financial_success}/{len(stock_codes)}개\n"
                     f"{verification_msg}"
@@ -199,10 +201,10 @@ class ScreeningTaskRunner:
             return True
 
         except Exception as e:
-            logger.error(f"❌ ML 데이터 수집 예외 발생: {e}")
+            logger.error(f"❌ 일일 데이터 수집 예외 발생: {e}")
             traceback.print_exc()
             if self.telegram:
-                await self.telegram.notify_error("ML Data Collection", e)
+                await self.telegram.notify_error("Daily Data Collection", e)
             return False
 
     async def run_ml_screening(self):

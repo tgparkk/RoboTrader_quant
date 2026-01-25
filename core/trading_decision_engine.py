@@ -589,36 +589,43 @@ class TradingDecisionEngine:
             self.logger.error(f"❌ 가상 매도 실행 오류: {e}")
     
     def _check_simple_stop_profit_conditions(self, trading_stock, current_price) -> Tuple[bool, str]:
-        """간단한 손절/익절 조건 확인 (trading_config.json의 손익비 설정 사용)"""
+        """간단한 손절/익절 조건 확인 (종목별 목표 익절/손절률 사용)"""
         try:
             if not trading_stock.position:
                 return False, ""
-            
+
             # 매수가격 안전하게 변환 (current_price는 이미 float로 전달됨)
             buy_price = self._safe_float_convert(trading_stock.position.avg_price)
-            
+
             if buy_price <= 0:
                 return False, "매수가격 정보 없음"
-            
-            # 수익률 계산 (HTS 방식과 동일: 백분율로 계산)
-            profit_rate_percent = (current_price - buy_price) / buy_price * 100
-            
-            # 🆕 trading_config.json에서 손익비 설정 가져오기
-            from config.settings import load_trading_config
-            config = load_trading_config()
-            take_profit_percent = config.risk_management.take_profit_ratio * 100  # 0.035 -> 3.5%
-            stop_loss_percent = config.risk_management.stop_loss_ratio * 100      # 0.025 -> 2.5%
-            
-            # 익절 조건: config에서 설정한 % 이상
-            if profit_rate_percent >= take_profit_percent:
-                return True, f"익절 {profit_rate_percent:.1f}% (기준: +{take_profit_percent:.1f}%)"
-            
-            # 손절 조건: config에서 설정한 % 이하
-            if profit_rate_percent <= -stop_loss_percent:
-                return True, f"손절 {profit_rate_percent:.1f}% (기준: -{stop_loss_percent:.1f}%)"
-            
+
+            # 수익률 계산
+            profit_rate = (current_price - buy_price) / buy_price
+
+            # 종목별 목표 익절/손절률 가져오기 (리밸런싱 시 설정됨)
+            target_profit_rate = getattr(trading_stock, 'target_profit_rate', 0.15)
+            stop_loss_rate = getattr(trading_stock, 'stop_loss_rate', 0.10)
+
+            # 🆕 09:00~09:05 사이에는 손절 체크 안 함 (익절만)
+            from utils.korean_time import now_kst
+            current_time = now_kst()
+            is_before_rebalancing = (
+                current_time.hour == 9 and
+                current_time.minute < 5
+            )
+
+            # 익절 조건 확인
+            if profit_rate >= target_profit_rate:
+                return True, f"목표 익절 도달 ({profit_rate*100:.1f}% >= {target_profit_rate*100:.1f}%)"
+
+            # 손절 조건 확인 (리밸런싱 전에는 스킵)
+            if not is_before_rebalancing:
+                if profit_rate <= -stop_loss_rate:
+                    return True, f"손절 실행 ({profit_rate*100:.1f}% <= -{stop_loss_rate*100:.1f}%)"
+
             return False, ""
-            
+
         except Exception as e:
             self.logger.error(f"❌ 간단한 손절/익절 조건 확인 오류: {e}")
             return False, ""

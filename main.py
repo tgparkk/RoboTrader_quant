@@ -101,11 +101,11 @@ class DayTradingBot:
         # 🆕 ML 멀티팩터 시스템 초기화
         self.ml_data_collector = MLDataCollector(db_path=self.db_manager.db_path, api_manager=self.api_manager)
         self.ml_screening_service = MLScreeningService(db_path=self.db_manager.db_path)
-        self._last_ml_data_collection_date = None
+        self._last_daily_data_collection_date = None
         self._last_ml_screening_date = None
-        self._ml_data_collection_task = None
+        self._daily_data_collection_task = None
         self._ml_screening_task = None
-        self._ml_data_collection_completed = False
+        self._daily_data_collection_completed = False
 
         # 🆕 일일 매매 리포트 초기화
         self._last_daily_report_date = None
@@ -131,7 +131,8 @@ class DayTradingBot:
             order_wait_helper=self.order_wait_helper,
             keep_list_updater=self.keep_list_updater,
             notification_helper=self.notification_helper,
-            telegram_integration=self.telegram
+            telegram_integration=self.telegram,
+            db_manager=self.db_manager
         )
         self.screening_task_runner = ScreeningTaskRunner(
             quant_screening_service=self.quant_screening_service,
@@ -515,10 +516,10 @@ class DayTradingBot:
                 if current_time.hour == 8:
                     # 08:30 전일 일봉 + 재무데이터 수집
                     if current_time.minute >= 30:
-                        if (self._last_ml_data_collection_date != current_time.date() and
-                            self._ml_data_collection_task is None):
+                        if (self._last_daily_data_collection_date != current_time.date() and
+                            self._daily_data_collection_task is None):
                             self.logger.info(f"📊 08:30+ 전일 데이터 수집 스케줄 트리거 ({current_time.strftime('%H:%M:%S')})")
-                            self._ml_data_collection_task = asyncio.create_task(self._run_ml_data_collection())
+                            self._daily_data_collection_task = asyncio.create_task(self._run_daily_data_collection())
 
                     # 08:55 퀀트 스크리닝 실행 (오늘용 포트폴리오 생성)
                     if current_time.minute >= 55:
@@ -528,8 +529,8 @@ class DayTradingBot:
 
                         # 08:55 ML 스크리닝 실행 (ML 데이터 수집 완료 후)
                         # ⚠️ 현재 비활성화 (미래 사용 예정)
-                        # if (self._last_ml_data_collection_date == current_time.date() and
-                        #     self._ml_data_collection_completed and
+                        # if (self._last_daily_data_collection_date == current_time.date() and
+                        #     self._daily_data_collection_completed and
                         #     self._last_ml_screening_date != current_time.date() and
                         #     self._ml_screening_task is None):
                         #     self.logger.info(f"🔍 08:55+ ML 스크리닝 스케줄 트리거 ({current_time.strftime('%H:%M:%S')})")
@@ -731,18 +732,18 @@ class DayTradingBot:
         finally:
             self._quant_screening_task = None
     
-    async def _run_ml_data_collection(self):
-        """ML 데이터 수집 실행 (08:30 - 전일 데이터)"""
+    async def _run_daily_data_collection(self):
+        """일일 데이터 수집 실행 (08:30 - 전일 데이터)"""
         try:
-            self._ml_data_collection_completed = False
-            result = await self.screening_task_runner.run_ml_data_collection(
+            self._daily_data_collection_completed = False
+            result = await self.screening_task_runner.run_daily_data_collection(
                 verify_callback=self._verify_daily_data_completeness
             )
             if result:
-                self._last_ml_data_collection_date = now_kst().date()
-                self._ml_data_collection_completed = True
+                self._last_daily_data_collection_date = now_kst().date()
+                self._daily_data_collection_completed = True
         finally:
-            self._ml_data_collection_task = None
+            self._daily_data_collection_task = None
     
     async def _run_ml_screening(self):
         """ML 멀티팩터 스크리닝 실행 (08:55)"""
