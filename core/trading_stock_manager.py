@@ -641,6 +641,14 @@ class TradingStockManager:
                 buy_price = trading_stock.position.avg_price
                 profit_rate = (current_price - buy_price) / buy_price
 
+                # 09:00~09:05 사이에는 손절 체크 안 함 (익절만)
+                from utils.korean_time import now_kst
+                current_time = now_kst()
+                is_before_rebalancing = (
+                    current_time.hour == 9 and
+                    current_time.minute < 5
+                )
+
                 # 목표 익절률 체크
                 if hasattr(trading_stock, 'target_profit_rate') and trading_stock.target_profit_rate:
                     if profit_rate >= trading_stock.target_profit_rate:
@@ -649,13 +657,14 @@ class TradingStockManager:
                         await self._execute_sell(trading_stock, current_price, reason)
                         return
 
-                # 손절률 체크
-                if hasattr(trading_stock, 'stop_loss_rate') and trading_stock.stop_loss_rate:
-                    if profit_rate <= -trading_stock.stop_loss_rate:
-                        reason = f"손절 실행 ({profit_rate:.2%} <= -{trading_stock.stop_loss_rate:.2%})"
-                        self.logger.info(f"🚨 {stock_code} 손절 신호: {reason}")
-                        await self._execute_sell(trading_stock, current_price, reason)
-                        return
+                # 손절률 체크 (리밸런싱 전에는 스킵)
+                if not is_before_rebalancing:
+                    if hasattr(trading_stock, 'stop_loss_rate') and trading_stock.stop_loss_rate:
+                        if profit_rate <= -trading_stock.stop_loss_rate:
+                            reason = f"손절 실행 ({profit_rate:.2%} <= -{trading_stock.stop_loss_rate:.2%})"
+                            self.logger.info(f"🚨 {stock_code} 손절 신호: {reason}")
+                            await self._execute_sell(trading_stock, current_price, reason)
+                            return
 
         except Exception as e:
             self.logger.error(f"❌ {trading_stock.stock_code} 매도 분석 오류: {e}")
