@@ -144,7 +144,7 @@ class QuantRebalancingService:
                         'stock_code': holding['stock_code'],
                         'stock_name': holding.get('stock_name', ''),
                         'quantity': holding.get('quantity', 0),
-                        'reason': '포트폴리오 데이터 부재 (긴급 매도)'
+                        'reason': '[리밸런싱] 포트폴리오 데이터 부재 (긴급 매도)'
                     })
 
                 return {
@@ -179,7 +179,7 @@ class QuantRebalancingService:
                             'stock_code': stock_code,
                             'stock_name': holding.get('stock_name', ''),
                             'quantity': holding.get('quantity', 0),
-                            'reason': '팩터 데이터 없음 (목표 포트폴리오 제외)'
+                            'reason': '[리밸런싱] 팩터 데이터 없음 (목표 포트폴리오 제외)'
                         })
                     continue
 
@@ -192,13 +192,13 @@ class QuantRebalancingService:
                 # 1단계: 긴급 매도 (Hard Stop) - 점수 < 62점
                 if total_score < self.hard_stop_score:
                     should_sell = True
-                    sell_reason = f"긴급 매도 (점수 {total_score:.1f} < {self.hard_stop_score})"
+                    sell_reason = f"[리밸런싱] 긴급 매도 (점수 {total_score:.1f} < {self.hard_stop_score})"
 
                 # 2단계: 조건부 매도 (Soft Stop) - 점수 62~64점 AND 순위 > 50위
                 elif self.hard_stop_score <= total_score < self.soft_stop_score:
                     if factor_rank > self.soft_stop_rank:
                         should_sell = True
-                        sell_reason = f"조건부 매도 (점수 {total_score:.1f}, {factor_rank}위 > {self.soft_stop_rank}위)"
+                        sell_reason = f"[리밸런싱] 조건부 매도 (점수 {total_score:.1f}, {factor_rank}위 > {self.soft_stop_rank}위)"
 
                 # 3단계: 포트폴리오 리밸런싱 - 순위 > 40위 AND 점수 < 65점
                 elif stock_code not in target_codes:
@@ -224,7 +224,7 @@ class QuantRebalancingService:
                             continue
 
                         should_sell = True
-                        sell_reason = f"포트폴리오 조정 (상승 가능성 낮음: {factor_rank}위, 점수 {total_score:.1f}, 모멘텀 {momentum_score:.1f})"
+                        sell_reason = f"[리밸런싱] 포트폴리오 조정 (상승 가능성 낮음: {factor_rank}위, 점수 {total_score:.1f}, 모멘텀 {momentum_score:.1f})"
 
                 if should_sell:
                     sell_list.append({

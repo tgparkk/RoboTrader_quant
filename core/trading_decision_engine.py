@@ -623,6 +623,11 @@ class TradingDecisionEngine:
             if not is_before_rebalancing:
                 if profit_rate <= -stop_loss_rate:
                     return True, f"손절 실행 ({profit_rate*100:.1f}% <= -{stop_loss_rate*100:.1f}%)"
+            else:
+                # 리밸런싱 전 손절 중단 모드 (디버그 로그)
+                if profit_rate <= -stop_loss_rate:
+                    self.logger.debug(f"⏸️ {trading_stock.stock_code} 리밸런싱 전 손절 중단 "
+                                     f"(손절선 도달: {profit_rate*100:.1f}% <= -{stop_loss_rate*100:.1f}%, 익절만 허용)")
 
             return False, ""
 

@@ -490,3 +490,191 @@ market_change = change_rate / 100  # 소수 형태로 변환 (0.0076)
 4. **부분 로직만 보고 판단**
    - ❌ "계속 추가만 하네? 메모리 누적!"
    - ✅ 함수 끝에 당일 필터링 로직 있음
+
+---
+
+## 로깅 개선 및 데이터 정합성 복원 (2026-01-27)
+
+### 1. 로깅 상세도 향상
+
+#### (1) 가격 검증 로그 추가
+**위치**: [core/helpers/rebalancing_executor.py:141-169](core/helpers/rebalancing_executor.py#L141-L169)
+
+리밸런싱 매수 시 가격 검증 결과를 명시적으로 로깅:
+
+```python
+# 급락 차단
+if current_price < lower_band:
+    logger.warning(f"⚠️ {stock_code} 매수 차단: 급락 (현재 {current_price:,}원 < 하한 {lower_band:,}원)")
+
+# 과열 차단
+if current_price > upper_band:
+    logger.warning(f"⚠️ {stock_code} 매수 차단: 극단적 과열 (현재 {current_price:,}원 > 상한 {upper_band:,}원)")
+
+# 시장 대비 약세 차단
+if relative_change < -5.0:
+    logger.warning(f"⚠️ {stock_code} 매수 차단: 시장 대비 약세 (상대 {relative_change:+.1f}%p)")
+
+# 검증 통과
+logger.info(f"✅ {stock_code} 가격 검증 통과: 현재 {current_price:,}원 (전일종가 대비 {change:+.1f}%)")
+```
+
+**효과**: 매수 차단 사유를 실시간으로 파악 가능
+
+#### (2) 09:00-09:05 손절 중단 모드 로그
+**위치**: [core/trading_decision_engine.py:623-628](core/trading_decision_engine.py#L623-L628)
+
+리밸런싱 전 손절선 도달 시 디버그 로그 추가:
+
+```python
+if not is_before_rebalancing:
+    if profit_rate <= -stop_loss_rate:
+        return True, f"손절 실행 ({profit_rate*100:.1f}%)"
+else:
+    # 리밸런싱 전 손절 중단 모드
+    if profit_rate <= -stop_loss_rate:
+        logger.debug(f"⏸️ {trading_stock.stock_code} 리밸런싱 전 손절 중단 "
+                     f"(손절선 도달: {profit_rate*100:.1f}%, 익절만 허용)")
+```
+
+**효과**: 09:00-09:05 손절 중단 기능 작동 여부 확인 가능
+
+#### (3) 당일 손절 종목 재매수 차단 로그
+**위치**: [core/helpers/rebalancing_executor.py:257-261](core/helpers/rebalancing_executor.py#L257-L261)
+
+당일 손절 종목 목록을 명시적으로 출력:
+
+```python
+today_stop_loss_stocks = self.db_manager.get_today_stop_loss_stocks()
+if today_stop_loss_stocks:
+    logger.info(f"🚫 당일 손절 재매수 차단 대상: {len(today_stop_loss_stocks)}개 "
+                f"({', '.join(today_stop_loss_stocks)})")
+else:
+    logger.info(f"✅ 당일 손절 종목 없음 (재매수 제한 없음)")
+```
+
+**효과**: 재매수 차단이 정상 작동하는지 실시간 확인
+
+### 2. 리밸런싱 매도 reason 구분
+
+**위치**: [core/quant/quant_rebalancing_service.py](core/quant/quant_rebalancing_service.py)
+
+리밸런싱 매도와 장중 손익절을 명확히 구분하도록 reason에 접두사 추가:
+
+```python
+# 리밸런싱 매도
+sell_reason = "[리밸런싱] 긴급 매도 (점수 xx < 62)"
+sell_reason = "[리밸런싱] 조건부 매도 (점수 xx, 순위 xx)"
+sell_reason = "[리밸런싱] 포트폴리오 조정 (...)"
+
+# 장중 손익절 (기존 유지)
+reason = "손절 실행 (-11.72% <= -9.00%)"
+reason = "목표 익절 도달 (17.08% >= 17.00%)"
+```
+
+**효과**:
+- SQL 쿼리로 리밸런싱 매도만 필터링 가능
+- 거래 로그 분석 시 명확한 구분
+
+### 3. BLOB 데이터 정합성 복원
+
+#### 문제 발견
+2026-01-08에 발생한 numpy.int64 BLOB 저장 버그로 인해 7건의 매도 기록 `quantity` 컬럼이 blob 타입으로 저장됨.
+
+**영향**:
+- SQL 집계 쿼리 오작동 (`SUM(quantity)` → 0)
+- Holdings 복원 시 수량 0으로 인식
+- 중복 매도 방지 경고 발생
+
+#### 복원 스크립트
+**위치**: [scripts/fix_blob_quantity.py](scripts/fix_blob_quantity.py)
+
+BLOB 데이터를 little-endian int64로 해석하여 INTEGER로 변환:
+
+```python
+import struct
+
+# BLOB 바이트 읽기
+blob_bytes = bytes(quantity_blob)
+if len(blob_bytes) < 8:
+    blob_bytes = blob_bytes + b'\x00' * (8 - len(blob_bytes))
+
+# little-endian int64로 해석
+quantity_int = struct.unpack('<q', blob_bytes)[0]
+
+# DB 업데이트
+cursor.execute("""
+    UPDATE virtual_trading_records
+    SET quantity = ?
+    WHERE id = ?
+""", (quantity_int, record_id))
+```
+
+**실행 방법**:
+```bash
+# 미리보기 (변경 없음)
+python scripts/fix_blob_quantity.py
+
+# 실제 변환
+python scripts/fix_blob_quantity.py --live
+```
+
+#### 복원 결과
+| ID | 종목코드 | BLOB → INTEGER | 검증 |
+|----|---------|---------------|------|
+| 514 | 086280 | 7주 | ✅ 매수 7주 |
+| 515 | 005380 | 4주 | ✅ 매수 4주 |
+| 517 | 006650 | 2주 | ✅ 매수 2주 |
+| 518 | 067830 | 98주 | ✅ 매수 98주 |
+| 519 | 011210 | 4주 | ✅ 매수 4주 |
+| 520 | 035510 | 18주 | ✅ 매수 18주 |
+| 521 | 023810 | 123주 | ✅ 매수 123주 |
+
+**총 복원**: 7건 (256주)
+
+**검증**:
+```sql
+-- 복원 전
+SELECT SUM(quantity) FROM virtual_trading_records WHERE action='SELL';
+-- 결과: 부정확 (BLOB 제외)
+
+-- 복원 후
+SELECT SUM(quantity) FROM virtual_trading_records WHERE action='SELL';
+-- 결과: 정확 (모든 거래 포함)
+```
+
+### 4. 향후 방지 조치
+
+#### 타입 안전성 보장 (이미 적용됨)
+**위치**: [db/database_manager.py:1148-1152](db/database_manager.py#L1148-L1152)
+
+```python
+# 타입 안전성 보장: numpy 타입을 Python 기본 타입으로 변환
+quantity = int(quantity)
+price = float(price)
+if target_profit_rate is not None:
+    target_profit_rate = float(target_profit_rate)
+if stop_loss_rate is not None:
+    stop_loss_rate = float(stop_loss_rate)
+```
+
+**커밋**: `98d5e72` (2026-01-08 22:34)
+
+### 5. 개선 효과 요약
+
+#### 로깅 개선
+- ✅ 가격 검증 차단 사유 실시간 파악
+- ✅ 손절 중단 모드 작동 여부 확인
+- ✅ 재매수 차단 대상 명시적 표시
+- ✅ 리밸런싱 vs 손익절 명확한 구분
+
+#### 데이터 정합성
+- ✅ BLOB 데이터 100% 복원 (7건)
+- ✅ SQL 집계 쿼리 정상 작동
+- ✅ Holdings 정합성 복원
+- ✅ 중복 매도 경고 근본 해결
+
+#### 시스템 안정성
+- ✅ numpy.int64 버그 재발 방지 (타입 변환 추가)
+- ✅ 데이터 품질 모니터링 스크립트 제공
+- ✅ 복원 절차 문서화 및 자동화

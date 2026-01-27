@@ -140,10 +140,12 @@ class RebalancingExecutor:
 
             if current_price < lower_band:
                 change = (current_price / prev_low - 1) * 100
+                logger.warning(f"⚠️ {stock_code} 매수 차단: 급락 (현재 {current_price:,}원 < 하한 {lower_band:,}원, 전일저 대비 {change:+.1f}%)")
                 return False, f"급락 (현재 {current_price:,}원 < 하한 {lower_band:,}원, 전일저 대비 {change:+.1f}%)"
 
             if current_price > upper_band:
                 change = (current_price / prev_close - 1) * 100
+                logger.warning(f"⚠️ {stock_code} 매수 차단: 극단적 과열 (현재 {current_price:,}원 > 상한 {upper_band:,}원, 전일종가 대비 {change:+.1f}%)")
                 return False, f"극단적 과열 (현재 {current_price:,}원 > 상한 {upper_band:,}원, 전일종가 대비 {change:+.1f}%)"
 
             # ============================================
@@ -157,6 +159,7 @@ class RebalancingExecutor:
                 relative_change = (stock_change - market_change) * 100
 
                 if relative_change < -5.0:
+                    logger.warning(f"⚠️ {stock_code} 매수 차단: 시장 대비 약세 (종목 {stock_change*100:+.1f}%, 코스피 {market_change*100:+.1f}%, 상대 {relative_change:+.1f}%p)")
                     return False, f"시장 대비 약세 (종목 {stock_change*100:+.1f}%, 코스피 {market_change*100:+.1f}%, 상대 {relative_change:+.1f}%p)"
 
                 if relative_change > 8.0:
@@ -164,6 +167,7 @@ class RebalancingExecutor:
 
             # 검증 통과
             change = (current_price - prev_close) / prev_close * 100
+            logger.info(f"✅ {stock_code} 가격 검증 통과: 현재 {current_price:,}원 (전일종가 대비 {change:+.1f}%, 밴드: {lower_band:,}~{upper_band:,})")
             return True, f"검증 통과 (현재 {current_price:,}원, 전일종가 대비 {change:+.1f}%, 밴드: {lower_band:,}~{upper_band:,})"
 
         except Exception as e:
@@ -185,6 +189,7 @@ class RebalancingExecutor:
                 stock_code = sell_item['stock_code']
                 quantity = sell_item['quantity']
                 stock_name = sell_item.get('stock_name', stock_code)
+                sell_reason = sell_item.get('reason', '리밸런싱 매도')  # 🆕 매도 사유 추가
 
                 try:
                     # 현재가 조회 (시장가 매도용)
@@ -250,6 +255,10 @@ class RebalancingExecutor:
             today_stop_loss_stocks = []
             if self.db_manager:
                 today_stop_loss_stocks = self.db_manager.get_today_stop_loss_stocks()
+                if today_stop_loss_stocks:
+                    logger.info(f"🚫 당일 손절 재매수 차단 대상: {len(today_stop_loss_stocks)}개 ({', '.join(today_stop_loss_stocks)})")
+                else:
+                    logger.info(f"✅ 당일 손절 종목 없음 (재매수 제한 없음)")
 
             # 🆕 코스피 변동률 조회 (1회만)
             market_change = self._get_market_change_rate()
