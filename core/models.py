@@ -87,7 +87,7 @@ class Order:
     order_id: str
     stock_code: str
     order_type: OrderType
-    price: float
+    price: float  # 주문가
     quantity: int
     timestamp: datetime
     status: OrderStatus = OrderStatus.PENDING
@@ -95,11 +95,19 @@ class Order:
     remaining_quantity: int = 0
     adjustment_count: int = 0  # 정정 횟수
     order_3min_candle_time: Optional[datetime] = None  # 주문 시점의 3분봉 시간 (3봉 후 취소용)
-    
+    filled_price: Optional[float] = None  # 🆕 실제 체결가 (실전 매매 시)
+    target_profit_rate: Optional[float] = None  # 🆕 목표 익절률 (DB 기록용)
+    stop_loss_rate: Optional[float] = None  # 🆕 목표 손절률 (DB 기록용)
+    stock_name: Optional[str] = None  # 🆕 종목명 (DB 기록용)
+
     def __post_init__(self):
         """초기화 후 처리"""
         if self.remaining_quantity == 0:
             self.remaining_quantity = self.quantity
+
+    def get_filled_price(self) -> float:
+        """체결가 반환 (실제 체결가 또는 주문가)"""
+        return self.filled_price if self.filled_price is not None else self.price
 
 
 @dataclass

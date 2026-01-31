@@ -8,43 +8,95 @@ from utils.korean_time import now_kst
 
 
 class VirtualTradingManager:
-    """가상매매 전용 관리 클래스"""
-    
-    def __init__(self, db_manager=None, api_manager=None):
+    """가상매매 전용 관리 클래스 (실전/가상 모드 지원)"""
+
+    def __init__(self, db_manager=None, api_manager=None, paper_trading: bool = True):
         """
         초기화
-        
+
         Args:
             db_manager: 데이터베이스 관리자
             api_manager: API 관리자 (계좌 정보 조회용)
+            paper_trading: 가상매매 모드 여부 (True: 가상, False: 실전)
         """
         self.logger = setup_logger(__name__)
         self.db_manager = db_manager
         self.api_manager = api_manager
-        
-        # 가상 매매 설정
+        self.paper_trading = paper_trading
+
+        # 잔고 관리
         self.virtual_investment_amount = 10000  # 기본값 (실제 계좌 조회 실패시 사용)
-        self.virtual_balance = 0  # 가상 잔고
+        self.virtual_balance = 0  # 현재 잔고 (가상 또는 실전)
         self.initial_balance = 0  # 시작 잔고 (수익률 계산용)
-        
-        # 장 시작 전에 실제 계좌 잔고로 가상 잔고 초기화
-        self._initialize_virtual_balance()
-    
-    def _initialize_virtual_balance(self):
-        """가상 잔고 초기화 (테스트 모드: 항상 1000만원)"""
+
+        # 잔고 초기화
+        self._initialize_balance()
+
+    def _initialize_balance(self):
+        """잔고 초기화 (가상/실전 모드에 따라 다르게 처리)"""
         try:
-            # 🎯 테스트 기간: 실제 계좌 잔고와 무관하게 항상 1000만원으로 설정
-            self.virtual_balance = 10000000  # 1천만원
-            self.initial_balance = self.virtual_balance
-            self.virtual_investment_amount = 1000000  # 종목당 100만원
-            self.logger.info(f"💰 가상 잔고 설정 (테스트 모드): {self.virtual_balance:,.0f}원 (종목당: {self.virtual_investment_amount:,.0f}원)")
-            
+            if self.paper_trading:
+                # 🎯 가상매매 모드: 1000만원으로 설정
+                self.virtual_balance = 10000000  # 1천만원
+                self.initial_balance = self.virtual_balance
+                self.virtual_investment_amount = 1000000  # 종목당 100만원
+                self.logger.info(f"💰 가상 잔고 설정 (가상매매 모드): {self.virtual_balance:,.0f}원 (종목당: {self.virtual_investment_amount:,.0f}원)")
+            else:
+                # 🎯 실전 모드: 실제 계좌 잔고 조회
+                self._initialize_real_balance()
+
         except Exception as e:
-            self.logger.error(f"❌ 가상 잔고 초기화 오류: {e}")
+            self.logger.error(f"❌ 잔고 초기화 오류: {e}")
             # 오류 시 기본값 사용
             self.virtual_balance = 10000000
             self.initial_balance = self.virtual_balance
             self.virtual_investment_amount = 1000000
+
+    def _initialize_real_balance(self):
+        """실전 모드: 실제 계좌 잔고로 초기화"""
+        try:
+            if not self.api_manager:
+                self.logger.warning("⚠️ API 매니저가 없어 실제 잔고 조회 불가 - 기본값 사용")
+                self._use_default_balance()
+                return
+
+            # 실제 계좌 잔고 조회
+            account_info = self.api_manager.get_account_balance()
+
+            if account_info and account_info.available_amount > 0:
+                self.virtual_balance = account_info.available_amount
+                self.initial_balance = self.virtual_balance
+                # 종목당 투자금액: 가용 잔고의 5% (최대 200만원, 최소 50만원)
+                self.virtual_investment_amount = max(500000, min(2000000, self.virtual_balance * 0.05))
+                self.logger.info(f"💰 실전 잔고 설정: {self.virtual_balance:,.0f}원 (종목당: {self.virtual_investment_amount:,.0f}원)")
+            else:
+                self.logger.warning("⚠️ 실제 잔고 조회 실패 - 기본값 사용")
+                self._use_default_balance()
+
+        except Exception as e:
+            self.logger.error(f"❌ 실전 잔고 초기화 오류: {e}")
+            self._use_default_balance()
+
+    def _use_default_balance(self):
+        """기본 잔고 설정 (조회 실패 시)"""
+        self.virtual_balance = 10000000
+        self.initial_balance = self.virtual_balance
+        self.virtual_investment_amount = 1000000
+        self.logger.warning(f"⚠️ 기본 잔고 사용: {self.virtual_balance:,.0f}원")
+
+    def refresh_balance(self):
+        """잔고 새로고침 (실전 모드에서 실제 잔고 재조회)"""
+        if not self.paper_trading and self.api_manager:
+            try:
+                account_info = self.api_manager.get_account_balance()
+                if account_info and account_info.available_amount > 0:
+                    old_balance = self.virtual_balance
+                    self.virtual_balance = account_info.available_amount
+                    self.logger.info(f"💰 실전 잔고 새로고침: {old_balance:,.0f}원 → {self.virtual_balance:,.0f}원")
+                    return True
+            except Exception as e:
+                self.logger.error(f"❌ 잔고 새로고침 오류: {e}")
+        return False
     
     def update_virtual_balance(self, amount: float, transaction_type: str):
         """

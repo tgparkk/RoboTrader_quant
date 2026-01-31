@@ -84,7 +84,8 @@ class DayTradingBot:
             telegram_integration=self.telegram,
             trading_manager=self.trading_manager,
             api_manager=self.api_manager,
-            intraday_manager=self.intraday_manager
+            intraday_manager=self.intraday_manager,
+            config=self.config  # 🆕 paper_trading 설정 전달
         )  # 🆕 매매 판단 엔진
         self.candidate_selector = CandidateSelector(self.config, self.api_manager, db_manager=self.db_manager)
         

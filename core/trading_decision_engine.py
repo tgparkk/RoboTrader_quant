@@ -27,7 +27,7 @@ class TradingDecisionEngine:
     Note: 리밸런싱 모드에서는 장중 매수 판단만 비활성화, 손절/익절 매도는 활성화
     """
     
-    def __init__(self, db_manager=None, telegram_integration=None, trading_manager=None, api_manager=None, intraday_manager=None):
+    def __init__(self, db_manager=None, telegram_integration=None, trading_manager=None, api_manager=None, intraday_manager=None, config=None):
         """
         초기화
 
@@ -37,6 +37,7 @@ class TradingDecisionEngine:
             trading_manager: 거래 종목 관리자
             api_manager: API 관리자 (계좌 정보 조회용)
             intraday_manager: 장중 종목 관리자
+            config: 거래 설정 (TradingConfig)
         """
         self.logger = setup_logger(__name__)
         self.db_manager = db_manager
@@ -44,13 +45,18 @@ class TradingDecisionEngine:
         self.trading_manager = trading_manager
         self.api_manager = api_manager
         self.intraday_manager = intraday_manager
+        self.config = config
 
-        # 가상 매매 설정
-        self.is_virtual_mode = True  # 🆕 가상매매 모드 여부 (False: 실제매매, True: 가상매매) - 테스트 기간
+        # 가상 매매 설정 (config에서 읽거나 기본값 True)
+        self.is_virtual_mode = getattr(config, 'paper_trading', True) if config else True
 
-        # 🆕 가상매매 관리자 초기화
+        # 🆕 가상매매 관리자 초기화 (paper_trading 설정 전달)
         from core.virtual_trading_manager import VirtualTradingManager
-        self.virtual_trading = VirtualTradingManager(db_manager=db_manager, api_manager=api_manager)
+        self.virtual_trading = VirtualTradingManager(
+            db_manager=db_manager,
+            api_manager=api_manager,
+            paper_trading=self.is_virtual_mode
+        )
 
         # 🆕 추세 모멘텀 분석기 초기화
         from core.trend_momentum_analyzer import TrendMomentumAnalyzer
