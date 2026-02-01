@@ -150,7 +150,8 @@ class DayTradingBot:
             candidate_selector=self.candidate_selector,
             telegram_integration=self.telegram,
             config=self.config,
-            get_previous_close_callback=self._get_previous_close_price
+            get_previous_close_callback=self._get_previous_close_price,
+            api_manager=self.api_manager  # 🆕 실전 모드에서 계좌 조회용
         )
 
         # 신호 핸들러 등록
