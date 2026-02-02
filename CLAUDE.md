@@ -686,3 +686,71 @@ if stop_loss_rate is not None:
 - ✅ numpy.int64 버그 재발 방지 (타입 변환 추가)
 - ✅ 데이터 품질 모니터링 스크립트 제공
 - ✅ 복원 절차 문서화 및 자동화
+
+---
+
+## 매매 현황 조회 스크립트 (2026-02-02)
+
+### 문제 상황
+
+임시 SQL 쿼리로 손익을 계산할 때 **전체 거래의 평균 매수가**를 사용하면 잘못된 손익률이 계산됩니다:
+
+```
+예: 010100 한국무브넥스
+- 전체 평균 매수가: 6,813원
+- 실제 해당 포지션 매수가: 6,130원
+- 매도가: 5,560원
+
+❌ 잘못된 계산: (5,560 - 6,813) / 6,813 = -18.4%
+✅ 정확한 계산: (5,560 - 6,130) / 6,130 = -9.3%
+```
+
+### 해결책
+
+**위치**: [scripts/today_trading_status.py](scripts/today_trading_status.py)
+
+DB에 저장된 정확한 `profit_loss`, `profit_rate` 컬럼을 사용하는 조회 스크립트:
+
+```python
+# 매도 시 DB에 저장되는 정확한 손익 정보 사용
+cursor.execute('''
+    SELECT
+        s.stock_code,
+        b.price as buy_price,      -- buy_record_id로 정확한 매수가 참조
+        s.price as sell_price,
+        s.profit_loss,             -- DB에 저장된 정확한 손익
+        s.profit_rate              -- DB에 저장된 정확한 손익률
+    FROM virtual_trading_records s
+    LEFT JOIN virtual_trading_records b ON s.buy_record_id = b.id
+    WHERE s.action = 'SELL'
+''')
+```
+
+### 사용법
+
+```bash
+# 오늘 매매 현황
+python scripts/today_trading_status.py
+
+# 특정 날짜 조회
+python scripts/today_trading_status.py --date 2026-01-23
+```
+
+### 출력 예시
+
+```
+[매도 내역]
+----------------------------------------------------------------------
+09:05 | 005380 현대차      |    4주 |  510,000 ->  484,000 |   -104,000원 (  -5.1%) [조정]
+09:32 | 010660 화천기계     |  316주 |    6,010 ->    5,680 |   -104,280원 (  -5.5%) [손절]
+11:53 | 010100 한국무브넥스   |  281주 |    6,130 ->    5,560 |   -160,170원 (  -9.3%) [손절]
+----------------------------------------------------------------------
+매도 3건 | 총 매도금액: xxx원 | 실현손익: -xxx원
+```
+
+### 핵심 원칙
+
+**손익 계산 시 반드시 준수:**
+1. ❌ 전체 평균 매수가로 계산하지 않음
+2. ✅ `buy_record_id`로 해당 포지션의 정확한 매수가 참조
+3. ✅ DB에 저장된 `profit_loss`, `profit_rate` 컬럼 직접 사용
