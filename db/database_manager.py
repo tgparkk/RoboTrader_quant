@@ -341,7 +341,15 @@ class DatabaseManager:
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_quant_portfolio_rank ON quant_portfolio(calc_date, rank)')
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_daily_prices_code_date ON daily_prices(stock_code, date)')
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_financial_statements_code_date ON financial_statements(stock_code, report_date)')
-                
+
+                # Race condition 방지: buy_record_id당 SELL은 1건만 허용
+                # (동시 매도 시도 시 중복 방지)
+                cursor.execute('''
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_virtual_trading_unique_sell
+                    ON virtual_trading_records(buy_record_id)
+                    WHERE action = 'SELL' AND buy_record_id IS NOT NULL
+                ''')
+
                 conn.commit()
                 self.logger.info("데이터베이스 테이블 생성 완료")
                 
@@ -1267,13 +1275,22 @@ class DatabaseManager:
                 timestamp_unix = int(timestamp.timestamp())
                 created_at_unix = int(now_kst().timestamp())
 
-                cursor.execute('''
-                    INSERT INTO virtual_trading_records
-                    (stock_code, stock_name, action, quantity, price, timestamp, strategy, reason,
-                     is_test, profit_loss, profit_rate, buy_record_id, created_at)
-                    VALUES (?, ?, 'SELL', ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
-                ''', (stock_code, stock_name, quantity, price, timestamp_unix,
-                      strategy, reason, profit_loss, profit_rate, buy_record_id, created_at_unix))
+                # Race condition 방지: UNIQUE 인덱스 위반 시 중복 매도로 처리
+                try:
+                    cursor.execute('''
+                        INSERT INTO virtual_trading_records
+                        (stock_code, stock_name, action, quantity, price, timestamp, strategy, reason,
+                         is_test, profit_loss, profit_rate, buy_record_id, created_at)
+                        VALUES (?, ?, 'SELL', ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+                    ''', (stock_code, stock_name, quantity, price, timestamp_unix,
+                          strategy, reason, profit_loss, profit_rate, buy_record_id, created_at_unix))
+                except sqlite3.IntegrityError as ie:
+                    # UNIQUE 제약 위반 = 동시 매도 시도 (Race condition)
+                    self.logger.warning(
+                        f"⚠️ {stock_code} 중복 매도 차단 (Race condition): "
+                        f"buy_record_id={buy_record_id} 이미 매도됨"
+                    )
+                    return False
 
                 conn.commit()
 
