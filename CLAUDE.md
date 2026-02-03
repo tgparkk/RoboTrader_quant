@@ -754,3 +754,79 @@ python scripts/today_trading_status.py --date 2026-01-23
 1. ❌ 전체 평균 매수가로 계산하지 않음
 2. ✅ `buy_record_id`로 해당 포지션의 정확한 매수가 참조
 3. ✅ DB에 저장된 `profit_loss`, `profit_rate` 컬럼 직접 사용
+
+---
+
+## 포트폴리오 집중화 및 진입 기준 강화 (2026-02-03)
+
+### 변경 배경
+
+- 투자 자산 규모 대비 30종목 분산은 비효율적
+- 종목당 투자금이 작아 수익 실현 금액이 제한됨
+- 최근 30일 승률 49.5% → 상위 종목 집중으로 승률 향상 목표
+
+### 변경 내용
+
+#### 1. 포트폴리오 크기 축소 (30 → 15종목)
+
+**위치**:
+- [config/constants.py:6](config/constants.py#L6)
+- [core/quant/quant_rebalancing_service.py:38](core/quant/quant_rebalancing_service.py#L38)
+
+```python
+# 변경 전
+PORTFOLIO_SIZE = 30
+target_portfolio_size = 30
+
+# 변경 후
+PORTFOLIO_SIZE = 15  # 집중 투자
+target_portfolio_size = 15
+```
+
+**효과**:
+- 종목당 투자금 ~170만원 → ~340만원 (2배 증가)
+- 관리 용이성 향상
+- 수익 실현 시 금액 증가
+
+#### 2. 진입/유지 기준 강화
+
+**위치**: [core/quant/quant_rebalancing_service.py:44-49](core/quant/quant_rebalancing_service.py#L44-L49)
+
+| 항목 | 이전 | 이후 | 의미 |
+|------|------|------|------|
+| `hard_stop_score` | 62점 | **70점** | 긴급 매도 기준 강화 |
+| `soft_stop_score` | 64점 | **72점** | 조건부 매도 기준 강화 |
+| `soft_stop_rank` | 50위 | **30위** | 순위 기준 강화 |
+| `safe_score` | 65점 | **75점** | 안전 유지 점수 상향 |
+| `safe_rank` | 40위 | **25위** | 안전 유지 순위 상향 |
+
+```python
+# 변경 후 설정
+self.hard_stop_score = 70.0  # 긴급 매도: 점수 < 70점
+self.soft_stop_score = 72.0  # 조건부 매도: 점수 70~72점
+self.soft_stop_rank = 30     # 조건부 매도 순위: > 30위
+self.safe_score = 75.0       # 안전 점수: >= 75점 유지
+self.safe_rank = 25          # 안전 순위: <= 25위 유지
+```
+
+### 예상 효과
+
+| 지표 | 변경 전 | 변경 후 |
+|------|---------|---------|
+| 보유 종목 수 | 30개 | 15개 |
+| 종목당 투자금 | ~170만원 | ~340만원 |
+| 승률 | 49.5% | 60~70% (목표) |
+| 분산 효과 | 높음 | 중간 |
+
+### 주의사항
+
+1. **리밸런싱 시 대량 매도 발생**
+   - 첫 리밸런싱(2/4 09:05)에서 기존 30종목 중 약 15종목 매도 예상
+   - 새 기준 미달 종목 추가 매도 가능
+
+2. **모니터링 기간**
+   - 첫 1~2주간 승률 변화 관찰 필요
+   - 기준이 과도하게 엄격하면 재조정 검토
+
+3. **변동성 증가 가능**
+   - 분산 효과 감소로 일일 손익 변동폭 증가 가능

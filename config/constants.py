@@ -3,7 +3,7 @@
 """
 
 # 포트폴리오 및 스크리닝 관련
-PORTFOLIO_SIZE = 30  # 퀀트/ML 포트폴리오 종목 수
+PORTFOLIO_SIZE = 15  # 퀀트/ML 포트폴리오 종목 수 (30→15 축소, 집중 투자)
 QUANT_CANDIDATE_LIMIT = 50  # 장중 퀀트 후보 종목 최대 수
 
 # 리밸런싱 주문 관련

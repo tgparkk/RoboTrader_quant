@@ -35,18 +35,18 @@ class QuantRebalancingService:
 
         # 리밸런싱 설정
         self.rebalancing_period = RebalancingPeriod.DAILY  # 기본값: 일간
-        self.target_portfolio_size = 30  # 목표 포트폴리오 크기
+        self.target_portfolio_size = 15  # 목표 포트폴리오 크기 (30→15 축소, 집중 투자)
         self.equal_weight = True  # 동등 비중
         self._last_rebalancing_date = None
         self._last_rebalancing_week = None
         self._last_rebalancing_month = None
 
-        # 점수 기반 매도 임계값 설정
-        self.hard_stop_score = 62.0  # 긴급 매도: 점수 < 62점
-        self.soft_stop_score = 64.0  # 조건부 매도: 점수 62~64점
-        self.soft_stop_rank = 50     # 조건부 매도 순위 기준: > 50위
-        self.safe_score = 65.0       # 안전 점수: >= 65점은 순위 무관 유지
-        self.safe_rank = 40          # 안전 순위: <= 40위면 점수 낮아도 유지
+        # 점수 기반 매도 임계값 설정 (진입 기준 강화: 승률 향상 목적)
+        self.hard_stop_score = 70.0  # 긴급 매도: 점수 < 70점 (62→70 강화)
+        self.soft_stop_score = 72.0  # 조건부 매도: 점수 70~72점 (64→72 강화)
+        self.soft_stop_rank = 30     # 조건부 매도 순위 기준: > 30위 (50→30 강화)
+        self.safe_score = 75.0       # 안전 점수: >= 75점은 순위 무관 유지 (65→75 강화)
+        self.safe_rank = 25          # 안전 순위: <= 25위면 점수 낮아도 유지 (40→25 강화)
 
         # 모멘텀 약화 감지 설정 (상승 가능성 평가)
         self.momentum_decline_threshold = -3.0  # 모멘텀 점수 하락 임계값 (전일 대비)
