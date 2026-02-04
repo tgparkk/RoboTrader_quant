@@ -243,6 +243,26 @@ class RebalancingExecutor:
                 logger.info(f"⏳ 매도 주문 체결 확인 중... (최대 {SELL_ORDER_WAIT_TIMEOUT//60}분)")
                 await self.order_wait_helper.wait_for_sell_orders_completion(sell_results, max_wait_seconds=SELL_ORDER_WAIT_TIMEOUT)
 
+                # 🆕 매도 완료된 종목의 trading_manager 상태 정리 (유령 포지션 방지)
+                for sell_result in sell_results:
+                    if sell_result.get('success'):
+                        stock_code = sell_result['stock_code']
+                        stock_name = sell_result.get('stock_name', stock_code)
+                        trading_stock = self.trading_manager.get_trading_stock(stock_code)
+                        if trading_stock:
+                            with self.trading_manager._lock:
+                                # 포지션 및 주문 정보 정리
+                                trading_stock.clear_position()
+                                trading_stock.clear_current_order()
+                                trading_stock.is_buying = False
+                                # 상태를 COMPLETED로 변경
+                                self.trading_manager._change_stock_state(
+                                    stock_code,
+                                    StockState.COMPLETED,
+                                    f"리밸런싱 매도 완료"
+                                )
+                            logger.info(f"✅ {stock_code}({stock_name}) 리밸런싱 매도 후 상태 정리 완료 → COMPLETED")
+
             # 1.5단계: 유지 대상 종목의 목표 익절/손절률 갱신
             keep_list = plan.get('keep_list', [])
             if keep_list:
