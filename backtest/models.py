@@ -1,0 +1,250 @@
+"""
+백테스트 데이터 모델 정의
+"""
+from dataclasses import dataclass, field
+from typing import List, Optional, Dict, Any
+from datetime import datetime
+from enum import Enum
+
+
+class TradeAction(Enum):
+    """거래 유형"""
+    BUY = "BUY"
+    SELL = "SELL"
+
+
+class SellReason(Enum):
+    """매도 사유"""
+    TAKE_PROFIT = "익절"
+    STOP_LOSS = "손절"
+    REBALANCING = "리밸런싱"
+    HARD_STOP = "긴급매도"
+    SOFT_STOP = "조건부매도"
+    END_OF_BACKTEST = "백테스트종료"
+
+
+@dataclass
+class BacktestParams:
+    """백테스트 파라미터"""
+    # 기본 설정
+    initial_capital: float = 50_000_000  # 초기 자본 (5천만원)
+    portfolio_size: int = 15  # 포트폴리오 종목 수
+
+    # 손익절 파라미터
+    target_profit_rate: float = 0.15  # 익절률 (15%)
+    stop_loss_rate: float = 0.10  # 손절률 (10%)
+
+    # 리밸런싱 기준
+    hard_stop_score: float = 70.0  # 긴급 매도 점수
+    soft_stop_score: float = 72.0  # 조건부 매도 점수
+    soft_stop_rank: int = 30  # 조건부 매도 순위
+    safe_score: float = 75.0  # 안전 유지 점수
+    safe_rank: int = 25  # 안전 유지 순위
+
+    # 동적 목표율 사용 여부
+    use_dynamic_targets: bool = True
+
+    # 거래 비용
+    trading_cost_rate: float = 0.001  # 0.1% (매수+매도 합계)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """딕셔너리로 변환"""
+        return {
+            'initial_capital': self.initial_capital,
+            'portfolio_size': self.portfolio_size,
+            'target_profit_rate': self.target_profit_rate,
+            'stop_loss_rate': self.stop_loss_rate,
+            'hard_stop_score': self.hard_stop_score,
+            'soft_stop_score': self.soft_stop_score,
+            'soft_stop_rank': self.soft_stop_rank,
+            'safe_score': self.safe_score,
+            'safe_rank': self.safe_rank,
+            'use_dynamic_targets': self.use_dynamic_targets,
+            'trading_cost_rate': self.trading_cost_rate,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'BacktestParams':
+        """딕셔너리에서 생성"""
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+
+@dataclass
+class Position:
+    """포지션 정보"""
+    stock_code: str
+    stock_name: str
+    quantity: int
+    buy_price: float
+    buy_date: str
+    target_profit_rate: float = 0.15
+    stop_loss_rate: float = 0.10
+    total_score: float = 0.0
+    factor_rank: int = 999
+
+    @property
+    def total_cost(self) -> float:
+        """총 매수 금액"""
+        return self.quantity * self.buy_price
+
+    def calculate_profit_rate(self, current_price: float) -> float:
+        """수익률 계산"""
+        if self.buy_price <= 0:
+            return 0.0
+        return (current_price - self.buy_price) / self.buy_price
+
+    def calculate_profit_loss(self, current_price: float) -> float:
+        """손익 금액 계산"""
+        return (current_price - self.buy_price) * self.quantity
+
+    def should_take_profit(self, current_price: float) -> bool:
+        """익절 조건 체크"""
+        profit_rate = self.calculate_profit_rate(current_price)
+        return profit_rate >= self.target_profit_rate
+
+    def should_stop_loss(self, current_price: float) -> bool:
+        """손절 조건 체크"""
+        profit_rate = self.calculate_profit_rate(current_price)
+        return profit_rate <= -self.stop_loss_rate
+
+
+@dataclass
+class TradeRecord:
+    """거래 기록"""
+    date: str
+    stock_code: str
+    stock_name: str
+    action: TradeAction
+    quantity: int
+    price: float
+    amount: float  # 거래 금액
+    reason: str
+    profit_loss: float = 0.0  # 손익 (매도시)
+    profit_rate: float = 0.0  # 수익률 (매도시)
+    trading_cost: float = 0.0  # 거래 비용
+
+    def to_dict(self) -> Dict[str, Any]:
+        """딕셔너리로 변환"""
+        return {
+            'date': self.date,
+            'stock_code': self.stock_code,
+            'stock_name': self.stock_name,
+            'action': self.action.value,
+            'quantity': self.quantity,
+            'price': self.price,
+            'amount': self.amount,
+            'reason': self.reason,
+            'profit_loss': self.profit_loss,
+            'profit_rate': self.profit_rate,
+            'trading_cost': self.trading_cost,
+        }
+
+
+@dataclass
+class DailySnapshot:
+    """일별 스냅샷"""
+    date: str
+    capital: float  # 현금
+    positions_value: float  # 보유 종목 평가액
+    total_value: float  # 총 자산 (현금 + 평가액)
+    position_count: int  # 보유 종목 수
+    daily_return: float = 0.0  # 일별 수익률
+    cumulative_return: float = 0.0  # 누적 수익률
+
+    def to_dict(self) -> Dict[str, Any]:
+        """딕셔너리로 변환"""
+        return {
+            'date': self.date,
+            'capital': self.capital,
+            'positions_value': self.positions_value,
+            'total_value': self.total_value,
+            'position_count': self.position_count,
+            'daily_return': self.daily_return,
+            'cumulative_return': self.cumulative_return,
+        }
+
+
+@dataclass
+class BacktestResult:
+    """백테스트 결과"""
+    # 기본 정보
+    params: BacktestParams
+    start_date: str
+    end_date: str
+    trading_days: int
+
+    # 수익률 지표
+    total_return: float = 0.0  # 총 수익률
+    annualized_return: float = 0.0  # 연환산 수익률
+
+    # 위험 지표
+    max_drawdown: float = 0.0  # 최대 낙폭 (MDD)
+    volatility: float = 0.0  # 변동성 (표준편차)
+    sharpe_ratio: float = 0.0  # 샤프 비율
+
+    # 거래 통계
+    total_trades: int = 0  # 총 거래 수
+    winning_trades: int = 0  # 수익 거래 수
+    losing_trades: int = 0  # 손실 거래 수
+    win_rate: float = 0.0  # 승률
+
+    # 손익 통계
+    total_profit: float = 0.0  # 총 수익
+    total_loss: float = 0.0  # 총 손실
+    profit_factor: float = 0.0  # 수익/손실 비율
+    avg_profit: float = 0.0  # 평균 수익
+    avg_loss: float = 0.0  # 평균 손실
+
+    # 거래 비용
+    total_trading_cost: float = 0.0  # 총 거래 비용
+
+    # 상세 데이터
+    trades: List[TradeRecord] = field(default_factory=list)
+    daily_snapshots: List[DailySnapshot] = field(default_factory=list)
+
+    # 최종 상태
+    final_capital: float = 0.0
+    final_positions_value: float = 0.0
+    final_total_value: float = 0.0
+
+    def to_summary_dict(self) -> Dict[str, Any]:
+        """요약 딕셔너리로 변환"""
+        return {
+            'period': f"{self.start_date} ~ {self.end_date}",
+            'trading_days': self.trading_days,
+            'total_return': f"{self.total_return:.2%}",
+            'annualized_return': f"{self.annualized_return:.2%}",
+            'max_drawdown': f"{self.max_drawdown:.2%}",
+            'volatility': f"{self.volatility:.2%}",
+            'sharpe_ratio': f"{self.sharpe_ratio:.2f}",
+            'total_trades': self.total_trades,
+            'win_rate': f"{self.win_rate:.1%}",
+            'profit_factor': f"{self.profit_factor:.2f}",
+            'total_trading_cost': f"{self.total_trading_cost:,.0f}원",
+            'final_total_value': f"{self.final_total_value:,.0f}원",
+        }
+
+    def print_summary(self):
+        """결과 요약 출력"""
+        print("\n" + "=" * 60)
+        print("백테스트 결과 요약")
+        print("=" * 60)
+        print(f"기간: {self.start_date} ~ {self.end_date} ({self.trading_days}일)")
+        print("-" * 60)
+        print(f"초기 자본: {self.params.initial_capital:,.0f}원")
+        print(f"최종 자산: {self.final_total_value:,.0f}원")
+        print("-" * 60)
+        print(f"총 수익률: {self.total_return:.2%}")
+        print(f"연환산 수익률: {self.annualized_return:.2%}")
+        print(f"최대 낙폭(MDD): {self.max_drawdown:.2%}")
+        print(f"변동성: {self.volatility:.2%}")
+        print(f"샤프 비율: {self.sharpe_ratio:.2f}")
+        print("-" * 60)
+        print(f"총 거래 수: {self.total_trades}건")
+        print(f"승률: {self.win_rate:.1%} ({self.winning_trades}/{self.winning_trades + self.losing_trades})")
+        print(f"수익 팩터: {self.profit_factor:.2f}")
+        print(f"평균 수익: {self.avg_profit:,.0f}원")
+        print(f"평균 손실: {self.avg_loss:,.0f}원")
+        print("-" * 60)
+        print(f"총 거래 비용: {self.total_trading_cost:,.0f}원")
+        print("=" * 60)

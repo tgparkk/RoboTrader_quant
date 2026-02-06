@@ -1,9 +1,12 @@
 """
 장 마감 후 데이터 저장 전담 모듈
-- 일봉 데이터 저장 (cache/daily/)
 - 텍스트 파일 저장 (디버깅용)
+
+참고: pkl 캐시 저장 기능은 더 이상 사용하지 않음 (2026-02-06)
+      - 현재 시스템은 DB(daily_prices 테이블)만 사용
+      - 레거시 pkl 파일 2,571개(25.7MB) 정리 완료
+      - 백업: data/backup/cache_daily_backup_20260206.zip
 """
-import pickle
 import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -11,7 +14,6 @@ from datetime import datetime, timedelta
 
 from utils.logger import setup_logger
 from utils.korean_time import now_kst
-from api.kis_market_api import get_inquire_daily_itemchartprice
 
 
 class PostMarketDataSaver:
@@ -20,10 +22,8 @@ class PostMarketDataSaver:
     def __init__(self):
         """초기화"""
         self.logger = setup_logger(__name__)
-        self.daily_cache_dir = Path("cache/daily")
-
-        # 디렉토리 생성
-        self.daily_cache_dir.mkdir(parents=True, exist_ok=True)
+        # pkl 캐시 디렉토리는 더 이상 사용하지 않음
+        # self.daily_cache_dir = Path("cache/daily")
 
         self.logger.info("장 마감 후 데이터 저장기 초기화 완료")
 
@@ -79,7 +79,11 @@ class PostMarketDataSaver:
 
     def save_daily_data(self, stock_codes: List[str], target_date: str = None, days_back: int = 100) -> Dict[str, int]:
         """
-        종목들의 일봉 데이터를 API로 조회하여 저장
+        [비활성화] 종목들의 일봉 데이터를 pkl로 저장하는 레거시 함수
+
+        참고: 이 기능은 더 이상 사용하지 않습니다 (2026-02-06)
+              현재 시스템은 DB(daily_prices 테이블)를 통해 일봉 데이터를 관리합니다.
+              core/ml_data_collector.py의 save_daily_prices_to_db() 참조
 
         Args:
             stock_codes: 저장할 종목 코드 리스트
@@ -87,96 +91,17 @@ class PostMarketDataSaver:
             days_back: 과거 몇 일치 데이터 저장 (기본 100일)
 
         Returns:
-            Dict: {'total': 전체 종목 수, 'saved': 저장 성공 수, 'failed': 실패 수}
+            Dict: {'total': 0, 'saved': 0, 'failed': 0, 'skipped': True}
         """
-        try:
-            if target_date is None:
-                target_date = now_kst().strftime('%Y%m%d')
-
-            if not stock_codes:
-                self.logger.info("💾 일봉 저장할 종목 없음")
-                return {'total': 0, 'saved': 0, 'failed': 0}
-
-            self.logger.info(f"📊 일봉 데이터 저장 시작: {len(stock_codes)}개 종목 (기준일: {target_date})")
-
-            saved_count = 0
-            failed_count = 0
-
-            for stock_code in stock_codes:
-                try:
-                    # 파일명 생성
-                    daily_file = self.daily_cache_dir / f"{stock_code}_{target_date}_daily.pkl"
-
-                    # 이미 파일이 존재하면 스킵
-                    if daily_file.exists():
-                        self.logger.debug(f"⏭️ [{stock_code}] 일봉 데이터 이미 존재 (스킵): {daily_file.name}")
-                        saved_count += 1  # 이미 있는 것도 성공으로 카운트
-                        continue
-
-                    # 날짜 계산 (주말/휴일 고려해서 여유있게)
-                    target_date_obj = datetime.strptime(target_date, '%Y%m%d')
-                    start_date_obj = target_date_obj - timedelta(days=days_back + 50)  # 여유있게 50일 더
-
-                    start_date = start_date_obj.strftime('%Y%m%d')
-                    end_date = target_date
-
-                    self.logger.info(f"📡 [{stock_code}] 일봉 데이터 API 조회 중... ({start_date} ~ {end_date})")
-
-                    # KIS API로 일봉 데이터 수집 (최대 100건)
-                    daily_data = get_inquire_daily_itemchartprice(
-                        output_dv="2",          # 2: 차트 데이터 (output2)
-                        div_code="J",           # KRX 시장
-                        itm_no=stock_code,
-                        inqr_strt_dt=start_date,
-                        inqr_end_dt=end_date,
-                        period_code="D",        # 일봉
-                        adj_prc="0"             # 0:수정주가
-                    )
-
-                    if daily_data is None or daily_data.empty:
-                        self.logger.warning(f"⚠️ [{stock_code}] 일봉 데이터 없음")
-                        failed_count += 1
-                        continue
-
-                    # 데이터 검증 및 최신 100일만 유지
-                    original_count = len(daily_data)
-                    if original_count > days_back:
-                        daily_data = daily_data.tail(days_back)
-                        self.logger.debug(f"📈 [{stock_code}] 일봉 데이터 {original_count}건 → {days_back}건으로 조정")
-
-                    # pickle로 저장
-                    with open(daily_file, 'wb') as f:
-                        pickle.dump(daily_data, f)
-
-                    # 날짜 범위 정보
-                    date_info = ""
-                    if 'stck_bsop_date' in daily_data.columns and not daily_data.empty:
-                        start_date_actual = daily_data.iloc[0]['stck_bsop_date']
-                        end_date_actual = daily_data.iloc[-1]['stck_bsop_date']
-                        date_info = f" ({start_date_actual}~{end_date_actual})"
-
-                    saved_count += 1
-                    self.logger.info(f"✅ [{stock_code}] 일봉 데이터 저장 완료: {len(daily_data)}일치{date_info}")
-
-                except Exception as e:
-                    self.logger.error(f"❌ [{stock_code}] 일봉 데이터 저장 실패: {e}")
-                    failed_count += 1
-
-            self.logger.info(f"✅ 일봉 데이터 저장 완료: {saved_count}/{len(stock_codes)}개 종목 성공, {failed_count}개 실패")
-
-            return {
-                'total': len(stock_codes),
-                'saved': saved_count,
-                'failed': failed_count
-            }
-
-        except Exception as e:
-            self.logger.error(f"❌ 일봉 데이터 저장 중 오류: {e}")
-            return {'total': 0, 'saved': 0, 'failed': 0}
+        self.logger.info("pkl 일봉 저장 기능 비활성화됨 - DB 저장 사용 중 (core/ml_data_collector.py)")
+        return {'total': 0, 'saved': 0, 'failed': 0, 'skipped': True}
 
     def save_all_data(self, intraday_manager) -> Dict[str, any]:
         """
-        장 마감 후 모든 데이터 저장 (일봉 + 텍스트)
+        장 마감 후 모든 데이터 저장 (텍스트 파일만)
+
+        참고: pkl 일봉 저장은 비활성화됨 (2026-02-06)
+              일봉 데이터는 DB를 통해 저장됨 (core/ml_data_collector.py)
 
         Args:
             intraday_manager: IntradayStockManager 인스턴스
@@ -186,7 +111,7 @@ class PostMarketDataSaver:
         """
         try:
             self.logger.info("=" * 80)
-            self.logger.info("🏁 장 마감 후 데이터 저장 시작")
+            self.logger.info("장 마감 후 데이터 저장 시작")
             self.logger.info("=" * 80)
 
             # 종목 목록 가져오기
@@ -194,49 +119,43 @@ class PostMarketDataSaver:
                 stock_codes = list(intraday_manager.selected_stocks.keys())
 
             if not stock_codes:
-                self.logger.warning("⚠️ 저장할 종목이 없습니다")
+                self.logger.warning("저장할 종목이 없습니다")
                 return {
                     'success': False,
                     'message': '저장할 종목 없음',
-                    'daily_data': {'total': 0, 'saved': 0, 'failed': 0},
+                    'daily_data': {'total': 0, 'saved': 0, 'failed': 0, 'skipped': True},
                     'text_file': None
                 }
 
-            self.logger.info(f"📋 대상 종목: {len(stock_codes)}개")
+            self.logger.info(f"대상 종목: {len(stock_codes)}개")
             self.logger.info(f"   종목 코드: {', '.join(stock_codes)}")
 
-            # 1. 일봉 데이터 저장 (pkl)
+            # 분봉 데이터 텍스트 파일 저장 (디버깅용)
             self.logger.info("\n" + "=" * 80)
-            self.logger.info("1️⃣ 일봉 데이터 pkl 저장")
-            self.logger.info("=" * 80)
-            daily_result = self.save_daily_data(stock_codes)
-
-            # 2. 분봉 데이터 텍스트 파일 저장 (디버깅용)
-            self.logger.info("\n" + "=" * 80)
-            self.logger.info("2️⃣ 분봉 데이터 텍스트 파일 저장 (디버깅용)")
+            self.logger.info("분봉 데이터 텍스트 파일 저장 (디버깅용)")
             self.logger.info("=" * 80)
             text_file = self.save_minute_data_to_file(intraday_manager)
 
             # 결과 요약
             self.logger.info("\n" + "=" * 80)
-            self.logger.info("✅ 장 마감 후 데이터 저장 완료")
+            self.logger.info("장 마감 후 데이터 저장 완료")
             self.logger.info("=" * 80)
-            self.logger.info(f"📊 일봉 데이터: {daily_result['saved']}/{daily_result['total']}개 저장 성공")
-            self.logger.info(f"📝 텍스트 파일: {text_file if text_file else '저장 실패'}")
+            self.logger.info(f"텍스트 파일: {text_file if text_file else '저장 실패'}")
+            self.logger.info("(일봉 데이터는 DB를 통해 저장됨 - core/ml_data_collector.py)")
             self.logger.info("=" * 80)
 
             return {
                 'success': True,
-                'daily_data': daily_result,
+                'daily_data': {'total': 0, 'saved': 0, 'failed': 0, 'skipped': True},
                 'text_file': text_file
             }
 
         except Exception as e:
-            self.logger.error(f"❌ 장 마감 후 데이터 저장 중 오류: {e}")
+            self.logger.error(f"장 마감 후 데이터 저장 중 오류: {e}")
             return {
                 'success': False,
                 'error': str(e),
-                'daily_data': {'total': 0, 'saved': 0, 'failed': 0},
+                'daily_data': {'total': 0, 'saved': 0, 'failed': 0, 'skipped': True},
                 'text_file': None
             }
 
