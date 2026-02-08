@@ -263,25 +263,7 @@ class RebalancingExecutor:
                                 )
                             logger.info(f"✅ {stock_code}({stock_name}) 리밸런싱 매도 후 상태 정리 완료 → COMPLETED")
 
-            # 1.5단계: 매도 실패율 체크 — 50% 초과 시 매수 중단
-            if sell_results:
-                total_sell = len(sell_results)
-                failed_sell = sum(1 for r in sell_results if not r.get('success'))
-                sell_fail_rate = failed_sell / total_sell if total_sell > 0 else 0.0
-
-                if sell_fail_rate > 0.5:
-                    msg = (
-                        f"🚨 매도 실패율 {sell_fail_rate*100:.0f}% ({failed_sell}/{total_sell}건) — "
-                        f"50% 초과로 매수 단계 중단"
-                    )
-                    logger.error(msg)
-                    try:
-                        await self.telegram.send_message(msg)
-                    except Exception as tg_err:
-                        logger.error(f"텔레그램 알림 실패: {tg_err}")
-                    return  # 매수 단계 진입하지 않음
-
-            # 1.6단계: 유지 대상 종목의 목표 익절/손절률 갱신
+            # 1.5단계: 유지 대상 종목의 목표 익절/손절률 갱신
             keep_list = plan.get('keep_list', [])
             if keep_list:
                 await self.keep_list_updater.update_keep_list_profit_loss(keep_list)

@@ -339,7 +339,7 @@ class DayTradingBot:
                 if self.decision_engine.is_virtual_mode:
                     # [가상매매 모드]
                     try:
-                        await self.decision_engine.execute_virtual_buy(trading_stock, daily_data, buy_reason)
+                        await self.decision_engine.execute_virtual_buy(trading_stock, daily_data, buy_reason, buy_price=buy_info['buy_price'])
                         # 상태를 POSITIONED로 반영하여 이후 매도 판단 루프에 포함
                         try:
                             self.trading_manager._change_stock_state(stock_code, StockState.POSITIONED, "가상 매수 체결")

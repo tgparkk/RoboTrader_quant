@@ -12,7 +12,6 @@ from datetime import datetime
 
 from utils.logger import setup_logger
 from utils.korean_time import now_kst
-from core.timeframe_converter import TimeFrameConverter
 
 
 class TradingDecisionEngine:
@@ -198,35 +197,6 @@ class TradingDecisionEngine:
     
     # set_buy_cooldown 메서드 제거: TradingStock 모델에서 last_buy_time으로 관리
     
-    def _calculate_buy_price(self, combined_data) -> float:
-        """매수가 계산 (4/5가 또는 현재가)
-        
-        @deprecated: generate_improved_signals에서 직접 계산하도록 변경됨
-        """
-        try:
-            current_price = self._safe_float_convert(combined_data['close'].iloc[-1])
-            
-            # 4/5가 계산 시도
-            try:
-                from core.price_calculator import PriceCalculator
-                
-                data_3min = TimeFrameConverter.convert_to_3min_data(combined_data)
-                four_fifths_price, entry_low = PriceCalculator.calculate_three_fifths_price(data_3min, self.logger)
-                
-                if four_fifths_price is not None:
-                    self.logger.debug(f"🎯 4/5가 계산 성공: {four_fifths_price:,.0f}원")
-                    return four_fifths_price
-                else:
-                    self.logger.debug(f"⚠️ 4/5가 계산 실패 → 현재가 사용: {current_price:,.0f}원")
-                    return current_price
-                    
-            except Exception as e:
-                self.logger.debug(f"4/5가 계산 오류: {e} → 현재가 사용")
-                return current_price
-                
-        except Exception as e:
-            self.logger.error(f"❌ 매수가 계산 오류: {e}")
-            return 0
     
     def _get_max_buy_amount(self, stock_code: str = "") -> float:
         """최대 매수 가능 금액 조회"""
@@ -369,38 +339,12 @@ class TradingDecisionEngine:
         try:
             stock_code = trading_stock.stock_code
             stock_name = trading_stock.stock_name
-            
-            # buy_price가 지정된 경우 사용, 아니면 4/5가 계산 로직 사용
+
             if buy_price is not None:
                 current_price = buy_price
-                self.logger.debug(f"📊 {stock_code} 지정된 매수가로 매수: {current_price:,.0f}원")
             else:
                 current_price = self._safe_float_convert(combined_data['close'].iloc[-1])
-                self.logger.debug(f"📊 {stock_code} 현재가로 매수 (기본값): {current_price:,.0f}원")
-                
-                # 4/5가 계산 (별도 클래스 사용)
-                try:
-                    from core.price_calculator import PriceCalculator
-                    data_3min = TimeFrameConverter.convert_to_3min_data(combined_data)
-                    
-                    four_fifths_price, entry_low = PriceCalculator.calculate_three_fifths_price(data_3min, self.logger)
-                    
-                    if four_fifths_price is not None:
-                        current_price = four_fifths_price
-                        self.logger.debug(f"🎯 4/5가로 매수: {stock_code} @{current_price:,.0f}원")
-                        
-                        # 진입 저가 저장
-                        if entry_low is not None:
-                            try:
-                                setattr(trading_stock, '_entry_low', entry_low)
-                            except Exception:
-                                pass
-                    else:
-                        self.logger.debug(f"⚠️ 4/5가 계산 실패 → 현재가 사용: {current_price:,.0f}원")
-                        
-                except Exception as e:
-                    self.logger.debug(f"4/5가 계산 오류: {e} → 현재가 사용")
-                    # 계산 실패 시 현재가 유지
+            self.logger.debug(f"📊 {stock_code} 매수가: {current_price:,.0f}원")
             
             # 가상 매수 수량 설정 (VirtualTradingManager 사용)
             quantity = self.virtual_trading.get_max_quantity(current_price)
