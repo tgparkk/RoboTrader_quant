@@ -162,10 +162,21 @@ class TradingDecisionEngine:
             if daily_data is None or daily_data.empty:
                 buy_info = {'buy_price': 0, 'quantity': 0, 'max_buy_amount': 0}
                 return False, f"{stock_code} 일봉 데이터 없음", buy_info
-            
-            # 최신 종가를 매수가로 사용
-            latest_close = float(daily_data['close'].iloc[-1])
-            buy_price = latest_close
+
+            # 현재가 API 조회 → 실패 시 전일 종가 fallback
+            buy_price = 0
+            if self.api_manager:
+                try:
+                    price_info = self.api_manager.get_current_price(stock_code)
+                    if price_info and price_info.current_price > 0:
+                        buy_price = float(price_info.current_price)
+                        self.logger.debug(f"📊 {stock_code} 현재가 API: {buy_price:,.0f}원")
+                except Exception as e:
+                    self.logger.debug(f"⚠️ {stock_code} 현재가 조회 실패: {e}")
+
+            if buy_price <= 0:
+                buy_price = float(daily_data['close'].iloc[-1])
+                self.logger.debug(f"📊 {stock_code} 전일 종가 fallback: {buy_price:,.0f}원")
             
             # 최대 매수 금액 조회
             max_buy_amount = self._get_max_buy_amount(stock_code)
