@@ -148,6 +148,6 @@ Thumbs.db
 *.old
 /realtime_data
 
-# Legacy cache (pkl files)
-cache/daily/
+# Cache (pkl files)
+cache/
 
