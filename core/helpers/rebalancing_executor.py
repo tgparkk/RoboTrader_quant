@@ -263,7 +263,25 @@ class RebalancingExecutor:
                                 )
                             logger.info(f"✅ {stock_code}({stock_name}) 리밸런싱 매도 후 상태 정리 완료 → COMPLETED")
 
-            # 1.5단계: 유지 대상 종목의 목표 익절/손절률 갱신
+            # 1.5단계: 매도 실패율 체크 — 50% 초과 시 매수 중단
+            if sell_results:
+                total_sell = len(sell_results)
+                failed_sell = sum(1 for r in sell_results if not r.get('success'))
+                sell_fail_rate = failed_sell / total_sell if total_sell > 0 else 0.0
+
+                if sell_fail_rate > 0.5:
+                    msg = (
+                        f"🚨 매도 실패율 {sell_fail_rate*100:.0f}% ({failed_sell}/{total_sell}건) — "
+                        f"50% 초과로 매수 단계 중단"
+                    )
+                    logger.error(msg)
+                    try:
+                        await self.telegram.send_message(msg)
+                    except Exception as tg_err:
+                        logger.error(f"텔레그램 알림 실패: {tg_err}")
+                    return  # 매수 단계 진입하지 않음
+
+            # 1.6단계: 유지 대상 종목의 목표 익절/손절률 갱신
             keep_list = plan.get('keep_list', [])
             if keep_list:
                 await self.keep_list_updater.update_keep_list_profit_loss(keep_list)
@@ -282,6 +300,29 @@ class RebalancingExecutor:
 
             # 🆕 코스피 변동률 조회 (1회만)
             market_change = self._get_market_change_rate()
+
+            # 🆕 매수 전 가용잔고 재확인 — 부족 시 비율 축소 (5% 안전마진)
+            total_planned_buy = sum(item.get('target_amount', 0) for item in buy_list)
+            if total_planned_buy > 0:
+                try:
+                    account_info = self.api_manager.get_account_balance()
+                    if account_info:
+                        actual_cash = account_info.available_amount
+                        safe_cash = actual_cash * 0.95  # 5% 안전마진
+                        if safe_cash < total_planned_buy:
+                            scale = safe_cash / total_planned_buy
+                            logger.warning(
+                                f"⚠️ 가용잔고 부족: 실제 {actual_cash:,.0f}원 (안전 {safe_cash:,.0f}원) < "
+                                f"계획 {total_planned_buy:,.0f}원 → {scale*100:.1f}%로 축소"
+                            )
+                            for item in buy_list:
+                                item['target_amount'] = item.get('target_amount', 0) * scale
+                        else:
+                            logger.info(f"✅ 가용잔고 충분: {actual_cash:,.0f}원 (계획 {total_planned_buy:,.0f}원)")
+                    else:
+                        logger.warning("⚠️ 매수 전 잔고 조회 실패 — 원래 계획대로 진행")
+                except Exception as bal_err:
+                    logger.error(f"❌ 매수 전 잔고 조회 오류: {bal_err}")
 
             for buy_item in buy_list:
                 stock_code = buy_item['stock_code']

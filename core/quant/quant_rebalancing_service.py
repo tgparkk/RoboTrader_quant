@@ -498,9 +498,17 @@ class QuantRebalancingService:
                 if current_price_data:
                     holdings_value += current_price_data.current_price * holding['quantity']
             
-            # 현금 잔고 (간단화: 계좌 잔고 조회)
-            # TODO: 실제 계좌 잔고 조회
-            cash = 10_000_000  # 임시값
+            # 현금 잔고: 실제 계좌 잔고 조회
+            cash = 0.0
+            try:
+                account_info = self.api_manager.get_account_balance()
+                if account_info:
+                    cash = account_info.available_amount
+                    self.logger.info(f"💰 가용 현금 잔고: {cash:,.0f}원")
+                else:
+                    self.logger.warning("⚠️ 계좌 잔고 조회 실패 — cash=0으로 진행")
+            except Exception as bal_err:
+                self.logger.error(f"❌ 계좌 잔고 조회 오류: {bal_err} — cash=0으로 진행")
             
             return holdings_value + cash
             

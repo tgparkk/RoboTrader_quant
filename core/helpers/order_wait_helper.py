@@ -75,11 +75,26 @@ class OrderWaitHelper:
 
                 await asyncio.sleep(check_interval)
 
-            # 타임아웃
+            # 타임아웃 — 미체결 주문 자동 취소
             logger.warning(f"⚠️ 매도 주문 체결 대기 타임아웃 ({max_wait_seconds}초)")
             for result in pending_orders:
                 if not result.get('filled_quantity'):
-                    logger.warning(f"⚠️ {result['stock_code']} 매도 주문 미체결 상태로 진행")
+                    order_id = result.get('order_id')
+                    stock_code = result['stock_code']
+                    logger.warning(f"⚠️ {stock_code} 매도 주문 미체결 — 자동 취소 시도 (주문번호: {order_id})")
+                    try:
+                        cancel_result = self.api_manager.cancel_order(
+                            order_id=order_id,
+                            stock_code=stock_code,
+                            order_type="00"
+                        )
+                        if cancel_result and cancel_result.success:
+                            logger.info(f"✅ {stock_code} 미체결 매도 주문 취소 성공")
+                        else:
+                            msg = cancel_result.message if cancel_result else "결과 없음"
+                            logger.warning(f"⚠️ {stock_code} 미체결 매도 주문 취소 실패: {msg}")
+                    except Exception as cancel_err:
+                        logger.error(f"❌ {stock_code} 주문 취소 오류: {cancel_err}")
 
         except Exception as e:
             logger.error(f"❌ 매도 주문 체결 확인 오류: {e}")

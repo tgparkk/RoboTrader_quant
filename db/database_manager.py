@@ -258,6 +258,17 @@ class DatabaseManager:
                     )
                 ''')
                 
+                # 기존 real_trading_records 테이블에 컬럼 추가 (없는 경우만)
+                try:
+                    cursor.execute('ALTER TABLE real_trading_records ADD COLUMN target_profit_rate REAL')
+                except sqlite3.OperationalError:
+                    pass  # 컬럼이 이미 존재
+
+                try:
+                    cursor.execute('ALTER TABLE real_trading_records ADD COLUMN stop_loss_rate REAL')
+                except sqlite3.OperationalError:
+                    pass  # 컬럼이 이미 존재
+
                 # 매매 기록 테이블 (기존)
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS trading_records (
@@ -347,6 +358,13 @@ class DatabaseManager:
                 cursor.execute('''
                     CREATE UNIQUE INDEX IF NOT EXISTS idx_virtual_trading_unique_sell
                     ON virtual_trading_records(buy_record_id)
+                    WHERE action = 'SELL' AND buy_record_id IS NOT NULL
+                ''')
+
+                # 실전 매매도 동일하게 중복 매도 방지
+                cursor.execute('''
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_real_trading_unique_sell
+                    ON real_trading_records(buy_record_id)
                     WHERE action = 'SELL' AND buy_record_id IS NOT NULL
                 ''')
 
@@ -969,25 +987,43 @@ class DatabaseManager:
     # ============================
     def save_real_buy(self, stock_code: str, stock_name: str, price: float,
                       quantity: int, strategy: str = '', reason: str = '',
-                      timestamp: datetime = None) -> Optional[int]:
+                      timestamp: datetime = None,
+                      target_profit_rate: float = None,
+                      stop_loss_rate: float = None) -> Optional[int]:
         """실거래 매수 기록 저장"""
         try:
             if timestamp is None:
                 timestamp = now_kst()
+
+            # 타입 안전성 보장
+            quantity = int(quantity)
+            price = float(price)
+            if target_profit_rate is not None:
+                target_profit_rate = float(target_profit_rate)
+            if stop_loss_rate is not None:
+                stop_loss_rate = float(stop_loss_rate)
+
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     INSERT INTO real_trading_records 
-                    (stock_code, stock_name, action, quantity, price, timestamp, strategy, reason, created_at)
-                    VALUES (?, ?, 'BUY', ?, ?, ?, ?, ?, ?)
+                    (stock_code, stock_name, action, quantity, price, timestamp, strategy, reason,
+                     target_profit_rate, stop_loss_rate, created_at)
+                    VALUES (?, ?, 'BUY', ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     stock_code, stock_name, quantity, price,
                     timestamp.strftime('%Y-%m-%d %H:%M:%S'), strategy, reason,
+                    target_profit_rate, stop_loss_rate,
                     now_kst().strftime('%Y-%m-%d %H:%M:%S')
                 ))
                 rec_id = cursor.lastrowid
                 conn.commit()
-                self.logger.info(f"✅ 실거래 매수 기록 저장: {stock_code} {quantity}주 @{price:,.0f}")
+
+                profit_info = ""
+                if target_profit_rate is not None and stop_loss_rate is not None:
+                    profit_info = f" (익절: {target_profit_rate*100:.1f}%, 손절: {stop_loss_rate*100:.1f}%)"
+
+                self.logger.info(f"✅ 실거래 매수 기록 저장: {stock_code} {quantity}주 @{price:,.0f}{profit_info}")
                 return rec_id
         except Exception as e:
             self.logger.error(f"실거래 매수 기록 저장 실패: {e}")
@@ -995,7 +1031,9 @@ class DatabaseManager:
 
     def save_real_sell(self, stock_code: str, stock_name: str, price: float,
                        quantity: int, strategy: str = '', reason: str = '',
-                       buy_record_id: Optional[int] = None, timestamp: datetime = None) -> bool:
+                       buy_record_id: Optional[int] = None, timestamp: datetime = None,
+                       target_profit_rate: float = None,
+                       stop_loss_rate: float = None) -> bool:
         """실거래 매도 기록 저장 (손익 계산 포함)"""
         try:
             if timestamp is None:
@@ -1049,22 +1087,37 @@ class DatabaseManager:
             if buy_price and buy_price > 0:
                 profit_loss = (price - buy_price) * quantity
                 profit_rate = (price - buy_price) / buy_price  # 소수 형태로 저장 (0.05 = 5%)
+            # 타입 안전성 보장
+            if target_profit_rate is not None:
+                target_profit_rate = float(target_profit_rate)
+            if stop_loss_rate is not None:
+                stop_loss_rate = float(stop_loss_rate)
+
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
-                    INSERT INTO real_trading_records 
-                    (stock_code, stock_name, action, quantity, price, timestamp, strategy, reason, 
-                     profit_loss, profit_rate, buy_record_id, created_at)
-                    VALUES (?, ?, 'SELL', ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    stock_code, stock_name, quantity, price,
-                    timestamp.strftime('%Y-%m-%d %H:%M:%S'), strategy, reason,
-                    profit_loss, profit_rate, buy_record_id,
-                    now_kst().strftime('%Y-%m-%d %H:%M:%S')
-                ))
+                # Race condition 방지: UNIQUE 인덱스 위반 시 중복 매도로 처리
+                try:
+                    cursor.execute('''
+                        INSERT INTO real_trading_records 
+                        (stock_code, stock_name, action, quantity, price, timestamp, strategy, reason, 
+                         profit_loss, profit_rate, buy_record_id, target_profit_rate, stop_loss_rate, created_at)
+                        VALUES (?, ?, 'SELL', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        stock_code, stock_name, quantity, price,
+                        timestamp.strftime('%Y-%m-%d %H:%M:%S'), strategy, reason,
+                        profit_loss, profit_rate, buy_record_id,
+                        target_profit_rate, stop_loss_rate,
+                        now_kst().strftime('%Y-%m-%d %H:%M:%S')
+                    ))
+                except sqlite3.IntegrityError:
+                    self.logger.warning(
+                        f"⚠️ {stock_code} 실거래 중복 매도 차단 (Race condition): "
+                        f"buy_record_id={buy_record_id} 이미 매도됨"
+                    )
+                    return False
                 conn.commit()
                 self.logger.info(
-                    f"✅ 실거래 매도 기록 저장: {stock_code} {quantity}주 @{price:,.0f} 손익 {profit_loss:+, .0f}원 ({profit_rate:+.2f}%)"
+                    f"✅ 실거래 매도 기록 저장: {stock_code} {quantity}주 @{price:,.0f} 손익 {profit_loss:+,.0f}원 ({profit_rate:+.2f}%)"
                 )
                 return True
         except Exception as e:
@@ -1341,6 +1394,41 @@ class DatabaseManager:
             self.logger.error(f"미체결 포지션 조회 실패: {e}")
             return pd.DataFrame()
     
+    def get_real_open_positions(self) -> pd.DataFrame:
+        """미체결 실전 포지션 조회 (매수만 하고 매도 안한 것들)"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                query = '''
+                    SELECT 
+                        b.id,
+                        b.stock_code,
+                        b.stock_name,
+                        b.quantity,
+                        b.price as buy_price,
+                        b.timestamp as buy_time,
+                        b.strategy,
+                        b.reason as buy_reason,
+                        b.target_profit_rate,
+                        b.stop_loss_rate
+                    FROM real_trading_records b
+                    WHERE b.action = 'BUY' 
+                        AND NOT EXISTS (
+                            SELECT 1 FROM real_trading_records s 
+                            WHERE s.buy_record_id = b.id AND s.action = 'SELL'
+                        )
+                    ORDER BY b.timestamp DESC
+                '''
+                
+                df = pd.read_sql_query(query, conn)
+                if not df.empty and 'buy_time' in df.columns:
+                    df['buy_time'] = pd.to_datetime(df['buy_time'], errors='coerce')
+
+                return df
+                
+        except Exception as e:
+            self.logger.error(f"실전 미체결 포지션 조회 실패: {e}")
+            return pd.DataFrame()
+
     def get_virtual_trading_history(self, days: int = 30, include_open: bool = True) -> pd.DataFrame:
         """가상 매매 이력 조회"""
         try:
@@ -1452,12 +1540,13 @@ class DatabaseManager:
             self.logger.error(f"가상 매매 통계 조회 실패: {e}")
             return {}
 
-    def get_today_stop_loss_stocks(self, target_date: str = None) -> List[str]:
+    def get_today_stop_loss_stocks(self, target_date: str = None, include_real: bool = False) -> List[str]:
         """
         오늘 손절한 종목 코드 리스트 조회
 
         Args:
             target_date: 조회 날짜 (YYYY-MM-DD 형식, None이면 오늘)
+            include_real: True이면 real_trading_records도 함께 조회
 
         Returns:
             손절한 종목 코드 리스트
@@ -1469,7 +1558,7 @@ class DatabaseManager:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
-                # 오늘 손절 매도한 종목 조회 (reason에 '손절' 포함)
+                # 가상 매매에서 오늘 손절 매도한 종목 조회
                 cursor.execute('''
                     SELECT DISTINCT stock_code
                     FROM virtual_trading_records
@@ -1479,12 +1568,27 @@ class DatabaseManager:
                 ''', (target_date,))
 
                 result = cursor.fetchall()
-                stop_loss_stocks = [row[0] for row in result]
+                stop_loss_stocks = set(row[0] for row in result)
 
-                if stop_loss_stocks:
-                    self.logger.info(f"📊 {target_date} 손절 종목: {len(stop_loss_stocks)}개 ({', '.join(stop_loss_stocks)})")
+                # 실전 매매에서도 손절 종목 조회
+                if include_real:
+                    cursor.execute('''
+                        SELECT DISTINCT stock_code
+                        FROM real_trading_records
+                        WHERE action = 'SELL'
+                          AND DATE(timestamp) = ?
+                          AND (reason LIKE '%손절%' OR reason LIKE '%stop%loss%')
+                    ''', (target_date,))
 
-                return stop_loss_stocks
+                    real_result = cursor.fetchall()
+                    stop_loss_stocks.update(row[0] for row in real_result)
+
+                stop_loss_list = list(stop_loss_stocks)
+
+                if stop_loss_list:
+                    self.logger.info(f"📊 {target_date} 손절 종목: {len(stop_loss_list)}개 ({', '.join(stop_loss_list)})")
+
+                return stop_loss_list
 
         except Exception as e:
             self.logger.error(f"오늘 손절 종목 조회 실패: {e}")
