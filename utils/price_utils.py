@@ -82,9 +82,11 @@ def check_duplicate_process(pid_file_path: str = 'robotrader_quant.pid'):
                 # 기존 PID가 존재하지 않으면 PID 파일 삭제
                 pid_file.unlink(missing_ok=True)
 
-        # 현재 프로세스 PID 저장
+        # 현재 프로세스 PID 저장 (원자적 쓰기: 임시파일 → rename)
         current_pid = os.getpid()
-        pid_file.write_text(str(current_pid))
+        tmp_pid_file = pid_file.with_suffix('.pid.tmp')
+        tmp_pid_file.write_text(str(current_pid))
+        tmp_pid_file.replace(pid_file)
         logger.info(f"프로세스 PID 등록: {current_pid}")
 
     except Exception as e:

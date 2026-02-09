@@ -57,6 +57,9 @@ class TradingDecisionEngine:
             paper_trading=self.is_virtual_mode
         )
 
+        # 리밸런싱 진행 중 플래그 (손절 일시 중단용)
+        self.rebalancing_in_progress = False
+
         # 🆕 추세 모멘텀 분석기 초기화
         from core.trend_momentum_analyzer import TrendMomentumAnalyzer
         self.trend_analyzer = TrendMomentumAnalyzer()
@@ -568,26 +571,26 @@ class TradingDecisionEngine:
             target_profit_rate = getattr(trading_stock, 'target_profit_rate', 0.15)
             stop_loss_rate = getattr(trading_stock, 'stop_loss_rate', 0.10)
 
-            # 🆕 09:00~09:05 사이에는 손절 체크 안 함 (익절만)
+            # 리밸런싱 진행 중이면 손절 중단 (익절만 허용)
+            # 플래그 기반이므로 09:05 전 뿐만 아니라 리밸런싱이 길어져도 대응 가능
             from utils.korean_time import now_kst
             current_time = now_kst()
             is_before_rebalancing = (
-                current_time.hour == 9 and
-                current_time.minute < 5
-            )
+                current_time.hour == 9 and current_time.minute < 5
+            ) or self.rebalancing_in_progress
 
             # 익절 조건 확인
             if profit_rate >= target_profit_rate:
                 return True, f"목표 익절 도달 ({profit_rate*100:.1f}% >= {target_profit_rate*100:.1f}%)"
 
-            # 손절 조건 확인 (리밸런싱 전에는 스킵)
+            # 손절 조건 확인 (리밸런싱 중에는 스킵)
             if not is_before_rebalancing:
                 if profit_rate <= -stop_loss_rate:
                     return True, f"손절 실행 ({profit_rate*100:.1f}% <= -{stop_loss_rate*100:.1f}%)"
             else:
-                # 리밸런싱 전 손절 중단 모드 (디버그 로그)
+                # 리밸런싱 전/중 손절 중단 모드
                 if profit_rate <= -stop_loss_rate:
-                    self.logger.debug(f"⏸️ {trading_stock.stock_code} 리밸런싱 전 손절 중단 "
+                    self.logger.debug(f"⏸️ {trading_stock.stock_code} 리밸런싱 중 손절 중단 "
                                      f"(손절선 도달: {profit_rate*100:.1f}% <= -{stop_loss_rate*100:.1f}%, 익절만 허용)")
 
             return False, ""

@@ -504,7 +504,11 @@ class DayTradingBot:
     
     async def _execute_rebalancing_async(self, plan):
         """리밸런싱 실행 (비동기 버전)"""
-        await self.rebalancing_executor.execute_rebalancing(plan)
+        self.decision_engine.rebalancing_in_progress = True
+        try:
+            await self.rebalancing_executor.execute_rebalancing(plan)
+        finally:
+            self.decision_engine.rebalancing_in_progress = False
     
     async def _system_monitoring_task(self):
         """시스템 모니터링 태스크"""
@@ -527,7 +531,7 @@ class DayTradingBot:
                     last_api_refresh = current_time
 
                 
-                # 08:20 DB 백업 (장 시작 전, 데이터 수집 전)
+                # 08:20 DB 백업 + 이전 완료 주문 정리 (장 시작 전)
                 if current_time.hour == 8 and current_time.minute >= 20:
                     if self._last_db_backup_date != current_time.date():
                         self._last_db_backup_date = current_time.date()
@@ -537,6 +541,8 @@ class DayTradingBot:
                                 self.logger.info(f"📦 장 시작 전 DB 백업 완료: {backup_path}")
                         except Exception as backup_err:
                             self.logger.error(f"❌ DB 백업 오류: {backup_err}")
+                        # 이전 완료 주문 메모리 정리
+                        self.order_manager.cleanup_old_completed_orders()
 
                 # 08:30 전일 데이터 수집 및 08:55 퀀트 스크리닝 실행 (장 시작 전)
                 if current_time.hour == 8:
@@ -723,13 +729,29 @@ class DayTradingBot:
             if hasattr(self, 'candidate_selector') and hasattr(self.candidate_selector, 'get_selection_statistics'):
                 selection_stats = self.candidate_selector.get_selection_statistics()
             
+            # DB 헬스체크
+            db_ok = False
+            try:
+                with self.db_manager._get_connection() as conn:
+                    conn.execute("SELECT 1")
+                    db_ok = True
+            except Exception:
+                pass
+
+            # 서킷 브레이커 상태
+            circuit_status = "🟢 정상"
+            if kis_auth._circuit_breaker_open_until and now_kst() < kis_auth._circuit_breaker_open_until:
+                circuit_status = f"🔴 차단 중 (해제: {kis_auth._circuit_breaker_open_until.strftime('%H:%M:%S')})"
+
             status_lines = [
                 f"📊 시스템 상태 [{current_time.strftime('%H:%M:%S')}]",
                 f"  - 시장 상태: {market_status}",
                 f"  - 미체결 주문: {order_summary['pending_count']}건",
                 f"  - 완료 주문: {order_summary['completed_count']}건",
                 f"  - 데이터 수집: {data_counts}",
-                f"  - API 통계: 총 {api_stats['total_calls']}회 호출, 성공률 {api_stats['success_rate']}%, 속도제한 {api_stats['rate_limit_errors']}회 ({api_stats['rate_limit_rate']}%)"
+                f"  - API 통계: 총 {api_stats['total_calls']}회 호출, 성공률 {api_stats['success_rate']}%, 속도제한 {api_stats['rate_limit_errors']}회 ({api_stats['rate_limit_rate']}%)",
+                f"  - 서킷 브레이커: {circuit_status}",
+                f"  - DB 상태: {'🟢 정상' if db_ok else '🔴 연결 실패'}"
             ]
             
             # 후보 선정 통계 추가

@@ -1037,6 +1037,18 @@ class OrderManager:
     def get_completed_orders(self) -> List[Order]:
         """완료된 주문 목록 반환"""
         return self.completed_orders.copy()
+
+    def cleanup_old_completed_orders(self):
+        """당일 이전 완료 주문 정리 (메모리 누적 방지)"""
+        today = now_kst().date()
+        before = len(self.completed_orders)
+        self.completed_orders = [
+            o for o in self.completed_orders
+            if o.timestamp.date() == today
+        ]
+        removed = before - len(self.completed_orders)
+        if removed > 0:
+            self.logger.info(f"🗑️ 이전 완료 주문 {removed}건 정리 (잔여 {len(self.completed_orders)}건)")
     
     def get_order_summary(self) -> dict:
         """주문 요약 정보"""

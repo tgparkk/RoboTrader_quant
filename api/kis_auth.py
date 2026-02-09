@@ -46,7 +46,14 @@ _max_retries = 3  # 최대 재시도 횟수
 _retry_delay_base = 1.5  # 기본 재시도 지연 시간(초) - 속도 제한 오류 대응 강화
 _request_timeout = (5, 30)  # (connect_timeout, read_timeout) 초
 
-# API 호출 통계 수집
+# 서킷 브레이커: 연속 실패 시 API 일시 중단
+_circuit_breaker_consecutive_fails = 0
+_circuit_breaker_open_until = None  # datetime: 이 시간까지 API 호출 차단
+_circuit_breaker_threshold = 10  # 연속 10회 실패 시 서킷 오픈
+_circuit_breaker_cooldown = 60  # 서킷 오픈 시 60초 쿨다운
+
+# API 호출 통계 수집 (스레드 안전)
+_stats_lock = threading.Lock()
 _api_stats = {
     'total_calls': 0,
     'success_calls': 0,
@@ -316,9 +323,19 @@ class APIResp:
 def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
                appendHeaders: Optional[Dict] = None, postFlag: bool = False,
                hashFlag: bool = True) -> Optional[APIResp]:
-    """API 호출 공통 함수 (속도 제한 및 재시도 로직 포함)"""
-    global _api_stats
-    
+    """API 호출 공통 함수 (속도 제한, 재시도, 서킷 브레이커 포함)"""
+    global _api_stats, _circuit_breaker_consecutive_fails, _circuit_breaker_open_until
+
+    # 서킷 브레이커 체크
+    if _circuit_breaker_open_until:
+        if now_kst() < _circuit_breaker_open_until:
+            logger.warning(f"🔴 서킷 브레이커 활성 - API 호출 차단 (해제: {_circuit_breaker_open_until.strftime('%H:%M:%S')})")
+            return None
+        else:
+            logger.info("🟢 서킷 브레이커 해제 - API 호출 재개")
+            _circuit_breaker_open_until = None
+            _circuit_breaker_consecutive_fails = 0
+
     if not _TRENV:
         logger.warning("토큰이 없습니다. 자동 인증 시도...")
         if not auth():
@@ -362,6 +379,7 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
                 ar = APIResp(res)
                 if ar.isOK():
                     _api_stats['success_calls'] += 1
+                    _circuit_breaker_consecutive_fails = 0  # 성공 시 리셋
                     if _DEBUG:
                         logger.debug(f"API 응답 성공: {tr_id}")
                     return ar
@@ -512,6 +530,15 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
                 return None
 
     logger.error(f"API 호출 최대 재시도 횟수 초과: {tr_id}")
+    # 서킷 브레이커: 연속 실패 카운트 증가
+    _circuit_breaker_consecutive_fails += 1
+    if _circuit_breaker_consecutive_fails >= _circuit_breaker_threshold:
+        from datetime import timedelta
+        _circuit_breaker_open_until = now_kst() + timedelta(seconds=_circuit_breaker_cooldown)
+        logger.error(
+            f"🔴 서킷 브레이커 활성화: 연속 {_circuit_breaker_consecutive_fails}회 실패 → "
+            f"{_circuit_breaker_cooldown}초간 API 호출 중단 (해제: {_circuit_breaker_open_until.strftime('%H:%M:%S')})"
+        )
     return None
 
 
@@ -568,35 +595,36 @@ def get_api_rate_limit_info():
 
 
 def get_api_statistics():
-    """API 호출 통계 정보 반환"""
-    global _api_stats
-    total_calls = _api_stats['total_calls']
-    success_rate = (_api_stats['success_calls'] / max(total_calls, 1)) * 100
-    rate_limit_rate = (_api_stats['rate_limit_errors'] / max(total_calls, 1)) * 100
-    
-    return {
-        'total_calls': total_calls,
-        'success_calls': _api_stats['success_calls'],
-        'rate_limit_errors': _api_stats['rate_limit_errors'],
-        'other_errors': _api_stats['other_errors'],
-        'success_rate': round(success_rate, 2),
-        'rate_limit_rate': round(rate_limit_rate, 2),
-        'total_wait_time': round(_api_stats['total_wait_time'], 2),
-        'last_rate_limit_time': _api_stats['last_rate_limit_time'].isoformat() if _api_stats['last_rate_limit_time'] else None
-    }
+    """API 호출 통계 정보 반환 (스레드 안전)"""
+    with _stats_lock:
+        total_calls = _api_stats['total_calls']
+        success_rate = (_api_stats['success_calls'] / max(total_calls, 1)) * 100
+        rate_limit_rate = (_api_stats['rate_limit_errors'] / max(total_calls, 1)) * 100
+
+        return {
+            'total_calls': total_calls,
+            'success_calls': _api_stats['success_calls'],
+            'rate_limit_errors': _api_stats['rate_limit_errors'],
+            'other_errors': _api_stats['other_errors'],
+            'success_rate': round(success_rate, 2),
+            'rate_limit_rate': round(rate_limit_rate, 2),
+            'total_wait_time': round(_api_stats['total_wait_time'], 2),
+            'last_rate_limit_time': _api_stats['last_rate_limit_time'].isoformat() if _api_stats['last_rate_limit_time'] else None
+        }
 
 
 def reset_api_statistics():
-    """API 통계 초기화"""
+    """API 통계 초기화 (스레드 안전)"""
     global _api_stats
-    _api_stats = {
-        'total_calls': 0,
-        'success_calls': 0,
-        'rate_limit_errors': 0,
-        'other_errors': 0,
-        'total_wait_time': 0.0,
-        'last_rate_limit_time': None
-    }
+    with _stats_lock:
+        _api_stats = {
+            'total_calls': 0,
+            'success_calls': 0,
+            'rate_limit_errors': 0,
+            'other_errors': 0,
+            'total_wait_time': 0.0,
+            'last_rate_limit_time': None
+        }
 
 
 # 🆕 웹소켓 연결을 위한 helper 함수들
