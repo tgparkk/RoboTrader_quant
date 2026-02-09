@@ -62,7 +62,14 @@ class DayTradingBot:
 
         # 설정 초기화
         self.config = load_config()
-        
+
+        # paper_trading 설정 존재 여부 검증 (모듈간 기본값 불일치 방지)
+        if not hasattr(self.config, 'paper_trading'):
+            raise SystemExit("CRITICAL: paper_trading 설정이 없습니다. trading_config.json을 확인하세요.")
+
+        trading_mode = "가상매매" if self.config.paper_trading else "실전매매"
+        self.logger.info(f"💰 매매 모드: {trading_mode} (paper_trading={self.config.paper_trading})")
+
         # 리밸런싱 모드 상태 로깅
         if getattr(self.config, 'rebalancing_mode', False):
             self.logger.info("🔄 리밸런싱 모드 활성화: 09:05 리밸런싱으로 매수, 장중 손절/익절 매도 판단 활성화")
@@ -350,6 +357,12 @@ class DayTradingBot:
                         self.logger.error(f"❌ 가상 매수 처리 오류: {e}")
                 else:
                     # [실전매매 모드]
+                    buy_amount = buy_info['buy_price'] * buy_info['quantity']
+                    reserve_order_id = f"PRE-{stock_code}-{int(now_kst().timestamp())}"
+                    reserved = self.fund_manager.reserve_funds(reserve_order_id, buy_amount)
+                    if not reserved:
+                        self.logger.warning(f"❌ {stock_code} 자금 예약 실패: {buy_amount:,.0f}원")
+                        return
                     try:
                         await self.decision_engine.execute_real_buy(
                             trading_stock,
@@ -357,9 +370,13 @@ class DayTradingBot:
                             buy_info['buy_price'],
                             buy_info['quantity']
                         )
+                        # 체결 확인 후 confirm_order로 전환 (주문 모니터링에서 처리)
+                        self.fund_manager.confirm_order(reserve_order_id, buy_amount)
                         self.logger.info(f"🔥 실제 매수 주문 완료: {stock_code}({stock_name}) - {buy_reason}")
                     except Exception as e:
-                        self.logger.error(f"❌ 실제 매수 처리 오류: {e}")
+                        # 주문 실패 시 예약 해제 보장
+                        self.fund_manager.cancel_order(reserve_order_id)
+                        self.logger.error(f"❌ 실제 매수 처리 오류 (자금 예약 해제됨): {e}")
                     
             else:
                 #self.logger.debug(f"📊 {stock_code}({stock_name}) 매수 신호 없음")
@@ -982,29 +999,50 @@ class DayTradingBot:
             await self.telegram.notify_error("Emergency Position Sync", e)
 
     async def shutdown(self):
-        """시스템 종료"""
+        """시스템 종료 (미체결 주문 완료 대기 포함)"""
         try:
             self.logger.info("🛑 시스템 종료 시작")
-            
-            # 데이터 수집 중단
+
+            # 1. 미체결 주문 완료 대기 (최대 60초)
+            if hasattr(self, 'order_manager') and self.order_manager.pending_orders:
+                pending_count = len(self.order_manager.pending_orders)
+                self.logger.info(f"⏳ 미체결 주문 {pending_count}건 완료 대기 중 (최대 60초)...")
+                try:
+                    deadline = asyncio.get_event_loop().time() + 60.0
+                    while self.order_manager.pending_orders and asyncio.get_event_loop().time() < deadline:
+                        await asyncio.sleep(1)
+                    remaining = len(self.order_manager.pending_orders)
+                    if remaining > 0:
+                        self.logger.warning(f"⚠️ 미체결 주문 {remaining}건 대기 타임아웃 - 강제 종료")
+                    else:
+                        self.logger.info("✅ 모든 미체결 주문 처리 완료")
+                except Exception as wait_err:
+                    self.logger.warning(f"미체결 주문 대기 중 오류: {wait_err}")
+
+            # 2. 데이터 수집 중단
             self.data_collector.stop_collection()
-            
-            # 주문 모니터링 중단
+
+            # 3. 주문 모니터링 중단
             self.order_manager.stop_monitoring()
-            
-            # 텔레그램 통합 종료
+
+            # 4. ThreadPoolExecutor 정리
+            if hasattr(self.order_manager, 'executor'):
+                self.order_manager.executor.shutdown(wait=False)
+                self.logger.info("ThreadPoolExecutor 종료 완료")
+
+            # 5. 텔레그램 통합 종료
             await self.telegram.shutdown()
-            
-            # API 매니저 종료
+
+            # 6. API 매니저 종료
             self.api_manager.shutdown()
-            
-            # PID 파일 삭제
+
+            # 7. PID 파일 삭제
             if self.pid_file.exists():
                 self.pid_file.unlink()
                 self.logger.info("PID 파일 삭제 완료")
-            
+
             self.logger.info("✅ 시스템 종료 완료")
-            
+
         except Exception as e:
             self.logger.error(f"❌ 시스템 종료 중 오류: {e}")
 

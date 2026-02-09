@@ -94,7 +94,7 @@ class OrderManager:
             self.logger.info(f"📈 매수 주문 시도: {stock_code} {quantity}주 @{price:,.0f}원 (타임아웃: {timeout_seconds}초)")
 
             # 🆕 가상매매 모드: 즉시 체결로 시뮬레이션
-            if getattr(self.config, "paper_trading", False):
+            if getattr(self.config, "paper_trading", True):
                 fake_order_id = f"VT-BUY-{stock_code}-{int(now_kst().timestamp())}"
                 order = Order(
                     order_id=fake_order_id,
@@ -230,7 +230,7 @@ class OrderManager:
             self.logger.info(f"📉 매도 주문 시도: {stock_code} {quantity}주 @{price:,.0f}원 (타임아웃: {timeout_seconds}초, 시장가: {market})")
 
             # 🆕 가상매매 모드: 즉시 체결로 시뮬레이션
-            if getattr(self.config, "paper_trading", False):
+            if getattr(self.config, "paper_trading", True):
                 fake_order_id = f"VT-SELL-{stock_code}-{int(now_kst().timestamp())}"
                 order = Order(
                     order_id=fake_order_id,
@@ -662,12 +662,29 @@ class OrderManager:
                     await self._save_real_trade_to_db(order, filled_price)
 
                     # 🆕 TradingStockManager에 즉시 알림 (콜백)
+                    # 체결 콜백 실패 시 포지션 미등록 → 손절 모니터링 누락 위험
                     if self.trading_manager:
                         try:
                             self.logger.info(f"📞 TradingStockManager에 체결 알림: {order_id}")
                             await self.trading_manager.on_order_filled(order)
                         except Exception as callback_err:
-                            self.logger.error(f"❌ 체결 콜백 오류: {callback_err}")
+                            self.logger.critical(
+                                f"🚨 체결 콜백 실패 - 포지션 미등록 위험! "
+                                f"order_id={order_id}, stock={order.stock_code}, "
+                                f"type={order.order_type.value}, qty={order.quantity}, "
+                                f"price={filled_price:,.0f}원, error={callback_err}"
+                            )
+                            # 텔레그램 긴급 알림 (포지션 수동 확인 필요)
+                            if self.telegram:
+                                try:
+                                    await self.telegram.notify_error(
+                                        f"체결 콜백 실패 - 수동 확인 필요",
+                                        Exception(f"{order.stock_code} {order.order_type.value} "
+                                                  f"{order.quantity}주 @{filled_price:,.0f}원 체결됨, "
+                                                  f"but 포지션 미등록: {callback_err}")
+                                    )
+                                except Exception:
+                                    pass
 
                     # 텔레그램 체결 알림
                     if self.telegram:

@@ -53,9 +53,32 @@ class DatabaseManager:
         
         self.db_path = str(db_path)
         self.logger.info(f"데이터베이스 초기화: {self.db_path}")
-        
+
+        # WAL 모드 활성화 (최초 1회, DB 파일 단위로 영구 설정)
+        self._init_pragmas()
+
         # 테이블 생성
         self._create_tables()
+
+    def _init_pragmas(self):
+        """SQLite PRAGMA 설정 (WAL 모드, 타임아웃 등)"""
+        try:
+            conn = sqlite3.connect(self.db_path, timeout=30.0)
+            conn.execute('PRAGMA journal_mode=WAL')
+            conn.execute('PRAGMA busy_timeout=5000')
+            conn.execute('PRAGMA synchronous=NORMAL')
+            conn.execute('PRAGMA foreign_keys=ON')
+            conn.close()
+            self.logger.info("SQLite PRAGMA 설정 완료 (WAL 모드, busy_timeout=5000ms)")
+        except Exception as e:
+            self.logger.error(f"SQLite PRAGMA 설정 실패: {e}")
+
+    def _get_connection(self):
+        """스레드 안전한 SQLite 연결 생성 (timeout + PRAGMA 적용)"""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        conn.execute('PRAGMA busy_timeout=5000')
+        conn.execute('PRAGMA foreign_keys=ON')
+        return conn
 
     def _get_today_range_strings(self) -> tuple:
         """KST 기준 오늘의 시작과 내일 시작 시간 문자열(YYYY-MM-DD HH:MM:SS)을 반환."""
@@ -82,7 +105,7 @@ class DatabaseManager:
         """
         try:
             start_str, next_str = self._get_today_range_strings()
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     '''
@@ -104,7 +127,7 @@ class DatabaseManager:
     def _create_tables(self):
         """데이터베이스 테이블 생성"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
                 # 후보 종목 테이블
@@ -385,7 +408,7 @@ class DatabaseManager:
             if selection_date is None:
                 selection_date = now_kst()
             
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
                 # 당일 이미 저장된 종목 조회 (성능 최적화)
@@ -445,7 +468,7 @@ class DatabaseManager:
             if not price_data:
                 return True
             
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
                 for record in price_data:
@@ -478,7 +501,7 @@ class DatabaseManager:
             if df_minute is None or df_minute.empty:
                 return True
             
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
                 # 기존 데이터 삭제 (해당 종목, 해당 날짜의 모든 데이터)
@@ -532,7 +555,7 @@ class DatabaseManager:
                 except (ValueError, TypeError):
                     return 0.0
             
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 rows = []
                 now_str = now_kst().strftime('%Y-%m-%d %H:%M:%S')
@@ -600,7 +623,7 @@ class DatabaseManager:
                 return True
             
             calc_date = str(calc_date)
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('DELETE FROM quant_factors WHERE calc_date = ?', (calc_date,))
                 
@@ -645,7 +668,7 @@ class DatabaseManager:
         """일자별 상위 포트폴리오 저장 (기존 데이터 덮어쓰기)"""
         try:
             calc_date = str(calc_date)
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('DELETE FROM quant_portfolio WHERE calc_date = ?', (calc_date,))
                 
@@ -686,7 +709,7 @@ class DatabaseManager:
     def get_quant_portfolio(self, calc_date: str, limit: int = 50) -> List[Dict[str, Any]]:
         """일자별 상위 포트폴리오 조회"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     SELECT stock_code, stock_name, rank, total_score, reason
@@ -722,7 +745,7 @@ class DatabaseManager:
             List[Dict]: 팩터 점수 리스트
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 if stock_code:
                     cursor.execute('''
@@ -760,7 +783,7 @@ class DatabaseManager:
     def get_minute_data(self, stock_code: str, date_str: str) -> Optional[pd.DataFrame]:
         """1분봉 데이터를 기존 stock_prices 테이블에서 조회"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 start_datetime = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]} 00:00:00"
                 end_datetime = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]} 23:59:59"
                 
@@ -800,7 +823,7 @@ class DatabaseManager:
     def has_minute_data(self, stock_code: str, date_str: str) -> bool:
         """해당 종목의 해당 날짜 1분봉 데이터가 DB에 있는지 확인"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 start_datetime = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]} 00:00:00"
                 end_datetime = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]} 23:59:59"
@@ -824,7 +847,7 @@ class DatabaseManager:
         try:
             start_date = now_kst() - timedelta(days=days)
             
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 query = '''
                     SELECT 
                         stock_code,
@@ -853,7 +876,7 @@ class DatabaseManager:
         try:
             start_date = now_kst() - timedelta(days=days)
             
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 query = '''
                     SELECT 
                         date_time,
@@ -882,7 +905,7 @@ class DatabaseManager:
         try:
             start_date = now_kst() - timedelta(days=days)
             
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 query = '''
                     SELECT 
                         c.stock_code,
@@ -915,7 +938,7 @@ class DatabaseManager:
         try:
             start_date = now_kst() - timedelta(days=days)
             
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 query = '''
                     SELECT 
                         DATE(selection_date) as date,
@@ -942,7 +965,7 @@ class DatabaseManager:
         try:
             cutoff_date = now_kst() - timedelta(days=keep_days)
             
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
                 # 오래된 후보 종목 데이터 삭제
@@ -966,7 +989,7 @@ class DatabaseManager:
     def get_database_stats(self) -> Dict[str, int]:
         """데이터베이스 통계"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
                 stats = {}
@@ -1003,7 +1026,7 @@ class DatabaseManager:
             if stop_loss_rate is not None:
                 stop_loss_rate = float(stop_loss_rate)
 
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     INSERT INTO real_trading_records 
@@ -1041,7 +1064,7 @@ class DatabaseManager:
             buy_price = None
 
             # 해당 종목의 모든 미체결 매수 기록을 조회하여 평균 매수가 계산
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     SELECT
@@ -1093,7 +1116,7 @@ class DatabaseManager:
             if stop_loss_rate is not None:
                 stop_loss_rate = float(stop_loss_rate)
 
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 # Race condition 방지: UNIQUE 인덱스 위반 시 중복 매도로 처리
                 try:
@@ -1127,7 +1150,7 @@ class DatabaseManager:
     def get_last_open_real_buy(self, stock_code: str) -> Optional[int]:
         """해당 종목의 미매칭 매수(가장 최근) ID 조회"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     SELECT b.id 
@@ -1158,7 +1181,7 @@ class DatabaseManager:
             매수 기록 ID 또는 None
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
                 if quantity is None:
@@ -1214,7 +1237,7 @@ class DatabaseManager:
             if stop_loss_rate is not None:
                 stop_loss_rate = float(stop_loss_rate)
 
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
 
                 # timestamp를 Unix epoch (정수)로 변환
@@ -1257,7 +1280,7 @@ class DatabaseManager:
             quantity = int(quantity)
             price = float(price)
 
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
 
                 # 중복 매도 방지: 해당 buy_record_id로 이미 매도된 기록이 있는지 확인
@@ -1359,7 +1382,7 @@ class DatabaseManager:
     def get_virtual_open_positions(self) -> pd.DataFrame:
         """미체결 가상 포지션 조회 (매수만 하고 매도 안한 것들)"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 query = '''
                     SELECT 
                         b.id,
@@ -1397,7 +1420,7 @@ class DatabaseManager:
     def get_real_open_positions(self) -> pd.DataFrame:
         """미체결 실전 포지션 조회 (매수만 하고 매도 안한 것들)"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 query = '''
                     SELECT 
                         b.id,
@@ -1434,7 +1457,7 @@ class DatabaseManager:
         try:
             start_date = now_kst() - timedelta(days=days)
             
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 if include_open:
                     # 모든 기록 (매수/매도)
                     query = '''
@@ -1555,7 +1578,7 @@ class DatabaseManager:
             if target_date is None:
                 target_date = now_kst().strftime('%Y-%m-%d')
 
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
 
                 # 가상 매매에서 오늘 손절 매도한 종목 조회

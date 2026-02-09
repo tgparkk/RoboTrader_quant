@@ -44,6 +44,7 @@ _last_api_call_time = None
 _min_api_interval = 0.06  # 최소 60ms 간격 (초당 약 16-17회, KIS 제한: 1초당 20건)
 _max_retries = 3  # 최대 재시도 횟수
 _retry_delay_base = 1.5  # 기본 재시도 지연 시간(초) - 속도 제한 오류 대응 강화
+_request_timeout = (5, 30)  # (connect_timeout, read_timeout) 초
 
 # API 호출 통계 수집
 _api_stats = {
@@ -279,10 +280,11 @@ class APIResp:
             body_data = self._resp.json()
             _tb_ = namedtuple('body', body_data.keys())
             return _tb_(**body_data)
-        except:
+        except Exception as e:
             # JSON 파싱 실패시 빈 객체 반환
+            logger.warning(f"API 응답 JSON 파싱 실패: {e}")
             _tb_ = namedtuple('body', ['rt_cd', 'msg_cd', 'msg1'])
-            return _tb_(rt_cd='1', msg_cd='ERROR', msg1='JSON 파싱 실패')
+            return _tb_(rt_cd='1', msg_cd='ERROR', msg1=f'JSON 파싱 실패: {e}')
 
     def getHeader(self):
         return self._header
@@ -296,7 +298,8 @@ class APIResp:
     def isOK(self) -> bool:
         try:
             return self.getBody().rt_cd == '0'
-        except:
+        except Exception as e:
+            logger.debug(f"isOK 확인 실패: {e}")
             return False
 
     def getErrorCode(self) -> str:
@@ -346,13 +349,13 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
             if _DEBUG:
                 logger.debug(f"API 호출 ({attempt + 1}/{_max_retries + 1}): {url}, TR: {tr_id}")
 
-            # API 호출
+            # API 호출 (timeout 적용)
             if postFlag:
                 if hashFlag:
                     set_order_hash_key(headers, params)
-                res = requests.post(url, headers=headers, data=json.dumps(params))
+                res = requests.post(url, headers=headers, data=json.dumps(params), timeout=_request_timeout)
             else:
-                res = requests.get(url, headers=headers, params=params)
+                res = requests.get(url, headers=headers, params=params, timeout=_request_timeout)
 
             # 응답 처리
             if res.status_code == 200:
@@ -399,13 +402,13 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
                                 if appendHeaders:
                                     headers.update(appendHeaders)
 
-                                # API 재호출
+                                # API 재호출 (timeout 적용)
                                 if postFlag:
                                     if hashFlag:
                                         set_order_hash_key(headers, params)
-                                    res = requests.post(url, headers=headers, data=json.dumps(params))
+                                    res = requests.post(url, headers=headers, data=json.dumps(params), timeout=_request_timeout)
                                 else:
-                                    res = requests.get(url, headers=headers, params=params)
+                                    res = requests.get(url, headers=headers, params=params, timeout=_request_timeout)
 
                                 # 재호출 결과 처리
                                 if res.status_code == 200:
@@ -479,10 +482,29 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
                     logger.error(f"API 오류: {res.status_code} - {res.text}")
                     return None
 
-        except Exception as e:
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            _api_stats['other_errors'] += 1
+            # 주문 API(POST)는 네트워크 오류 시 재시도 금지 (중복 주문 위험)
+            # 서버에서 이미 처리되었지만 응답만 못 받은 경우 재시도 시 중복 체결
+            if postFlag:
+                logger.error(
+                    f"🚨 주문 API 네트워크 오류 - 재시도 금지 (중복 주문 방지): "
+                    f"{type(e).__name__} - {e}, TR: {tr_id}"
+                )
+                return None
             if attempt < _max_retries:
                 wait_time = _retry_delay_base * (2 ** attempt)
-                logger.warning(f"API 호출 예외 발생. {wait_time}초 후 재시도 ({attempt + 1}/{_max_retries + 1}): {e}")
+                logger.warning(f"네트워크 오류 ({type(e).__name__}). {wait_time:.1f}초 후 재시도 ({attempt + 1}/{_max_retries + 1}): {e}")
+                time.sleep(wait_time)
+                continue
+            else:
+                logger.error(f"네트워크 오류 (재시도 소진): {type(e).__name__} - {e}")
+                return None
+        except Exception as e:
+            _api_stats['other_errors'] += 1
+            if attempt < _max_retries:
+                wait_time = _retry_delay_base * (2 ** attempt)
+                logger.warning(f"API 호출 예외 발생. {wait_time:.1f}초 후 재시도 ({attempt + 1}/{_max_retries + 1}): {e}")
                 time.sleep(wait_time)
                 continue
             else:
@@ -520,7 +542,8 @@ def _is_rate_limit_error(response_text: str) -> bool:
         response_data = json.loads(response_text)
         return (response_data.get('msg_cd') == 'EGW00201' or
                 '초당 거래건수를 초과' in response_data.get('msg1', ''))
-    except:
+    except Exception as e:
+        logger.debug(f"속도 제한 오류 확인 중 파싱 실패: {e}")
         return False
 
 
