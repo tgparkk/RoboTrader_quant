@@ -41,11 +41,10 @@ def print_today_trading_summary():
             SELECT stock_code, stock_name, quantity, price,
                    (quantity * price) as total_amount,
                    target_profit_rate, stop_loss_rate,
-                   timestamp
+                   datetime(timestamp, 'unixepoch', 'localtime') as dt
             FROM virtual_trading_records
             WHERE action = 'BUY'
-              AND is_test = 0
-              AND date(timestamp, 'localtime') = date(?)
+              AND DATE(datetime(timestamp, 'unixepoch', 'localtime')) = ?
             ORDER BY timestamp
         ''', (today,))
 
@@ -80,11 +79,10 @@ def print_today_trading_summary():
             SELECT stock_code, stock_name, quantity, price,
                    (quantity * price) as total_amount,
                    profit_loss, profit_rate,
-                   timestamp
+                   datetime(timestamp, 'unixepoch', 'localtime') as dt
             FROM virtual_trading_records
             WHERE action = 'SELL'
-              AND is_test = 0
-              AND date(timestamp, 'localtime') = date(?)
+              AND DATE(datetime(timestamp, 'unixepoch', 'localtime')) = ?
             ORDER BY timestamp
         ''', (today,))
 
@@ -145,7 +143,6 @@ def print_today_trading_summary():
                 b.stop_loss_rate
             FROM virtual_trading_records b
             WHERE b.action = 'BUY'
-              AND b.is_test = 0
               AND NOT EXISTS (
                 SELECT 1 FROM virtual_trading_records s
                 WHERE s.buy_record_id = b.id
@@ -218,7 +215,6 @@ def print_today_trading_summary():
                 COUNT(CASE WHEN action = 'SELL' AND profit_loss < 0 THEN 1 END) as loss_count,
                 COUNT(CASE WHEN action = 'SELL' THEN 1 END) as total_trades
             FROM virtual_trading_records
-            WHERE is_test = 0
         ''')
 
         pl_row = cursor.fetchone()
