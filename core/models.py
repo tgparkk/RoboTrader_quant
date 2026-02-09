@@ -18,6 +18,7 @@ class OrderStatus(Enum):
     FILLED = "filled"
     CANCELLED = "cancelled"
     TIMEOUT = "timeout"  # 🆕 타임아웃으로 인한 강제 정리
+    FAILED = "failed"    # 주문 실패 (네트워크 오류 등)
 
 
 class PositionType(Enum):

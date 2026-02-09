@@ -637,7 +637,7 @@ class TradingStockManager:
                 if not hasattr(trading_stock, '_price_fail_count'):
                     trading_stock._price_fail_count = 0
                 trading_stock._price_fail_count += 1
-                if trading_stock._price_fail_count >= 3:
+                if trading_stock._price_fail_count == 3:
                     self.logger.error(f"🚨 {stock_code} 현재가 조회 연속 {trading_stock._price_fail_count}회 실패 - 수동 확인 필요")
                     if hasattr(self, 'telegram') and self.telegram:
                         try:
@@ -647,6 +647,8 @@ class TradingStockManager:
                             )
                         except Exception:
                             pass
+                elif trading_stock._price_fail_count > 3 and trading_stock._price_fail_count % 20 == 0:
+                    self.logger.error(f"🚨 {stock_code} 현재가 조회 연속 {trading_stock._price_fail_count}회 실패 지속 중")
                 return
 
             # 가격 조회 성공 시 연속 실패 카운트 리셋
@@ -664,7 +666,8 @@ class TradingStockManager:
                 is_before_rebalancing = (
                     current_time.hour == 9 and
                     current_time.minute < 5
-                )
+                ) or (hasattr(self, 'decision_engine') and self.decision_engine and
+                      getattr(self.decision_engine, 'rebalancing_in_progress', False))
 
                 # 목표 익절률 체크
                 if hasattr(trading_stock, 'target_profit_rate') and trading_stock.target_profit_rate:

@@ -314,6 +314,7 @@ class RebalancingExecutor:
                 target_amount = buy_item['target_amount']
                 stock_name = buy_item.get('stock_name', stock_code)
 
+                reserved = False
                 try:
                     # 🆕 오늘 손절한 종목은 재매수 금지
                     if stock_code in today_stop_loss_stocks:
