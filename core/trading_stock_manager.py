@@ -632,9 +632,26 @@ class TradingStockManager:
 
             # 현재가 조회 실패 시 종료
             if current_price is None or current_price <= 0:
-                # 주기적으로 발생할 수 있으므로 DEBUG 레벨로 로깅
-                self.logger.debug(f"⚠️ {stock_code} 현재가 조회 실패 - 손익절 체크 스킵")
+                self.logger.warning(f"⚠️ {stock_code} 현재가 조회 실패 (API+캐시+collector 모두 실패) - 손익절 체크 스킵")
+                # 연속 실패 카운트 추적
+                if not hasattr(trading_stock, '_price_fail_count'):
+                    trading_stock._price_fail_count = 0
+                trading_stock._price_fail_count += 1
+                if trading_stock._price_fail_count >= 3:
+                    self.logger.error(f"🚨 {stock_code} 현재가 조회 연속 {trading_stock._price_fail_count}회 실패 - 수동 확인 필요")
+                    if hasattr(self, 'telegram') and self.telegram:
+                        try:
+                            await self.telegram.notify_error(
+                                f"현재가 조회 연속 실패",
+                                Exception(f"{stock_code} {trading_stock._price_fail_count}회 연속 실패 - 손절 모니터링 중단 상태")
+                            )
+                        except Exception:
+                            pass
                 return
+
+            # 가격 조회 성공 시 연속 실패 카운트 리셋
+            if hasattr(trading_stock, '_price_fail_count'):
+                trading_stock._price_fail_count = 0
 
             # 간단한 손익절 체크
             if trading_stock.position:

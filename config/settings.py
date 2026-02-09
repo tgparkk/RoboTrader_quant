@@ -71,3 +71,13 @@ APP_KEY = _config['KIS_APP_KEY']
 SECRET_KEY = _config['KIS_APP_SECRET']
 ACCOUNT_NUMBER = _config['KIS_ACCOUNT_NO']
 HTS_ID = _config['KIS_HTS_ID']
+
+# 필수 설정값 검증 (빈 값이면 시스템 시작 불가)
+_required_settings = {
+    'KIS_APP_KEY': APP_KEY,
+    'KIS_APP_SECRET': SECRET_KEY,
+    'KIS_ACCOUNT_NO': ACCOUNT_NUMBER,
+}
+_missing = [k for k, v in _required_settings.items() if not v]
+if _missing:
+    raise SystemExit(f"CRITICAL: 필수 API 설정이 비어있습니다: {', '.join(_missing)}. key.ini를 확인하세요.")

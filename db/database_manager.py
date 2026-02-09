@@ -3,6 +3,7 @@
 후보 종목 선정 이력 및 관련 데이터 저장/조회
 """
 import sqlite3
+import shutil
 import json
 import pandas as pd
 from datetime import datetime, timedelta
@@ -390,6 +391,13 @@ class DatabaseManager:
                     ON real_trading_records(buy_record_id)
                     WHERE action = 'SELL' AND buy_record_id IS NOT NULL
                 ''')
+
+                # B-8: 자주 사용되는 쿼리에 대한 복합 인덱스 추가
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_virtual_code_action ON virtual_trading_records(stock_code, action)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_real_code_action ON real_trading_records(stock_code, action)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_virtual_buy_record ON virtual_trading_records(buy_record_id, action)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_real_buy_record ON real_trading_records(buy_record_id, action)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_real_trading_code_date ON real_trading_records(stock_code, timestamp)')
 
                 conn.commit()
                 self.logger.info("데이터베이스 테이블 생성 완료")
@@ -1502,14 +1510,16 @@ class DatabaseManager:
                         ORDER BY s.timestamp DESC
                     '''
                 
-                df = pd.read_sql_query(query, conn, params=(start_date.strftime('%Y-%m-%d %H:%M:%S'),))
-                
+                # virtual_trading_records는 Unix epoch(정수)로 저장되므로 정수 비교
+                start_timestamp = int(start_date.timestamp())
+                df = pd.read_sql_query(query, conn, params=(start_timestamp,))
+
                 if not df.empty:
                     if include_open:
-                        df['timestamp'] = pd.to_datetime(df['timestamp'])
+                        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
                     else:
-                        df['buy_time'] = pd.to_datetime(df['buy_time'])
-                        df['sell_time'] = pd.to_datetime(df['sell_time'])
+                        df['buy_time'] = pd.to_datetime(df['buy_time'], unit='s')
+                        df['sell_time'] = pd.to_datetime(df['sell_time'], unit='s')
                 
                 return df
                 
@@ -1616,3 +1626,49 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"오늘 손절 종목 조회 실패: {e}")
             return []
+
+    def backup_database(self, max_backups: int = 7) -> Optional[str]:
+        """DB 파일 백업 (장 시작 전 호출)
+
+        SQLite의 VACUUM INTO를 사용하여 일관된 백업을 생성합니다.
+        최대 max_backups개의 백업만 유지하고 오래된 것은 삭제합니다.
+
+        Args:
+            max_backups: 유지할 최대 백업 파일 수 (기본 7일)
+
+        Returns:
+            백업 파일 경로 (성공 시), None (실패 시)
+        """
+        try:
+            db_path = Path(self.db_path)
+            backup_dir = db_path.parent / "backups"
+            backup_dir.mkdir(exist_ok=True)
+
+            today_str = now_kst().strftime('%Y%m%d')
+            backup_filename = f"robotrader_{today_str}.db"
+            backup_path = backup_dir / backup_filename
+
+            # 오늘 이미 백업한 경우 스킵
+            if backup_path.exists():
+                self.logger.info(f"📦 오늘자 DB 백업 이미 존재: {backup_path}")
+                return str(backup_path)
+
+            # VACUUM INTO로 일관된 백업 생성 (WAL 모드에서도 안전)
+            with self._get_connection() as conn:
+                conn.execute(f"VACUUM INTO '{backup_path}'")
+
+            backup_size_mb = backup_path.stat().st_size / (1024 * 1024)
+            self.logger.info(f"✅ DB 백업 완료: {backup_path} ({backup_size_mb:.1f}MB)")
+
+            # 오래된 백업 삭제 (최대 max_backups개 유지)
+            backups = sorted(backup_dir.glob("robotrader_*.db"))
+            if len(backups) > max_backups:
+                for old_backup in backups[:-max_backups]:
+                    old_backup.unlink()
+                    self.logger.info(f"🗑️ 오래된 백업 삭제: {old_backup.name}")
+
+            return str(backup_path)
+
+        except Exception as e:
+            self.logger.error(f"❌ DB 백업 실패: {e}")
+            return None

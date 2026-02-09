@@ -117,6 +117,7 @@ class DayTradingBot:
 
         # 🆕 일일 매매 리포트 초기화
         self._last_daily_report_date = None
+        self._last_db_backup_date = None
 
         # 🆕 리밸런싱 서비스 초기화 (9단계)
         self.rebalancing_service = QuantRebalancingService(
@@ -140,7 +141,8 @@ class DayTradingBot:
             keep_list_updater=self.keep_list_updater,
             notification_helper=self.notification_helper,
             telegram_integration=self.telegram,
-            db_manager=self.db_manager
+            db_manager=self.db_manager,
+            fund_manager=self.fund_manager
         )
         self.screening_task_runner = ScreeningTaskRunner(
             quant_screening_service=self.quant_screening_service,
@@ -525,6 +527,17 @@ class DayTradingBot:
                     last_api_refresh = current_time
 
                 
+                # 08:20 DB 백업 (장 시작 전, 데이터 수집 전)
+                if current_time.hour == 8 and current_time.minute >= 20:
+                    if self._last_db_backup_date != current_time.date():
+                        self._last_db_backup_date = current_time.date()
+                        try:
+                            backup_path = self.db_manager.backup_database()
+                            if backup_path:
+                                self.logger.info(f"📦 장 시작 전 DB 백업 완료: {backup_path}")
+                        except Exception as backup_err:
+                            self.logger.error(f"❌ DB 백업 오류: {backup_err}")
+
                 # 08:30 전일 데이터 수집 및 08:55 퀀트 스크리닝 실행 (장 시작 전)
                 if current_time.hour == 8:
                     # 08:30 전일 일봉 + 재무데이터 수집

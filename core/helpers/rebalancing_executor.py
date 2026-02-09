@@ -24,7 +24,8 @@ class RebalancingExecutor:
         keep_list_updater,
         notification_helper,
         telegram_integration,
-        db_manager=None
+        db_manager=None,
+        fund_manager=None
     ):
         """
         Args:
@@ -36,6 +37,7 @@ class RebalancingExecutor:
             notification_helper: RebalancingNotificationHelper 인스턴스
             telegram_integration: 텔레그램 통합
             db_manager: DatabaseManager 인스턴스
+            fund_manager: FundManager 인스턴스
         """
         self.api_manager = api_manager
         self.order_manager = order_manager
@@ -45,6 +47,7 @@ class RebalancingExecutor:
         self.notification_helper = notification_helper
         self.telegram = telegram_integration
         self.db_manager = db_manager
+        self.fund_manager = fund_manager
 
     def _get_market_change_rate(self):
         """
@@ -356,6 +359,16 @@ class RebalancingExecutor:
                     target_profit_rate = buy_item.get('target_profit_rate', 0.15)
                     stop_loss_rate = buy_item.get('stop_loss_rate', 0.10)
 
+                    # FundManager 자금 예약 (Race condition 방지)
+                    buy_amount = current_price * target_quantity
+                    reserve_order_id = f"REB-{stock_code}-{int(now_kst().timestamp())}"
+                    reserved = False
+                    if self.fund_manager:
+                        reserved = self.fund_manager.reserve_funds(reserve_order_id, buy_amount)
+                        if not reserved:
+                            logger.warning(f"⚠️ {stock_code}({stock_name}) 자금 예약 실패: {buy_amount:,.0f}원 - 매수 스킵")
+                            continue
+
                     # TradingStock 객체에 먼저 추가 또는 업데이트 (매수 주문 전에 목표 익절/손절률 설정)
                     trading_stock = self.trading_manager.get_trading_stock(stock_code)
                     if not trading_stock:
@@ -389,6 +402,9 @@ class RebalancingExecutor:
                     )
 
                     if order_id:
+                        # 자금 예약 → 투자 확정
+                        if self.fund_manager and reserved:
+                            self.fund_manager.confirm_order(reserve_order_id, buy_amount)
 
                         buy_results.append({
                             'stock_code': stock_code,
@@ -402,6 +418,10 @@ class RebalancingExecutor:
                         })
                         logger.info(f"✅ 리밸런싱 매수 주문: {stock_code}({stock_name}) {target_quantity}주 시장가 (목표: {target_amount:,.0f}원)")
                     else:
+                        # 주문 실패 → 자금 예약 해제
+                        if self.fund_manager and reserved:
+                            self.fund_manager.cancel_order(reserve_order_id)
+
                         buy_results.append({
                             'stock_code': stock_code,
                             'stock_name': stock_name,
@@ -415,6 +435,9 @@ class RebalancingExecutor:
                     await asyncio.sleep(REBALANCING_ORDER_INTERVAL)
 
                 except Exception as e:
+                    # 예외 발생 시 자금 예약 해제
+                    if self.fund_manager and reserved:
+                        self.fund_manager.cancel_order(reserve_order_id)
                     logger.error(f"❌ 리밸런싱 매수 오류 {stock_code}: {e}")
                     buy_results.append({
                         'stock_code': stock_code,
