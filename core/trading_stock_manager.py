@@ -419,8 +419,7 @@ class TradingStockManager:
                             config = load_config()
                             if getattr(config, 'paper_trading', False):
                                 try:
-                                    from db.database_manager import DatabaseManager
-                                    db = DatabaseManager()
+                                    db = self.decision_engine.db_manager
                                     # 최근 가상매매 매수 기록 조회
                                     open_positions = db.get_virtual_open_positions()
                                     stock_positions = open_positions[open_positions['stock_code'] == trading_stock.stock_code]
@@ -460,8 +459,7 @@ class TradingStockManager:
                         # 실거래 매수 기록 저장 (실전매매 모드에서만)
                         if not (self.decision_engine and self.decision_engine.is_virtual_mode):
                             try:
-                                from db.database_manager import DatabaseManager
-                                db = DatabaseManager()
+                                db = self.decision_engine.db_manager
                                 db.save_real_buy(
                                     stock_code=trading_stock.stock_code,
                                     stock_name=trading_stock.stock_name,
@@ -530,8 +528,7 @@ class TradingStockManager:
                         profit_rate = 0.0
                         if not (self.decision_engine and self.decision_engine.is_virtual_mode):
                             try:
-                                from db.database_manager import DatabaseManager
-                                db = DatabaseManager()
+                                db = self.decision_engine.db_manager
                                 buy_id = db.get_last_open_real_buy(trading_stock.stock_code)
 
                                 if buy_id and cached_buy_price:
@@ -894,8 +891,7 @@ class TradingStockManager:
                         config = load_config()
                         if getattr(config, 'paper_trading', False):
                             try:
-                                from db.database_manager import DatabaseManager
-                                db = DatabaseManager()
+                                db = self.decision_engine.db_manager
                                 # 최근 가상매매 매수 기록 조회
                                 open_positions = db.get_virtual_open_positions()
                                 stock_positions = open_positions[open_positions['stock_code'] == trading_stock.stock_code]
@@ -926,8 +922,7 @@ class TradingStockManager:
                         # 실거래 매수 기록 저장 (실전매매 모드에서만)
                         if not (self.decision_engine and self.decision_engine.is_virtual_mode):
                             try:
-                                from db.database_manager import DatabaseManager
-                                db = DatabaseManager()
+                                db = self.decision_engine.db_manager
                                 db.save_real_buy(
                                     stock_code=trading_stock.stock_code,
                                     stock_name=trading_stock.stock_name,
@@ -967,8 +962,7 @@ class TradingStockManager:
                         profit_rate = 0.0
                         if not (self.decision_engine and self.decision_engine.is_virtual_mode):
                             try:
-                                from db.database_manager import DatabaseManager
-                                db = DatabaseManager()
+                                db = self.decision_engine.db_manager
                                 buy_id = db.get_last_open_real_buy(trading_stock.stock_code)
 
                                 if buy_id and cached_buy_price:
