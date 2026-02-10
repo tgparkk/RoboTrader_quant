@@ -83,15 +83,16 @@ class OrderManager:
             self.logger.error(f"❌ 4분봉 경과 확인 오류: {e}")
             return False
     
-    async def place_buy_order(self, stock_code: str, quantity: int, price: float, 
+    async def place_buy_order(self, stock_code: str, quantity: int, price: float,
                              timeout_seconds: int = None,
                              target_profit_rate: float = None,
-                             stop_loss_rate: float = None) -> Optional[str]:
+                             stop_loss_rate: float = None,
+                             market: bool = False) -> Optional[str]:
         """매수 주문 실행"""
         try:
             timeout_seconds = timeout_seconds or self.config.order_management.buy_timeout_seconds
-            
-            self.logger.info(f"📈 매수 주문 시도: {stock_code} {quantity}주 @{price:,.0f}원 (타임아웃: {timeout_seconds}초)")
+
+            self.logger.info(f"📈 매수 주문 시도: {stock_code} {quantity}주 @{price:,.0f}원 (타임아웃: {timeout_seconds}초, 시장가: {market})")
 
             # 🆕 가상매매 모드: 즉시 체결로 시뮬레이션
             if getattr(self.config, "paper_trading", True):
@@ -167,7 +168,7 @@ class OrderManager:
             result: OrderResult = await loop.run_in_executor(
                 self.executor,
                 self.api_manager.place_buy_order,
-                stock_code, quantity, int(price)
+                stock_code, quantity, int(price), ("01" if market else "00")
             )
             
             if result.success:

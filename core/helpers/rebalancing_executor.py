@@ -412,10 +412,11 @@ class RebalancingExecutor:
                     order_id = await self.order_manager.place_buy_order(
                         stock_code=stock_code,
                         quantity=target_quantity,
-                        price=current_price,  # 시장가는 가격 0으로 주문하지만, 여기서는 현재가 사용
+                        price=current_price,
                         timeout_seconds=300,
                         target_profit_rate=target_profit_rate,
-                        stop_loss_rate=stop_loss_rate
+                        stop_loss_rate=stop_loss_rate,
+                        market=True
                     )
 
                     if order_id:
