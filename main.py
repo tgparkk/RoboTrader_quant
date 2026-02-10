@@ -368,18 +368,21 @@ class DayTradingBot:
                         self.logger.warning(f"❌ {stock_code} 자금 예약 실패: {buy_amount:,.0f}원")
                         return
                     try:
+                        # 체결 시 fund_manager confirm용 예약 ID 저장
+                        trading_stock._reserve_order_id = reserve_order_id
+                        trading_stock._reserve_amount = buy_amount
                         await self.decision_engine.execute_real_buy(
                             trading_stock,
                             buy_reason,
                             buy_info['buy_price'],
                             buy_info['quantity']
                         )
-                        # 체결 확인 후 confirm_order로 전환 (주문 모니터링에서 처리)
-                        self.fund_manager.confirm_order(reserve_order_id, buy_amount)
+                        # confirm_order는 체결 콜백(on_order_filled/_check_buy_order_completion)에서 호출
                         self.logger.info(f"🔥 실제 매수 주문 완료: {stock_code}({stock_name}) - {buy_reason}")
                     except Exception as e:
                         # 주문 실패 시 예약 해제 보장
                         self.fund_manager.cancel_order(reserve_order_id)
+                        trading_stock._reserve_order_id = None
                         self.logger.error(f"❌ 실제 매수 처리 오류 (자금 예약 해제됨): {e}")
                     
             else:

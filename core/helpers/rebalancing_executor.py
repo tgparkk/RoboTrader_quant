@@ -403,6 +403,11 @@ class RebalancingExecutor:
                             f"(순위: {buy_item.get('rank', '?')}위, 점수: {buy_item.get('total_score', 0):.1f})"
                         )
 
+                    # 체결 시 fund_manager confirm용 예약 ID 저장
+                    if trading_stock and reserved:
+                        trading_stock._reserve_order_id = reserve_order_id
+                        trading_stock._reserve_amount = buy_amount
+
                     # 시장가 매수 주문 (목표 익절/손절률 직접 전달)
                     order_id = await self.order_manager.place_buy_order(
                         stock_code=stock_code,
@@ -414,9 +419,6 @@ class RebalancingExecutor:
                     )
 
                     if order_id:
-                        # 자금 예약 → 투자 확정
-                        if self.fund_manager and reserved:
-                            self.fund_manager.confirm_order(reserve_order_id, buy_amount)
 
                         buy_results.append({
                             'stock_code': stock_code,

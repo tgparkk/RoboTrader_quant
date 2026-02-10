@@ -449,6 +449,14 @@ class TradingStockManager:
                                 StockState.POSITIONED,
                                 f"매수 완료: {order.quantity}주 @{order.price:,.0f}원"
                             )
+                        # fund_manager 자금 예약 → 투자 확정 (체결 확인 시점)
+                        if self.decision_engine and self.decision_engine.fund_manager:
+                            reserve_id = getattr(trading_stock, '_reserve_order_id', None)
+                            if reserve_id:
+                                actual_amount = float(order.price) * int(order.quantity)
+                                self.decision_engine.fund_manager.confirm_order(reserve_id, actual_amount)
+                                trading_stock._reserve_order_id = None
+
                         # 실거래 매수 기록 저장 (실전매매 모드에서만)
                         if not (self.decision_engine and self.decision_engine.is_virtual_mode):
                             try:
@@ -466,8 +474,15 @@ class TradingStockManager:
                                 self.logger.warning(f"⚠️ 실거래 매수 기록 저장 실패: {db_err}")
 
                         self.logger.info(f"✅ {trading_stock.stock_code} 매수 완료")
-                        
+
                     elif order.status in [OrderStatus.CANCELLED, OrderStatus.FAILED]:
+                        # fund_manager 자금 예약 해제
+                        if self.decision_engine and self.decision_engine.fund_manager:
+                            reserve_id = getattr(trading_stock, '_reserve_order_id', None)
+                            if reserve_id:
+                                self.decision_engine.fund_manager.cancel_order(reserve_id)
+                                trading_stock._reserve_order_id = None
+
                         # 매수 실패 - 매수 후보로 되돌림
                         with self._lock:
                             trading_stock.clear_current_order()
@@ -897,6 +912,14 @@ class TradingStockManager:
                             f"매수 체결 (콜백): {order.quantity}주 @{order.price:,.0f}원"
                         )
                         
+                        # fund_manager 자금 예약 → 투자 확정 (체결 확인 시점)
+                        if self.decision_engine and self.decision_engine.fund_manager:
+                            reserve_id = getattr(trading_stock, '_reserve_order_id', None)
+                            if reserve_id:
+                                actual_amount = float(order.price) * int(order.quantity)
+                                self.decision_engine.fund_manager.confirm_order(reserve_id, actual_amount)
+                                trading_stock._reserve_order_id = None
+
                         # 실거래 매수 기록 저장 (실전매매 모드에서만)
                         if not (self.decision_engine and self.decision_engine.is_virtual_mode):
                             try:
