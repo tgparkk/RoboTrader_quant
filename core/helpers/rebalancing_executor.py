@@ -277,7 +277,7 @@ class RebalancingExecutor:
             # 🆕 오늘 손절한 종목 조회
             today_stop_loss_stocks = []
             if self.db_manager:
-                today_stop_loss_stocks = self.db_manager.get_today_stop_loss_stocks()
+                today_stop_loss_stocks = self.db_manager.get_today_stop_loss_stocks(include_real=True)
                 if today_stop_loss_stocks:
                     logger.info(f"🚫 당일 손절 재매수 차단 대상: {len(today_stop_loss_stocks)}개 ({', '.join(today_stop_loss_stocks)})")
                 else:

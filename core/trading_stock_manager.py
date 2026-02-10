@@ -449,22 +449,22 @@ class TradingStockManager:
                                 StockState.POSITIONED,
                                 f"매수 완료: {order.quantity}주 @{order.price:,.0f}원"
                             )
-                        # 실거래 매수 기록 저장
-                        try:
-                            from db.database_manager import DatabaseManager
-                            # DatabaseManager는 main에서 생성되어 전달되었을 수도 있으나, 안전하게 새 인스턴스 사용
-                            db = DatabaseManager()
-                            db.save_real_buy(
-                                stock_code=trading_stock.stock_code,
-                                stock_name=trading_stock.stock_name,
-                                price=float(order.price),
-                                quantity=int(order.quantity),
-                                strategy=trading_stock.selection_reason,
-                                reason="체결"
-                            )
-                        except Exception as db_err:
-                            self.logger.warning(f"⚠️ 실거래 매수 기록 저장 실패: {db_err}")
-                        
+                        # 실거래 매수 기록 저장 (실전매매 모드에서만)
+                        if not (self.decision_engine and self.decision_engine.is_virtual_mode):
+                            try:
+                                from db.database_manager import DatabaseManager
+                                db = DatabaseManager()
+                                db.save_real_buy(
+                                    stock_code=trading_stock.stock_code,
+                                    stock_name=trading_stock.stock_name,
+                                    price=float(order.price),
+                                    quantity=int(order.quantity),
+                                    strategy=trading_stock.selection_reason,
+                                    reason="체결"
+                                )
+                            except Exception as db_err:
+                                self.logger.warning(f"⚠️ 실거래 매수 기록 저장 실패: {db_err}")
+
                         self.logger.info(f"✅ {trading_stock.stock_code} 매수 완료")
                         
                     elif order.status in [OrderStatus.CANCELLED, OrderStatus.FAILED]:
@@ -506,33 +506,31 @@ class TradingStockManager:
                                 StockState.COMPLETED, 
                                 f"매도 완료: {order.quantity}주 @{order.price:,.0f}원"
                             )
-                        # 실거래 매도 기록 저장 (매칭된 매수와 손익 계산)
+                        # 실거래 매도 기록 저장 (실전매매 모드에서만)
                         profit_rate = 0.0
-                        try:
-                            from db.database_manager import DatabaseManager
-                            db = DatabaseManager()
-                            buy_id = db.get_last_open_real_buy(trading_stock.stock_code)
-                            
-                            # 수익률 계산을 위해 매수가 조회
-                            buy_price = None
-                            if buy_id and trading_stock.position and trading_stock.position.avg_price:
-                                buy_price = trading_stock.position.avg_price
-                                profit_rate = ((float(order.price) - buy_price) / buy_price) * 100
-                            
-                            db.save_real_sell(
-                                stock_code=trading_stock.stock_code,
-                                stock_name=trading_stock.stock_name,
-                                price=float(order.price),
-                                quantity=int(order.quantity),
-                                strategy=trading_stock.selection_reason,
-                                reason="체결",
-                                buy_record_id=buy_id
-                            )
-                            
-                            
-                        except Exception as db_err:
-                            self.logger.warning(f"⚠️ 실거래 매도 기록 저장 실패: {db_err}")
-                        
+                        if not (self.decision_engine and self.decision_engine.is_virtual_mode):
+                            try:
+                                from db.database_manager import DatabaseManager
+                                db = DatabaseManager()
+                                buy_id = db.get_last_open_real_buy(trading_stock.stock_code)
+
+                                buy_price = None
+                                if buy_id and trading_stock.position and trading_stock.position.avg_price:
+                                    buy_price = trading_stock.position.avg_price
+                                    profit_rate = ((float(order.price) - buy_price) / buy_price) * 100
+
+                                db.save_real_sell(
+                                    stock_code=trading_stock.stock_code,
+                                    stock_name=trading_stock.stock_name,
+                                    price=float(order.price),
+                                    quantity=int(order.quantity),
+                                    strategy=trading_stock.selection_reason,
+                                    reason="체결",
+                                    buy_record_id=buy_id
+                                )
+                            except Exception as db_err:
+                                self.logger.warning(f"⚠️ 실거래 매도 기록 저장 실패: {db_err}")
+
                         self.logger.info(f"✅ {trading_stock.stock_code} 매도 완료 (수익률: {profit_rate:.2f}%)")
                         
                         # 매도 완료 후 즉시 재거래 준비 (COMPLETED 상태 유지)
@@ -894,21 +892,22 @@ class TradingStockManager:
                             f"매수 체결 (콜백): {order.quantity}주 @{order.price:,.0f}원"
                         )
                         
-                        # 실거래 매수 기록 저장
-                        try:
-                            from db.database_manager import DatabaseManager
-                            db = DatabaseManager()
-                            db.save_real_buy(
-                                stock_code=trading_stock.stock_code,
-                                stock_name=trading_stock.stock_name,
-                                price=float(order.price),
-                                quantity=int(order.quantity),
-                                strategy=trading_stock.selection_reason,
-                                reason="체결(콜백)"
-                            )
-                        except Exception as db_err:
-                            self.logger.warning(f"⚠️ 실거래 매수 기록 저장 실패: {db_err}")
-                        
+                        # 실거래 매수 기록 저장 (실전매매 모드에서만)
+                        if not (self.decision_engine and self.decision_engine.is_virtual_mode):
+                            try:
+                                from db.database_manager import DatabaseManager
+                                db = DatabaseManager()
+                                db.save_real_buy(
+                                    stock_code=trading_stock.stock_code,
+                                    stock_name=trading_stock.stock_name,
+                                    price=float(order.price),
+                                    quantity=int(order.quantity),
+                                    strategy=trading_stock.selection_reason,
+                                    reason="체결(콜백)"
+                                )
+                            except Exception as db_err:
+                                self.logger.warning(f"⚠️ 실거래 매수 기록 저장 실패: {db_err}")
+
                         self.logger.info(f"✅ 매수 체결 처리 완료 (콜백): {trading_stock.stock_code}")
                     else:
                         self.logger.warning(f"⚠️ 예상치 못한 상태에서 매수 체결: {trading_stock.state.value}")
@@ -928,33 +927,31 @@ class TradingStockManager:
                             f"매도 체결 (콜백): {order.quantity}주 @{order.price:,.0f}원"
                         )
                         
-                        # 실거래 매도 기록 저장
+                        # 실거래 매도 기록 저장 (실전매매 모드에서만)
                         profit_rate = 0.0
-                        try:
-                            from db.database_manager import DatabaseManager
-                            db = DatabaseManager()
-                            buy_id = db.get_last_open_real_buy(trading_stock.stock_code)
-                            
-                            # 수익률 계산을 위해 매수가 조회 (콜백 매도)
-                            buy_price = None
-                            if buy_id and trading_stock.position and trading_stock.position.avg_price:
-                                buy_price = trading_stock.position.avg_price
-                                profit_rate = ((float(order.price) - buy_price) / buy_price) * 100
-                            
-                            db.save_real_sell(
-                                stock_code=trading_stock.stock_code,
-                                stock_name=trading_stock.stock_name,
-                                price=float(order.price),
-                                quantity=int(order.quantity),
-                                strategy=trading_stock.selection_reason,
-                                reason="체결(콜백)",
-                                buy_record_id=buy_id
-                            )
-                            
-                            
-                        except Exception as db_err:
-                            self.logger.warning(f"⚠️ 실거래 매도 기록 저장 실패: {db_err}")
-                        
+                        if not (self.decision_engine and self.decision_engine.is_virtual_mode):
+                            try:
+                                from db.database_manager import DatabaseManager
+                                db = DatabaseManager()
+                                buy_id = db.get_last_open_real_buy(trading_stock.stock_code)
+
+                                buy_price = None
+                                if buy_id and trading_stock.position and trading_stock.position.avg_price:
+                                    buy_price = trading_stock.position.avg_price
+                                    profit_rate = ((float(order.price) - buy_price) / buy_price) * 100
+
+                                db.save_real_sell(
+                                    stock_code=trading_stock.stock_code,
+                                    stock_name=trading_stock.stock_name,
+                                    price=float(order.price),
+                                    quantity=int(order.quantity),
+                                    strategy=trading_stock.selection_reason,
+                                    reason="체결(콜백)",
+                                    buy_record_id=buy_id
+                                )
+                            except Exception as db_err:
+                                self.logger.warning(f"⚠️ 실거래 매도 기록 저장 실패: {db_err}")
+
                         self.logger.info(f"✅ 매도 체결 처리 완료 (콜백): {trading_stock.stock_code} (수익률: {profit_rate:.2f}%)")
                         
                         # 매도 완료 후 즉시 재거래 준비 (COMPLETED 상태 유지)
