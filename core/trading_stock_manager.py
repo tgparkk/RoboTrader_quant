@@ -531,19 +531,24 @@ class TradingStockManager:
                             except Exception as db_err:
                                 self.logger.warning(f"⚠️ 실거래 매도 기록 저장 실패: {db_err}")
 
+                        # fund_manager 투자금 회수
+                        if self.decision_engine and self.decision_engine.fund_manager:
+                            sell_amount = float(order.price) * int(order.quantity)
+                            self.decision_engine.fund_manager.release_investment(sell_amount)
+
                         self.logger.info(f"✅ {trading_stock.stock_code} 매도 완료 (수익률: {profit_rate:.2f}%)")
-                        
+
                         # 매도 완료 후 즉시 재거래 준비 (COMPLETED 상태 유지)
                         if self.enable_re_trading:
                             self.logger.info(f"🔄 {trading_stock.stock_code} 즉시 재거래 준비 완료 (COMPLETED 상태 유지)")
-                        
+
                     elif order.status in [OrderStatus.CANCELLED, OrderStatus.FAILED]:
                         # 매도 실패 - 매도 후보로 되돌림
                         with self._lock:
                             trading_stock.clear_current_order()
                             self._change_stock_state(
-                                trading_stock.stock_code, 
-                                StockState.SELL_CANDIDATE, 
+                                trading_stock.stock_code,
+                                StockState.SELL_CANDIDATE,
                                 f"매도 실패: {order.status.value}"
                             )
                     
@@ -952,8 +957,13 @@ class TradingStockManager:
                             except Exception as db_err:
                                 self.logger.warning(f"⚠️ 실거래 매도 기록 저장 실패: {db_err}")
 
+                        # fund_manager 투자금 회수
+                        if self.decision_engine and self.decision_engine.fund_manager:
+                            sell_amount = float(order.price) * int(order.quantity)
+                            self.decision_engine.fund_manager.release_investment(sell_amount)
+
                         self.logger.info(f"✅ 매도 체결 처리 완료 (콜백): {trading_stock.stock_code} (수익률: {profit_rate:.2f}%)")
-                        
+
                         # 매도 완료 후 즉시 재거래 준비 (COMPLETED 상태 유지)
                         if self.enable_re_trading:
                             self.logger.info(f"🔄 {trading_stock.stock_code} 즉시 재거래 준비 완료 (COMPLETED 상태 유지)")

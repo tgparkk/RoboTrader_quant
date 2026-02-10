@@ -57,6 +57,9 @@ class TradingDecisionEngine:
             paper_trading=self.is_virtual_mode
         )
 
+        # 자금 관리자 (나중에 main에서 설정)
+        self.fund_manager = None
+
         # 리밸런싱 진행 중 플래그 (손절 일시 중단용)
         self.rebalancing_in_progress = False
 
@@ -544,6 +547,10 @@ class TradingDecisionEngine:
                             })
                     finally:
                         # ⚠️ 매도 성공 시 반드시 실행되어야 하는 정리 작업
+                        # fund_manager 투자금 회수
+                        if self.fund_manager and quantity and current_price:
+                            sell_amount = float(current_price) * int(quantity)
+                            self.fund_manager.release_investment(sell_amount)
                         # 가상 포지션 정보 정리
                         trading_stock.clear_virtual_buy_info()
                         # 포지션 정리 (중복 매도 방지)

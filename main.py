@@ -100,6 +100,7 @@ class DayTradingBot:
         self.trading_manager.set_decision_engine(self.decision_engine)
 
         self.fund_manager = FundManager()  # 🆕 자금 관리자
+        self.decision_engine.fund_manager = self.fund_manager  # 매도 시 투자금 회수용
         self.quant_screening_service = QuantScreeningService(
             self.api_manager, self.db_manager, self.candidate_selector
         )
