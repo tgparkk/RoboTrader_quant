@@ -512,13 +512,18 @@ class TradingStockManager:
                     order.stock_code == trading_stock.stock_code):
                     
                     if order.status == OrderStatus.FILLED:
+                        # 매수가 캡처 (clear_position 전에)
+                        cached_buy_price = None
+                        if trading_stock.position and trading_stock.position.avg_price:
+                            cached_buy_price = trading_stock.position.avg_price
+
                         # 매도 완료 - 완료 상태로 변경
                         with self._lock:
                             trading_stock.clear_position()
                             trading_stock.clear_current_order()
                             self._change_stock_state(
-                                trading_stock.stock_code, 
-                                StockState.COMPLETED, 
+                                trading_stock.stock_code,
+                                StockState.COMPLETED,
                                 f"매도 완료: {order.quantity}주 @{order.price:,.0f}원"
                             )
                         # 실거래 매도 기록 저장 (실전매매 모드에서만)
@@ -529,10 +534,8 @@ class TradingStockManager:
                                 db = DatabaseManager()
                                 buy_id = db.get_last_open_real_buy(trading_stock.stock_code)
 
-                                buy_price = None
-                                if buy_id and trading_stock.position and trading_stock.position.avg_price:
-                                    buy_price = trading_stock.position.avg_price
-                                    profit_rate = ((float(order.price) - buy_price) / buy_price) * 100
+                                if buy_id and cached_buy_price:
+                                    profit_rate = ((float(order.price) - cached_buy_price) / cached_buy_price) * 100
 
                                 db.save_real_sell(
                                     stock_code=trading_stock.stock_code,
@@ -946,15 +949,20 @@ class TradingStockManager:
                         # 🆕 체결 처리 플래그 설정
                         trading_stock.order_processed = True
                         trading_stock.is_selling = False  # 매도 완료
-                        
+
+                        # 매수가 캡처 (clear_position 전에)
+                        cached_buy_price = None
+                        if trading_stock.position and trading_stock.position.avg_price:
+                            cached_buy_price = trading_stock.position.avg_price
+
                         trading_stock.clear_position()
                         trading_stock.clear_current_order()
                         self._change_stock_state(
-                            trading_stock.stock_code, 
-                            StockState.COMPLETED, 
+                            trading_stock.stock_code,
+                            StockState.COMPLETED,
                             f"매도 체결 (콜백): {order.quantity}주 @{order.price:,.0f}원"
                         )
-                        
+
                         # 실거래 매도 기록 저장 (실전매매 모드에서만)
                         profit_rate = 0.0
                         if not (self.decision_engine and self.decision_engine.is_virtual_mode):
@@ -963,10 +971,8 @@ class TradingStockManager:
                                 db = DatabaseManager()
                                 buy_id = db.get_last_open_real_buy(trading_stock.stock_code)
 
-                                buy_price = None
-                                if buy_id and trading_stock.position and trading_stock.position.avg_price:
-                                    buy_price = trading_stock.position.avg_price
-                                    profit_rate = ((float(order.price) - buy_price) / buy_price) * 100
+                                if buy_id and cached_buy_price:
+                                    profit_rate = ((float(order.price) - cached_buy_price) / cached_buy_price) * 100
 
                                 db.save_real_sell(
                                     stock_code=trading_stock.stock_code,
