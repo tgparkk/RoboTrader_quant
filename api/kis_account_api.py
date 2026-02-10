@@ -31,7 +31,7 @@ def get_inquire_balance(tr_cont: str = "", FK100: str = "", NK100: str = "") -> 
         "ACNT_PRDT_CD": tr_env.my_prod,      # 계좌상품코드 2자리
         "AFHR_FLPR_YN": "N",                 # 시간외단일가여부
         "OFL_YN": "",                        # 오프라인여부
-        "INQR_DVSN": "02",                   # 조회구분 02:종목별
+        "INQR_DVSN": "01",                   # 조회구분 01:소유분 — "02"는 OPSQ2001 오류 발생
         "UNPR_DVSN": "01",                   # 단가구분 01:기본값
         "FUND_STTL_ICLD_YN": "N",            # 펀드결제분포함여부
         "FNCG_AMT_AUTO_RDPT_YN": "N",

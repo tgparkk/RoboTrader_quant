@@ -290,14 +290,25 @@ class RebalancingExecutor:
             total_planned_buy = sum(item.get('target_amount', 0) for item in buy_list)
             if total_planned_buy > 0:
                 try:
-                    account_info = self.api_manager.get_account_balance()
-                    if account_info:
-                        actual_cash = account_info.available_amount
+                    actual_cash = None
+
+                    # fund_manager가 있으면 내부 자금 관리 기준 사용 (가상/실전 모두 정확)
+                    if self.fund_manager:
+                        actual_cash = self.fund_manager.available_funds
+                        logger.info(f"💰 fund_manager 가용잔고: {actual_cash:,.0f}원")
+                    else:
+                        # fund_manager 없으면 실제 API 조회 (fallback)
+                        account_info = self.api_manager.get_account_balance()
+                        if account_info:
+                            actual_cash = account_info.available_amount
+                            logger.info(f"💰 API 가용잔고: {actual_cash:,.0f}원")
+
+                    if actual_cash is not None:
                         safe_cash = actual_cash * 0.95  # 5% 안전마진
                         if safe_cash < total_planned_buy:
                             scale = safe_cash / total_planned_buy
                             logger.warning(
-                                f"⚠️ 가용잔고 부족: 실제 {actual_cash:,.0f}원 (안전 {safe_cash:,.0f}원) < "
+                                f"⚠️ 가용잔고 부족: {actual_cash:,.0f}원 (안전 {safe_cash:,.0f}원) < "
                                 f"계획 {total_planned_buy:,.0f}원 → {scale*100:.1f}%로 축소"
                             )
                             for item in buy_list:

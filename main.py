@@ -124,7 +124,8 @@ class DayTradingBot:
             api_manager=self.api_manager,
             db_manager=self.db_manager,
             order_manager=self.order_manager,
-            telegram=self.telegram
+            telegram=self.telegram,
+            fund_manager=self.fund_manager
         )
         self.rebalancing_service.rebalancing_period = RebalancingPeriod.DAILY  # 일간 리밸런싱
         self._last_rebalancing_date = None  # 마지막 리밸런싱 실행 날짜

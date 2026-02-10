@@ -26,11 +26,12 @@ class RebalancingPeriod(Enum):
 class QuantRebalancingService:
     """퀀트 리밸런싱 서비스"""
     
-    def __init__(self, api_manager, db_manager, order_manager=None, telegram=None):
+    def __init__(self, api_manager, db_manager, order_manager=None, telegram=None, fund_manager=None):
         self.api_manager = api_manager
         self.db_manager = db_manager
         self.order_manager = order_manager
         self.telegram = telegram
+        self.fund_manager = fund_manager
         self.logger = setup_logger(__name__)
 
         # 리밸런싱 설정
@@ -498,9 +499,11 @@ class QuantRebalancingService:
                 if current_price_data:
                     holdings_value += current_price_data.current_price * holding['quantity']
             
-            # 현금 잔고 (간단화: 계좌 잔고 조회)
-            # TODO: 실제 계좌 잔고 조회
-            cash = 10_000_000  # 임시값
+            # 현금 잔고: fund_manager가 있으면 실제 가용잔고 사용
+            if self.fund_manager:
+                cash = self.fund_manager.available_funds
+            else:
+                cash = 10_000_000  # fallback 기본값
             
             return holdings_value + cash
             
