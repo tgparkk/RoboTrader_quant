@@ -303,13 +303,23 @@ class QuantRebalancingService:
                     else:
                         # 포트폴리오 밖이지만 점수가 좋아서 유지되는 종목
                         if factors_data:
+                            # 동일한 calculator로 목표 익절/손절률 계산 (하드코딩 제거)
+                            factor_rank = factors_data.get('factor_rank', 999)
+                            total_score = factors_data.get('total_score', 0)
+                            momentum_score = factors_data.get('momentum_score', 50)
+                            target_profit, stop_loss = self.profit_loss_calculator.calculate(
+                                rank=factor_rank,
+                                total_score=total_score,
+                                momentum_score=momentum_score
+                            )
+
                             keep_list.append({
                                 'stock_code': stock_code,
                                 'stock_name': holding.get('stock_name', ''),
-                                'rank': factors_data.get('factor_rank', 999),
-                                'total_score': factors_data.get('total_score', 0),
-                                'target_profit_rate': 0.05,  # 기본값 (5% 익절)
-                                'stop_loss_rate': 0.05  # 기본값 (5% 손절) - 양수로 수정
+                                'rank': factor_rank,
+                                'total_score': total_score,
+                                'target_profit_rate': target_profit,
+                                'stop_loss_rate': stop_loss
                             })
             
             self.logger.info(

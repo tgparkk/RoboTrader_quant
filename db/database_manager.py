@@ -1627,6 +1627,55 @@ class DatabaseManager:
             self.logger.error(f"오늘 손절 종목 조회 실패: {e}")
             return []
 
+    def get_today_profit_taking_stocks(self, target_date: str = None, include_real: bool = False) -> List[str]:
+        """
+        오늘 익절한 종목 코드 리스트 조회 (리밸런싱 재매수 차단용)
+
+        Args:
+            target_date: 조회 날짜 (YYYY-MM-DD 형식, None이면 오늘)
+            include_real: True이면 real_trading_records도 함께 조회
+
+        Returns:
+            익절한 종목 코드 리스트
+        """
+        try:
+            if target_date is None:
+                target_date = now_kst().strftime('%Y-%m-%d')
+
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # 가상 매매에서 오늘 익절 매도한 종목 조회
+                cursor.execute('''
+                    SELECT DISTINCT stock_code
+                    FROM virtual_trading_records
+                    WHERE action = 'SELL'
+                      AND DATE(datetime(timestamp, 'unixepoch', 'localtime')) = ?
+                      AND (reason LIKE '%익절%' OR reason LIKE '%profit%')
+                ''', (target_date,))
+
+                result = cursor.fetchall()
+                profit_taking_stocks = set(row[0] for row in result)
+
+                # 실전 매매에서도 익절 종목 조회
+                if include_real:
+                    cursor.execute('''
+                        SELECT DISTINCT stock_code
+                        FROM real_trading_records
+                        WHERE action = 'SELL'
+                          AND DATE(timestamp) = ?
+                          AND (reason LIKE '%익절%' OR reason LIKE '%profit%')
+                    ''', (target_date,))
+
+                    real_result = cursor.fetchall()
+                    profit_taking_stocks.update(row[0] for row in real_result)
+
+                return list(profit_taking_stocks)
+
+        except Exception as e:
+            self.logger.error(f"오늘 익절 종목 조회 실패: {e}")
+            return []
+
     def backup_database(self, max_backups: int = 7) -> Optional[str]:
         """DB 파일 백업 (장 시작 전 호출)
 

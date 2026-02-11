@@ -55,6 +55,11 @@ class OrderWaitHelper:
                     if not order_id:
                         continue
 
+                    # 가상매매(VT-)는 즉시 체결이므로 API 상태 조회 불필요
+                    if order_id.startswith('VT-'):
+                        result['filled_quantity'] = result.get('quantity', 0)
+                        continue
+
                     # 주문 상태 확인
                     status_data = self.api_manager.get_order_status(order_id)
                     if status_data:
@@ -81,6 +86,11 @@ class OrderWaitHelper:
                 if not result.get('filled_quantity'):
                     order_id = result.get('order_id')
                     stock_code = result['stock_code']
+
+                    # 가상매매(VT-)는 취소 API 호출 불필요
+                    if order_id and order_id.startswith('VT-'):
+                        continue
+
                     logger.warning(f"⚠️ {stock_code} 매도 주문 미체결 — 자동 취소 시도 (주문번호: {order_id})")
                     try:
                         cancel_result = self.api_manager.cancel_order(

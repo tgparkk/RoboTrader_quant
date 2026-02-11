@@ -466,12 +466,13 @@ class OrderManager:
             if not self.completed_orders:
                 return
             
-            # 최근 10분 이내 완료된 주문들만 확인
+            # 최근 10분 이내 완료된 주문들만 확인 (가상매매 VT- 주문 제외)
             recent_completed = [
                 order for order in self.completed_orders[-10:]  # 최근 10건만
                 if (current_time - order.timestamp).total_seconds() <= 600  # 10분 이내
                 and order.status == OrderStatus.FILLED  # 체결로 처리된 것만
                 and order.order_type == OrderType.BUY  # 매수 주문만 (매도는 즉시 확인됨)
+                and not order.order_id.startswith('VT-')  # 가상매매는 즉시 체결이므로 확인 불필요
             ]
             
             if not recent_completed:
@@ -543,9 +544,13 @@ class OrderManager:
         try:
             if order_id not in self.pending_orders:
                 return
-            
+
             order = self.pending_orders[order_id]
-            
+
+            # 가상매매(VT-)는 즉시 체결이므로 API 상태 조회 불필요
+            if order.order_id.startswith('VT-'):
+                return
+
             # API 호출을 별도 스레드에서 실행
             loop = asyncio.get_event_loop()
             status_data = await loop.run_in_executor(
