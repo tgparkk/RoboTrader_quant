@@ -8,3 +8,6 @@ pytz
 python-telegram-bot
 PyYAML
 matplotlib
+finance-datareader
+pykrx
+yfinance

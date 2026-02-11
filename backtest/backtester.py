@@ -2,10 +2,10 @@
 DB 기반 백테스터 구현
 
 일봉 데이터(daily_prices)와 퀀트 포트폴리오(quant_portfolio) 기반 백테스트
-- 매수: 당일 시가
-- 매도: 당일 종가
-- 손익절: 종가 기준 체크
+- 매수: 당일 시가 (가격 검증 포함)
+- 손익절: 고가/저가 기반 장중 시뮬레이션
 - 리밸런싱: 매일 09:05 실행 가정
+- 라이브 규칙: 재매수 차단, 가격 검증, 리밸런싱 중 손절 중단
 """
 import sqlite3
 import pandas as pd
@@ -53,6 +53,9 @@ class Backtester:
         self.daily_prices_cache: Dict[str, pd.DataFrame] = {}
         self.portfolio_cache: Dict[str, List[Dict]] = {}
         self.factors_cache: Dict[str, Dict[str, Dict]] = {}
+        # 라이브 규칙용 상태
+        self._today_stop_profit_sold: set = set()  # 당일 손익절 매도 종목 (재매수 차단)
+        self._today_rebalancing_bought: set = set()  # 당일 리밸런싱 매수 종목 (손절 스킵)
 
     def backtest(self, start_date: str, end_date: str) -> BacktestResult:
         """
@@ -89,10 +92,14 @@ class Backtester:
         # 일별 시뮬레이션
         prev_total_value = self.params.initial_capital
         for i, date in enumerate(trading_days):
+            # 일별 상태 초기화
+            self._today_stop_profit_sold = set()
+            self._today_rebalancing_bought = set()
+
             # 1. 리밸런싱 실행 (09:05 가정)
             self._execute_rebalancing(date)
 
-            # 2. 손익절 체크 (종가 기준)
+            # 2. 손익절 체크 (고가/저가 기반)
             self._check_stop_profit_loss(date)
 
             # 3. 일별 스냅샷 기록
@@ -317,14 +324,25 @@ class Backtester:
         current_codes = set(self.positions.keys())
         buy_candidates = []
 
+        # KOSPI 변동률 조회 (시장 대비 상대강도 검증용)
+        kospi_change = self._get_kospi_change(date)
+
         for item in target_portfolio:
             stock_code = item['stock_code']
             if stock_code in current_codes:
                 continue  # 이미 보유
 
+            # [라이브 규칙] 당일 손익절 종목 재매수 차단
+            if stock_code in self._today_stop_profit_sold:
+                continue
+
             # 가격 데이터 확인
             price_data = self._get_daily_price(stock_code, date)
             if not price_data or price_data['open'] <= 0:
+                continue
+
+            # [라이브 규칙] 매수가격 검증 (2단계)
+            if not self._validate_buy_price(stock_code, price_data['open'], date, kospi_change):
                 continue
 
             buy_candidates.append(item)
@@ -381,6 +399,8 @@ class Backtester:
                     total_score=item['total_score'],
                     factor_rank=item['rank']
                 )
+                # [라이브 규칙] 리밸런싱 매수 종목 추적 (당일 손절 스킵)
+                self._today_rebalancing_bought.add(stock_code)
 
     def _execute_buy(self, stock_code: str, stock_name: str, date: str,
                      buy_price: float, quantity: int, target_profit_rate: float,
@@ -422,19 +442,24 @@ class Backtester:
 
         logger.debug(f"[{date}] 매수: {stock_code} {quantity}주 @ {buy_price:,.0f}원")
 
-    def _execute_sell(self, stock_code: str, date: str, reason: str):
-        """매도 실행"""
+    def _execute_sell(self, stock_code: str, date: str, reason: str,
+                      sell_price: float = None):
+        """매도 실행
+
+        Args:
+            sell_price: 지정 매도가 (None이면 종가 사용)
+        """
         if stock_code not in self.positions:
             return
 
         position = self.positions[stock_code]
 
-        # 종가로 매도
-        price_data = self._get_daily_price(stock_code, date)
-        if not price_data:
-            return
+        if sell_price is None:
+            price_data = self._get_daily_price(stock_code, date)
+            if not price_data:
+                return
+            sell_price = price_data['close']
 
-        sell_price = price_data['close']
         amount = sell_price * position.quantity
         trading_cost = amount * self.params.trading_cost_rate / 2  # 매도 비용
 
@@ -467,26 +492,138 @@ class Backtester:
         logger.debug(f"[{date}] 매도: {stock_code} {position.quantity}주 @ {sell_price:,.0f}원 ({profit_rate:.1%})")
 
     def _check_stop_profit_loss(self, date: str):
-        """손익절 체크 (종가 기준)"""
+        """
+        손익절 체크 (고가/저가 기반 장중 시뮬레이션)
+
+        라이브 시스템은 1분마다 현재가를 체크하여 목표가/손절가 도달 시 즉시 매도.
+        일봉 시뮬레이션에서는 고가/저가로 도달 여부를 판단하고, 목표가/손절가에서 체결.
+        """
         for stock_code, position in list(self.positions.items()):
             price_data = self._get_daily_price(stock_code, date)
             if not price_data:
                 continue
 
-            current_price = price_data['close']
+            high = price_data['high']
+            low = price_data['low']
+            open_price = price_data['open']
+            buy_price = position.buy_price
 
-            # 익절 체크
-            if position.should_take_profit(current_price):
-                profit_rate = position.calculate_profit_rate(current_price)
+            profit_target_price = buy_price * (1 + position.target_profit_rate)
+            stop_loss_price = buy_price * (1 - position.stop_loss_rate)
+
+            hit_profit = high >= profit_target_price
+            hit_loss = low <= stop_loss_price
+
+            # [라이브 규칙] 리밸런싱 매수 당일에는 손절 스킵 (익절만 허용)
+            is_rebalancing_day_buy = stock_code in self._today_rebalancing_bought
+            if is_rebalancing_day_buy:
+                hit_loss = False
+
+            if hit_profit and hit_loss:
+                # 양쪽 다 도달: 시가 방향으로 판단
+                if open_price >= buy_price:
+                    # 시가가 매수가 이상 → 익절 먼저
+                    profit_rate = position.calculate_profit_rate(profit_target_price)
+                    reason = f"목표 익절 도달 ({profit_rate:.1%} >= {position.target_profit_rate:.1%})"
+                    self._execute_sell(stock_code, date, reason, sell_price=profit_target_price)
+                else:
+                    # 시가가 매수가 미만 → 손절 먼저
+                    profit_rate = position.calculate_profit_rate(stop_loss_price)
+                    reason = f"손절 실행 ({profit_rate:.1%} <= -{position.stop_loss_rate:.1%})"
+                    self._execute_sell(stock_code, date, reason, sell_price=stop_loss_price)
+                    self._today_stop_profit_sold.add(stock_code)
+            elif hit_profit:
+                profit_rate = position.calculate_profit_rate(profit_target_price)
                 reason = f"목표 익절 도달 ({profit_rate:.1%} >= {position.target_profit_rate:.1%})"
-                self._execute_sell(stock_code, date, reason)
-                continue
-
-            # 손절 체크
-            if position.should_stop_loss(current_price):
-                profit_rate = position.calculate_profit_rate(current_price)
+                self._execute_sell(stock_code, date, reason, sell_price=profit_target_price)
+                self._today_stop_profit_sold.add(stock_code)
+            elif hit_loss:
+                profit_rate = position.calculate_profit_rate(stop_loss_price)
                 reason = f"손절 실행 ({profit_rate:.1%} <= -{position.stop_loss_rate:.1%})"
-                self._execute_sell(stock_code, date, reason)
+                self._execute_sell(stock_code, date, reason, sell_price=stop_loss_price)
+                self._today_stop_profit_sold.add(stock_code)
+
+    def _validate_buy_price(self, stock_code: str, buy_price: float,
+                            date: str, kospi_change: Optional[float]) -> bool:
+        """
+        매수가격 검증 (rebalancing_executor.py:119-178과 동일한 2단계 검증)
+
+        1단계: 절대 가격 밴드 (전일저가 -5% ~ 전일종가 +10%)
+        2단계: 시장 대비 상대강도 (-5%p 이하 차단)
+        """
+        # 전일 데이터 조회
+        prev_data = self._get_previous_day_price(stock_code, date)
+        if not prev_data:
+            return True  # 전일 데이터 없으면 통과
+
+        prev_close = prev_data['close']
+        prev_low = prev_data['low']
+
+        # 1단계: 절대 가격 밴드
+        lower_band = prev_low * 0.95
+        upper_band = prev_close * 1.10
+
+        if buy_price < lower_band:
+            return False  # 급락 차단
+
+        if buy_price > upper_band:
+            return False  # 과열 차단
+
+        # 2단계: 시장 대비 상대강도
+        if kospi_change is not None and prev_close > 0:
+            stock_change = (buy_price - prev_close) / prev_close
+            relative_change = (stock_change - kospi_change) * 100  # %p
+
+            if relative_change < -5.0:
+                return False  # 시장 대비 약세 차단
+
+        return True
+
+    def _get_previous_day_price(self, stock_code: str, date: str) -> Optional[Dict]:
+        """전일 가격 데이터 조회"""
+        if stock_code not in self.daily_prices_cache:
+            return None
+
+        df = self.daily_prices_cache[stock_code]
+        dates = df.index.tolist()
+
+        try:
+            idx = dates.index(date)
+            if idx <= 0:
+                return None
+            prev_date = dates[idx - 1]
+            row = df.loc[prev_date]
+            return {
+                'open': float(row['open']),
+                'high': float(row['high']),
+                'low': float(row['low']),
+                'close': float(row['close']),
+            }
+        except (ValueError, KeyError):
+            return None
+
+    def _get_kospi_change(self, date: str) -> Optional[float]:
+        """KOSPI 당일 변동률 조회"""
+        if 'KS11' not in self.daily_prices_cache:
+            return None
+
+        df = self.daily_prices_cache['KS11']
+        dates = df.index.tolist()
+
+        try:
+            idx = dates.index(date)
+            if idx <= 0:
+                return None
+
+            today_open = float(df.loc[date, 'open'])
+            prev_close = float(df.loc[dates[idx - 1], 'close'])
+
+            if prev_close > 0:
+                return (today_open - prev_close) / prev_close
+        except (ValueError, KeyError):
+            pass
+
+        return None
 
     def _close_all_positions(self, date: str):
         """모든 포지션 청산 (백테스트 종료)"""

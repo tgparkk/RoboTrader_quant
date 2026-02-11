@@ -28,15 +28,15 @@ class BacktestParams:
     """백테스트 파라미터"""
     # 기본 설정
     initial_capital: float = 50_000_000  # 초기 자본 (5천만원)
-    portfolio_size: int = 15  # 포트폴리오 종목 수
+    portfolio_size: int = 10  # 포트폴리오 종목 수 (라이브 설정과 일치)
 
     # 손익절 파라미터
     target_profit_rate: float = 0.15  # 익절률 (15%)
     stop_loss_rate: float = 0.10  # 손절률 (10%)
 
-    # 리밸런싱 기준
-    hard_stop_score: float = 70.0  # 긴급 매도 점수
-    soft_stop_score: float = 72.0  # 조건부 매도 점수
+    # 리밸런싱 기준 (라이브 설정과 일치)
+    hard_stop_score: float = 65.0  # 긴급 매도 점수
+    soft_stop_score: float = 67.0  # 조건부 매도 점수
     soft_stop_rank: int = 30  # 조건부 매도 순위
     safe_score: float = 75.0  # 안전 유지 점수
     safe_rank: int = 25  # 안전 유지 순위
@@ -44,8 +44,8 @@ class BacktestParams:
     # 동적 목표율 사용 여부
     use_dynamic_targets: bool = True
 
-    # 거래 비용
-    trading_cost_rate: float = 0.001  # 0.1% (매수+매도 합계)
+    # 거래 비용 (한국 실제: 위탁수수료 ~0.015% + 거래세 0.23%)
+    trading_cost_rate: float = 0.0025  # 0.25% (매수+매도 합계)
 
     def to_dict(self) -> Dict[str, Any]:
         """딕셔너리로 변환"""
