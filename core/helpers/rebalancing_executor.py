@@ -378,8 +378,7 @@ class RebalancingExecutor:
                     stop_loss_rate = buy_item.get('stop_loss_rate', 0.10)
 
                     # FundManager 자금 예약 (Race condition 방지)
-                    # 시장가 주문 슬리피지 마진 3% 포함하여 예약
-                    buy_amount = current_price * target_quantity * 1.03
+                    buy_amount = current_price * target_quantity
                     reserve_order_id = f"REB-{stock_code}-{int(now_kst().timestamp())}"
                     reserved = False
                     if self.fund_manager:

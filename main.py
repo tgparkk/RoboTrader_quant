@@ -380,8 +380,8 @@ class DayTradingBot:
                     except Exception as e:
                         self.logger.error(f"❌ 가상 매수 처리 오류: {e}")
                 else:
-                    # [실전매매 모드] — 시장가 슬리피지 마진 3% 포함
-                    buy_amount = buy_info['buy_price'] * buy_info['quantity'] * 1.03
+                    # [실전매매 모드]
+                    buy_amount = buy_info['buy_price'] * buy_info['quantity']
                     reserve_order_id = f"PRE-{stock_code}-{int(now_kst().timestamp())}"
                     reserved = self.fund_manager.reserve_funds(reserve_order_id, buy_amount)
                     if not reserved:
