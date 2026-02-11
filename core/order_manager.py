@@ -667,27 +667,40 @@ class OrderManager:
                     # 🆕 실전 매매 시 DB에 거래 기록 저장
                     await self._save_real_trade_to_db(order, filled_price)
 
-                    # 🆕 TradingStockManager에 즉시 알림 (콜백)
+                    # 🆕 TradingStockManager에 즉시 알림 (콜백) — 최대 3회 재시도
                     # 체결 콜백 실패 시 포지션 미등록 → 손절 모니터링 누락 위험
                     if self.trading_manager:
-                        try:
-                            self.logger.info(f"📞 TradingStockManager에 체결 알림: {order_id}")
-                            await self.trading_manager.on_order_filled(order)
-                        except Exception as callback_err:
+                        callback_success = False
+                        max_retries = 3
+                        for attempt in range(1, max_retries + 1):
+                            try:
+                                self.logger.info(f"📞 TradingStockManager에 체결 알림: {order_id} (시도 {attempt}/{max_retries})")
+                                await self.trading_manager.on_order_filled(order)
+                                callback_success = True
+                                break
+                            except Exception as callback_err:
+                                self.logger.error(
+                                    f"체결 콜백 실패 (시도 {attempt}/{max_retries}): "
+                                    f"order_id={order_id}, stock={order.stock_code}, error={callback_err}"
+                                )
+                                if attempt < max_retries:
+                                    await asyncio.sleep(1)  # 1초 대기 후 재시도
+
+                        if not callback_success:
                             self.logger.critical(
-                                f"🚨 체결 콜백 실패 - 포지션 미등록 위험! "
+                                f"🚨 체결 콜백 {max_retries}회 모두 실패 - 포지션 미등록 위험! "
                                 f"order_id={order_id}, stock={order.stock_code}, "
                                 f"type={order.order_type.value}, qty={order.quantity}, "
-                                f"price={filled_price:,.0f}원, error={callback_err}"
+                                f"price={filled_price:,.0f}원"
                             )
                             # 텔레그램 긴급 알림 (포지션 수동 확인 필요)
                             if self.telegram:
                                 try:
                                     await self.telegram.notify_error(
-                                        f"체결 콜백 실패 - 수동 확인 필요",
+                                        f"체결 콜백 {max_retries}회 실패 - 수동 확인 필요",
                                         Exception(f"{order.stock_code} {order.order_type.value} "
                                                   f"{order.quantity}주 @{filled_price:,.0f}원 체결됨, "
-                                                  f"but 포지션 미등록: {callback_err}")
+                                                  f"but 포지션 미등록")
                                     )
                                 except Exception:
                                     pass

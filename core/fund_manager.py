@@ -138,13 +138,26 @@ class FundManager:
             # 투자 금액으로 이동
             self.invested_funds += actual_amount
             
-            # 차액은 가용 자금으로 반환
+            # 차액 정산: 예약액 > 실제 체결액이면 환불, 반대면 추가 차감
             refund = reserved_amount - actual_amount
-            if refund > 0:
+            if refund >= 0:
                 self.available_funds += refund
-            
+            else:
+                # 시장가 주문으로 예약보다 비싸게 체결된 경우 (슬리피지)
+                deficit = abs(refund)
+                if self.available_funds < deficit:
+                    self.logger.error(
+                        f"🚨 슬리피지 초과: {order_id} - 부족분 {deficit - self.available_funds:,.0f}원 "
+                        f"(가용 {self.available_funds:,.0f}원 < 초과분 {deficit:,.0f}원)"
+                    )
+                self.available_funds = max(0, self.available_funds - deficit)
+                self.logger.warning(
+                    f"⚠️ 슬리피지 발생: {order_id} - 예약 {reserved_amount:,.0f}원, "
+                    f"실제 {actual_amount:,.0f}원 (초과 {deficit:,.0f}원 차감, 가용: {self.available_funds:,.0f}원)"
+                )
+
             self.logger.info(f"💰 주문 체결: {order_id} - 투자: {actual_amount:,.0f}원, "
-                           f"환불: {refund:,.0f}원")
+                           f"차액: {refund:+,.0f}원 (가용: {self.available_funds:,.0f}원)")
     
     def cancel_order(self, order_id: str):
         """

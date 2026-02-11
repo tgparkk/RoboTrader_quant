@@ -113,11 +113,15 @@ class StateRestorationHelper:
             logger.error(f"❌ 종목 복원 실패: {e}")
 
     async def _restore_holdings_from_db(self):
-        """가상매매 모드: DB에서 보유 종목 복원"""
+        """DB에서 보유 종목 복원 (모드에 따라 테이블 선택)"""
         try:
-            holdings = self.db_manager.get_virtual_open_positions()
+            if self.is_paper_trading:
+                holdings = self.db_manager.get_virtual_open_positions()
+            else:
+                holdings = self.db_manager.get_real_open_positions()
+            mode_label = "가상매매" if self.is_paper_trading else "실전매매"
             if not holdings.empty:
-                logger.info(f"🔄 [가상매매] 보유 종목 {len(holdings)}개 복원 시작")
+                logger.info(f"🔄 [{mode_label}] 보유 종목 {len(holdings)}개 복원 시작")
                 holding_restored = 0
 
                 for _, holding in holdings.iterrows():
@@ -162,12 +166,12 @@ class StateRestorationHelper:
                                 f"손절가 {buy_price*(1-stop_loss_rate):,.0f}원"
                             )
 
-                logger.info(f"✅ [가상매매] 보유 종목 {holding_restored}/{len(holdings)}개 복원 완료")
+                logger.info(f"✅ [{mode_label}] 보유 종목 {holding_restored}/{len(holdings)}개 복원 완료")
             else:
-                logger.info("📊 [가상매매] 보유 종목 없음")
+                logger.info(f"📊 [{mode_label}] 보유 종목 없음")
 
         except Exception as holding_err:
-            logger.error(f"❌ [가상매매] 보유 종목 복원 실패: {holding_err}")
+            logger.error(f"❌ DB 보유 종목 복원 실패: {holding_err}")
 
     async def _restore_holdings_from_real_account(self):
         """실전매매 모드: 실제 계좌에서 보유 종목 조회 → DB 동기화 → 메모리 복원"""
@@ -190,8 +194,8 @@ class StateRestorationHelper:
             real_holdings = account_info.positions if account_info.positions else []
             logger.info(f"📊 [실전매매] 실제 계좌 보유 종목: {len(real_holdings)}개")
 
-            # 2. DB 보유 종목 조회
-            db_holdings = self.db_manager.get_virtual_open_positions()
+            # 2. DB 보유 종목 조회 (실전매매는 real_trading_records 테이블)
+            db_holdings = self.db_manager.get_real_open_positions()
             db_holdings_dict = {}
             if not db_holdings.empty:
                 for _, row in db_holdings.iterrows():

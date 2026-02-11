@@ -179,7 +179,27 @@ class DayTradingBot:
         try:
             self.logger.info("🚀 주식 단타 거래 시스템 초기화 시작")
 
-            # 0. 오늘 거래시간 정보 출력 (특수일 확인)
+            # 0-1. 실전매매 모드 확인 절차 (paper_trading=False일 때만)
+            if not self.config.paper_trading:
+                print("\n" + "=" * 60)
+                print("  실전매매 모드 확인")
+                print("=" * 60)
+                print(f"  매매 모드: 실전매매 (paper_trading=False)")
+                print(f"  시작 시각: {now_kst().strftime('%Y-%m-%d %H:%M:%S')}")
+                print("=" * 60)
+                try:
+                    confirm = input("  실전매매를 시작하시겠습니까? (yes/no): ").strip().lower()
+                except EOFError:
+                    # 비대화형 환경(배치 파일 등)에서는 자동 진행
+                    confirm = "yes"
+                    self.logger.info("비대화형 환경 감지 - 실전매매 자동 진행")
+                if confirm != "yes":
+                    self.logger.info("사용자가 실전매매를 취소했습니다.")
+                    print("  실전매매가 취소되었습니다.")
+                    return False
+                self.logger.info("실전매매 모드 확인 완료 - 사용자 승인됨")
+
+            # 0-2. 오늘 거래시간 정보 출력 (특수일 확인)
             today_info = MarketHours.get_today_info('KRX')
             self.logger.info(f"📅 오늘 거래시간 정보:\n{today_info}")
 
@@ -360,8 +380,8 @@ class DayTradingBot:
                     except Exception as e:
                         self.logger.error(f"❌ 가상 매수 처리 오류: {e}")
                 else:
-                    # [실전매매 모드]
-                    buy_amount = buy_info['buy_price'] * buy_info['quantity']
+                    # [실전매매 모드] — 시장가 슬리피지 마진 3% 포함
+                    buy_amount = buy_info['buy_price'] * buy_info['quantity'] * 1.03
                     reserve_order_id = f"PRE-{stock_code}-{int(now_kst().timestamp())}"
                     reserved = self.fund_manager.reserve_funds(reserve_order_id, buy_amount)
                     if not reserved:
