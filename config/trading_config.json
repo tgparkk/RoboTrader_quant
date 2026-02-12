@@ -37,6 +37,6 @@
     "level": "INFO",
     "file_retention_days": 30
   },
-  "paper_trading": true,
+  "paper_trading": false,
   "rebalancing_mode": true
 }

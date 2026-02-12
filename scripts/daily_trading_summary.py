@@ -2,9 +2,11 @@
 일일 매매 판단 현황 및 수익률 요약
 
 장 마감 후(15:30) 실행하여 오늘의 매매 내역과 수익률을 확인합니다.
+가상/실전 모드에 따라 적절한 테이블을 조회합니다.
 """
 import sys
 import os
+import json
 import sqlite3
 from datetime import datetime
 
@@ -14,13 +16,35 @@ sys.path.insert(0, project_root)
 from utils.korean_time import now_kst
 
 
+def _is_paper_trading() -> bool:
+    """trading_config.json에서 paper_trading 설정 읽기"""
+    config_path = os.path.join(project_root, 'config', 'trading_config.json')
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        return config.get('paper_trading', True)
+    except Exception:
+        return True  # 기본값: 가상매매
+
+
+def _get_table_and_date_expr(paper_trading: bool):
+    """모드에 따른 테이블명과 날짜 표현식 반환"""
+    if paper_trading:
+        return "virtual_trading_records", "datetime(timestamp, 'unixepoch', 'localtime')"
+    else:
+        return "real_trading_records", "timestamp"
+
+
 def print_today_trading_summary():
     """오늘의 매매 현황 요약"""
-    db_path = 'data/robotrader.db'
+    db_path = os.path.join(project_root, 'data', 'robotrader.db')
     today = now_kst().strftime('%Y-%m-%d')
+    paper_trading = _is_paper_trading()
+    table, dt_expr = _get_table_and_date_expr(paper_trading)
+    mode_label = "가상매매" if paper_trading else "실전매매"
 
     print("=" * 100)
-    print(f"📊 일일 매매 판단 현황 및 수익률 요약")
+    print(f"📊 일일 매매 판단 현황 및 수익률 요약 [{mode_label}]")
     print("=" * 100)
     print(f"날짜: {today}")
     print(f"생성 시각: {now_kst().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -37,14 +61,14 @@ def print_today_trading_summary():
         print()
 
         # 매수 내역
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT stock_code, stock_name, quantity, price,
                    (quantity * price) as total_amount,
                    target_profit_rate, stop_loss_rate,
-                   datetime(timestamp, 'unixepoch', 'localtime') as dt
-            FROM virtual_trading_records
+                   {dt_expr} as dt
+            FROM {table}
             WHERE action = 'BUY'
-              AND DATE(datetime(timestamp, 'unixepoch', 'localtime')) = ?
+              AND DATE({dt_expr}) = ?
             ORDER BY timestamp
         ''', (today,))
 
@@ -60,7 +84,10 @@ def print_today_trading_summary():
             total_buy_amount = 0
             for row in buy_records:
                 stock_code, stock_name, qty, buy_price, total_amt, target_profit, stop_loss, created_at = row
-                time_str = created_at.split()[1][:5] if ' ' in created_at else created_at[:5]
+                time_str = created_at.split()[1][:5] if created_at and ' ' in created_at else (created_at or '')[:5]
+
+                target_profit = target_profit or 0.15
+                stop_loss = stop_loss or 0.10
 
                 print(f"{time_str:<10} {stock_code:<10} {stock_name:<20} {qty:>8,} {buy_price:>12,.0f} "
                       f"{total_amt:>15,.0f} {target_profit*100:>9.1f}% {stop_loss*100:>9.1f}%")
@@ -75,14 +102,14 @@ def print_today_trading_summary():
             print()
 
         # 매도 내역
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT stock_code, stock_name, quantity, price,
                    (quantity * price) as total_amount,
                    profit_loss, profit_rate,
-                   datetime(timestamp, 'unixepoch', 'localtime') as dt
-            FROM virtual_trading_records
+                   {dt_expr} as dt
+            FROM {table}
             WHERE action = 'SELL'
-              AND DATE(datetime(timestamp, 'unixepoch', 'localtime')) = ?
+              AND DATE({dt_expr}) = ?
             ORDER BY timestamp
         ''', (today,))
 
@@ -102,8 +129,10 @@ def print_today_trading_summary():
 
             for row in sell_records:
                 stock_code, stock_name, qty, sell_price, total_amt, pl, pl_rate, created_at = row
-                time_str = created_at.split()[1][:5] if ' ' in created_at else created_at[:5]
+                time_str = created_at.split()[1][:5] if created_at and ' ' in created_at else (created_at or '')[:5]
 
+                pl = pl or 0
+                pl_rate = pl_rate or 0
                 pl_sign = "+" if pl >= 0 else ""
                 pl_color = "🟢" if pl >= 0 else "🔴"
 
@@ -133,7 +162,7 @@ def print_today_trading_summary():
         print("=" * 100)
         print()
 
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT
                 b.stock_code,
                 b.stock_name,
@@ -141,10 +170,10 @@ def print_today_trading_summary():
                 b.price as avg_buy_price,
                 b.target_profit_rate,
                 b.stop_loss_rate
-            FROM virtual_trading_records b
+            FROM {table} b
             WHERE b.action = 'BUY'
               AND NOT EXISTS (
-                SELECT 1 FROM virtual_trading_records s
+                SELECT 1 FROM {table} s
                 WHERE s.buy_record_id = b.id
                   AND s.action = 'SELL'
               )
@@ -152,6 +181,8 @@ def print_today_trading_summary():
         ''')
 
         holdings = cursor.fetchall()
+
+        total_unrealized_pl = 0
 
         if holdings:
             print(f"📦 보유 종목 ({len(holdings)}개)")
@@ -162,7 +193,6 @@ def print_today_trading_summary():
 
             total_buy_value = 0
             total_current_value = 0
-            total_unrealized_pl = 0
 
             for stock_code, stock_name, qty, avg_buy, target_profit, stop_loss in holdings:
                 # 최신 종가 조회
@@ -194,8 +224,9 @@ def print_today_trading_summary():
                 total_unrealized_pl += unrealized_pl
 
             print("-" * 120)
-            print(f"{'합계:':<50} {total_buy_value:>15,.0f} {'':<12} {total_current_value:>15,.0f} "
-                  f"{total_unrealized_pl:>15,.0f} {total_unrealized_pl/total_buy_value*100:>9.1f}%")
+            if total_buy_value > 0:
+                print(f"{'합계:':<50} {total_buy_value:>15,.0f} {'':<12} {total_current_value:>15,.0f} "
+                      f"{total_unrealized_pl:>15,.0f} {total_unrealized_pl/total_buy_value*100:>9.1f}%")
             print()
         else:
             print("📦 보유 종목: 없음")
@@ -208,13 +239,13 @@ def print_today_trading_summary():
         print()
 
         # 전체 매매 손익
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT
                 SUM(CASE WHEN action = 'SELL' THEN profit_loss ELSE 0 END) as total_realized_pl,
                 COUNT(CASE WHEN action = 'SELL' AND profit_loss > 0 THEN 1 END) as win_count,
                 COUNT(CASE WHEN action = 'SELL' AND profit_loss < 0 THEN 1 END) as loss_count,
                 COUNT(CASE WHEN action = 'SELL' THEN 1 END) as total_trades
-            FROM virtual_trading_records
+            FROM {table}
         ''')
 
         pl_row = cursor.fetchone()

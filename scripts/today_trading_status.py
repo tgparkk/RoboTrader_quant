@@ -4,9 +4,11 @@
 
 DB에 저장된 정확한 profit_loss, profit_rate를 사용하여
 오늘의 매매 내역과 손익을 조회합니다.
+가상/실전 모드에 따라 적절한 테이블을 조회합니다.
 """
 import sys
 import os
+import json
 import sqlite3
 
 # Windows 콘솔 인코딩 설정
@@ -19,6 +21,25 @@ sys.path.insert(0, project_root)
 from utils.korean_time import now_kst
 
 
+def _is_paper_trading() -> bool:
+    """trading_config.json에서 paper_trading 설정 읽기"""
+    config_path = os.path.join(project_root, 'config', 'trading_config.json')
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        return config.get('paper_trading', True)
+    except Exception:
+        return True  # 기본값: 가상매매
+
+
+def _get_table_and_date_expr(paper_trading: bool):
+    """모드에 따른 테이블명과 날짜 표현식 반환"""
+    if paper_trading:
+        return "virtual_trading_records", "datetime(timestamp, 'unixepoch', 'localtime')"
+    else:
+        return "real_trading_records", "timestamp"
+
+
 def get_today_status(target_date: str = None):
     """오늘(또는 지정일)의 매매 현황 조회"""
     db_path = os.path.join(project_root, 'data', 'robotrader.db')
@@ -26,17 +47,21 @@ def get_today_status(target_date: str = None):
     if target_date is None:
         target_date = now_kst().strftime('%Y-%m-%d')
 
+    paper_trading = _is_paper_trading()
+    table, dt_expr = _get_table_and_date_expr(paper_trading)
+    mode_label = "가상매매" if paper_trading else "실전매매"
+
     print(f"\n{'=' * 70}")
-    print(f"  {target_date} 매매 현황")
+    print(f"  {target_date} 매매 현황 [{mode_label}]")
     print(f"{'=' * 70}\n")
 
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
 
         # 1. 오늘 매도 내역 (DB에 저장된 정확한 손익 사용)
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT
-                datetime(s.timestamp, 'unixepoch', 'localtime') as trade_time,
+                {dt_expr} as trade_time,
                 s.stock_code,
                 s.stock_name,
                 s.quantity,
@@ -45,10 +70,10 @@ def get_today_status(target_date: str = None):
                 s.profit_loss,
                 s.profit_rate,
                 s.reason
-            FROM virtual_trading_records s
-            LEFT JOIN virtual_trading_records b ON s.buy_record_id = b.id
+            FROM {table} s
+            LEFT JOIN {table} b ON s.buy_record_id = b.id
             WHERE s.action = 'SELL'
-              AND DATE(datetime(s.timestamp, 'unixepoch', 'localtime')) = ?
+              AND DATE({dt_expr}) = ?
             ORDER BY s.timestamp
         ''', (target_date,))
 
@@ -61,7 +86,7 @@ def get_today_status(target_date: str = None):
             total_sell_amount = 0
 
             for row in sells:
-                time_str = row[0].split(' ')[1][:5] if row[0] else ''
+                time_str = row[0].split(' ')[1][:5] if row[0] and ' ' in row[0] else ''
                 code = row[1]
                 name = row[2] or ''
                 qty = row[3]
@@ -98,9 +123,9 @@ def get_today_status(target_date: str = None):
         print()
 
         # 2. 오늘 매수 내역
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT
-                datetime(timestamp, 'unixepoch', 'localtime') as trade_time,
+                {dt_expr} as trade_time,
                 stock_code,
                 stock_name,
                 quantity,
@@ -108,9 +133,9 @@ def get_today_status(target_date: str = None):
                 target_profit_rate,
                 stop_loss_rate,
                 reason
-            FROM virtual_trading_records
+            FROM {table}
             WHERE action = 'BUY'
-              AND DATE(datetime(timestamp, 'unixepoch', 'localtime')) = ?
+              AND DATE({dt_expr}) = ?
             ORDER BY timestamp
         ''', (target_date,))
 
@@ -122,7 +147,7 @@ def get_today_status(target_date: str = None):
             total_buy_amount = 0
 
             for row in buys:
-                time_str = row[0].split(' ')[1][:5] if row[0] else ''
+                time_str = row[0].split(' ')[1][:5] if row[0] and ' ' in row[0] else ''
                 code = row[1]
                 name = row[2] or ''
                 qty = row[3]
@@ -145,12 +170,12 @@ def get_today_status(target_date: str = None):
         print()
 
         # 3. 현재 보유 종목 요약
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT COUNT(*), SUM(quantity * price)
-            FROM virtual_trading_records b
+            FROM {table} b
             WHERE b.action = 'BUY'
               AND NOT EXISTS (
-                SELECT 1 FROM virtual_trading_records s
+                SELECT 1 FROM {table} s
                 WHERE s.buy_record_id = b.id AND s.action = 'SELL'
               )
         ''')
