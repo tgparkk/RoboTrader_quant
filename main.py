@@ -179,25 +179,11 @@ class DayTradingBot:
         try:
             self.logger.info("🚀 주식 단타 거래 시스템 초기화 시작")
 
-            # 0-1. 실전매매 모드 확인 절차 (paper_trading=False일 때만)
+            # 0-1. 실전매매 모드 로깅 (자동 진행)
             if not self.config.paper_trading:
-                print("\n" + "=" * 60)
-                print("  실전매매 모드 확인")
-                print("=" * 60)
+                self.logger.info("💰 실전매매 모드로 자동 시작")
                 print(f"  매매 모드: 실전매매 (paper_trading=False)")
                 print(f"  시작 시각: {now_kst().strftime('%Y-%m-%d %H:%M:%S')}")
-                print("=" * 60)
-                try:
-                    confirm = input("  실전매매를 시작하시겠습니까? (yes/no): ").strip().lower()
-                except EOFError:
-                    # 비대화형 환경(배치 파일 등)에서는 자동 진행
-                    confirm = "yes"
-                    self.logger.info("비대화형 환경 감지 - 실전매매 자동 진행")
-                if confirm != "yes":
-                    self.logger.info("사용자가 실전매매를 취소했습니다.")
-                    print("  실전매매가 취소되었습니다.")
-                    return False
-                self.logger.info("실전매매 모드 확인 완료 - 사용자 승인됨")
 
             # 0-2. 오늘 거래시간 정보 출력 (특수일 확인)
             today_info = MarketHours.get_today_info('KRX')
@@ -487,8 +473,8 @@ class DayTradingBot:
                         await asyncio.sleep(60)
                         continue
                     
-                    # 09:05 시점 체크 (시초가 형성 후)
-                    if current_time.hour == 9 and current_time.minute == 5:
+                    # 09:05 시점 체크 (시초가 형성 후) — 09:05~09:30 범위 (재시작 대응)
+                    if current_time.hour == 9 and 5 <= current_time.minute <= 30:
                         # 하루에 한 번만 실행
                         today_str = current_time.strftime('%Y%m%d')
                         if self._last_rebalancing_date != today_str:

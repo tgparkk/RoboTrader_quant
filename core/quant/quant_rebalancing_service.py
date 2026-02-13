@@ -411,65 +411,83 @@ class QuantRebalancingService:
             self.logger.error(f"❌ 리밸런싱 실행 오류: {e}")
             return False
     
+    def _is_paper_trading(self) -> bool:
+        """trading_config.json의 paper_trading 설정 확인"""
+        try:
+            import json
+            from pathlib import Path
+            config_path = Path(__file__).parent.parent.parent / "config" / "trading_config.json"
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            return config.get('paper_trading', True)  # 기본값: 안전하게 가상매매
+        except Exception as e:
+            self.logger.warning(f"⚠️ trading_config.json 읽기 실패: {e}, 기본값 paper_trading=True")
+            return True
+
     def _get_current_holdings(self) -> List[Dict[str, Any]]:
         """
         현재 보유 종목 조회
         
-        가상 매매 모드: virtual_trading_records 테이블에서 조회
-        실제 매매 모드: 실제 계좌 API에서 조회
+        가상 매매 모드(paper_trading=true): virtual_trading_records 테이블에서 조회
+        실전 매매 모드(paper_trading=false): 실제 계좌 KIS API에서 조회
         """
         try:
-            # 가상 매매 모드 확인 (db_manager를 통해 확인)
-            # 가상 매매 모드일 때는 virtual_trading_records에서 조회
-            if self.db_manager:
-                try:
-                    import sqlite3
-                    with sqlite3.connect(self.db_manager.db_path) as conn:
-                        cursor = conn.cursor()
-                        
-                        # 종목코드별 보유 수량 집계
-                        query = '''
-                        SELECT 
-                            buy.stock_code,
-                            MAX(buy.stock_name) as stock_name,
-                            SUM(buy.quantity) - COALESCE(SUM(sell.quantity), 0) as holding_qty,
-                            SUM(buy.quantity * buy.price) / SUM(buy.quantity) as avg_buy_price
-                        FROM virtual_trading_records buy
-                        LEFT JOIN virtual_trading_records sell 
-                            ON buy.id = sell.buy_record_id AND sell.action = 'SELL'
-                        WHERE buy.action = 'BUY' AND buy.is_test = 1
-                        GROUP BY buy.stock_code
-                        HAVING holding_qty > 0
-                        ORDER BY MAX(buy.timestamp) DESC
-                        '''
-                        
-                        cursor.execute(query)
-                        rows = cursor.fetchall()
-                        
-                        holdings = []
-                        for row in rows:
-                            stock_code, stock_name, holding_qty, avg_buy_price = row
-                            if holding_qty > 0:
-                                holdings.append({
-                                    'stock_code': stock_code,
-                                    'stock_name': stock_name or f'Stock_{stock_code}',
-                                    'quantity': holding_qty,
-                                    'avg_price': avg_buy_price or 0.0
-                                })
-                        
-                        if holdings:
+            paper_trading = self._is_paper_trading()
+            
+            if paper_trading:
+                # ===== 가상 매매 모드: virtual_trading_records에서 조회 =====
+                self.logger.info("📋 가상매매 모드: virtual_trading_records에서 보유종목 조회")
+                if self.db_manager:
+                    try:
+                        import sqlite3
+                        with sqlite3.connect(self.db_manager.db_path) as conn:
+                            cursor = conn.cursor()
+                            
+                            query = '''
+                            SELECT 
+                                buy.stock_code,
+                                MAX(buy.stock_name) as stock_name,
+                                SUM(buy.quantity) - COALESCE(SUM(sell.quantity), 0) as holding_qty,
+                                SUM(buy.quantity * buy.price) / SUM(buy.quantity) as avg_buy_price
+                            FROM virtual_trading_records buy
+                            LEFT JOIN virtual_trading_records sell 
+                                ON buy.id = sell.buy_record_id AND sell.action = 'SELL'
+                            WHERE buy.action = 'BUY' AND buy.is_test = 1
+                            GROUP BY buy.stock_code
+                            HAVING holding_qty > 0
+                            ORDER BY MAX(buy.timestamp) DESC
+                            '''
+                            
+                            cursor.execute(query)
+                            rows = cursor.fetchall()
+                            
+                            holdings = []
+                            for row in rows:
+                                stock_code, stock_name, holding_qty, avg_buy_price = row
+                                if holding_qty > 0:
+                                    holdings.append({
+                                        'stock_code': stock_code,
+                                        'stock_name': stock_name or f'Stock_{stock_code}',
+                                        'quantity': holding_qty,
+                                        'avg_price': avg_buy_price or 0.0
+                                    })
+                            
                             self.logger.info(f"✅ 가상 매매 보유 종목 조회: {len(holdings)}개")
                             return holdings
-                except Exception as db_err:
-                    self.logger.warning(f"⚠️ 가상 매매 보유 종목 조회 실패: {db_err}, 실제 계좌 조회 시도")
+                    except Exception as db_err:
+                        self.logger.warning(f"⚠️ 가상 매매 보유 종목 조회 실패: {db_err}")
+                        return []
+                return []
             
-            # 실제 계좌에서 보유 종목 조회 (가상 매매 모드가 아니거나 DB 조회 실패 시)
+            # ===== 실전 매매 모드: KIS API 실제 계좌 잔고 조회 =====
+            self.logger.info("💰 실전매매 모드: KIS API 실제 계좌에서 보유종목 조회")
             if not hasattr(kis_account_api, 'get_inquire_balance'):
                 self.logger.error("❌ kis_account_api.get_inquire_balance 함수가 없습니다")
                 return []
             
             holdings_data = kis_account_api.get_inquire_balance()
             if holdings_data is None or holdings_data.empty:
+                self.logger.info("📋 실제 계좌 보유 종목: 0개 (빈 계좌)")
                 return []
             
             holdings = []
@@ -485,9 +503,7 @@ class QuantRebalancingService:
                         'avg_price': float(row.get('pchs_avg_pric', 0) or 0)
                     })
             
-            if holdings:
-                self.logger.info(f"✅ 실제 계좌 보유 종목 조회: {len(holdings)}개")
-            
+            self.logger.info(f"✅ 실제 계좌 보유 종목 조회: {len(holdings)}개")
             return holdings
             
         except AttributeError as e:
