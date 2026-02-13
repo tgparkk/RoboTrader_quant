@@ -165,10 +165,12 @@ class OrderManager:
             
             # API 호출을 별도 스레드에서 실행
             loop = asyncio.get_event_loop()
+            # 시장가 주문(01)일 때는 단가를 0으로 전달 (KIS API 요구사항)
+            order_price = 0 if market else int(price)
             result: OrderResult = await loop.run_in_executor(
                 self.executor,
                 self.api_manager.place_buy_order,
-                stock_code, quantity, int(price), ("01" if market else "00")
+                stock_code, quantity, order_price, ("01" if market else "00")
             )
             
             if result.success:
@@ -302,10 +304,12 @@ class OrderManager:
             
             # API 호출을 별도 스레드에서 실행
             loop = asyncio.get_event_loop()
+            # 시장가 주문(01)일 때는 단가를 0으로 전달 (KIS API 요구사항)
+            order_price = 0 if market else int(price)
             result: OrderResult = await loop.run_in_executor(
                 self.executor,
                 self.api_manager.place_sell_order,
-                stock_code, quantity, int(price), ("01" if market else "00")
+                stock_code, quantity, order_price, ("01" if market else "00")
             )
             
             if result.success:
