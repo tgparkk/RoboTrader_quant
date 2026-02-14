@@ -343,7 +343,7 @@ class StateRestorationHelper:
                         alert_msg += f"• {m['message']}\n"
                     if len(mismatches) > 5:
                         alert_msg += f"... 외 {len(mismatches)-5}건"
-                    await self.telegram.send_notification(alert_msg)
+                    await self.telegram.notify_system_status(alert_msg)
             else:
                 logger.info("✅ [실전매매] 계좌-DB 보유 종목 일치 확인")
 

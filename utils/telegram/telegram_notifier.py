@@ -289,12 +289,14 @@ class TelegramNotifier:
         )
         await self.send_message(message)
     
-    async def send_system_status(self, market_status: str, pending_orders: int, 
+    async def send_system_status(self, market_status: str, pending_orders: int,
                                completed_orders: int):
         """시스템 상태 알림"""
+        # market_status에 _가 포함되면 Markdown italic으로 해석되므로 공백으로 치환
+        safe_market_status = market_status.replace('_', ' ')
         message = self.templates['system_status'].format(
             time=datetime.now().strftime('%H:%M:%S'),
-            market_status=market_status,
+            market_status=safe_market_status,
             pending_orders=pending_orders,
             completed_orders=completed_orders
         )
