@@ -3,7 +3,7 @@ ML 멀티팩터 시스템 통합 계산 모듈
 - 4개 팩터 점수 계산 및 통합
 - ML 피처 저장
 """
-import sqlite3
+import psycopg2
 import pandas as pd
 from typing import Dict, Optional, Any, List
 from datetime import datetime
@@ -12,6 +12,7 @@ from pathlib import Path
 from utils.logger import setup_logger
 from utils.korean_time import now_kst
 from core.factors import ValueFactor, MomentumFactor, QualityFactor, GrowthFactor
+from config.pg_helper import pg_connection
 
 
 logger = setup_logger(__name__)
@@ -23,50 +24,26 @@ class MLFactorCalculator:
     def __init__(self, db_path: str = None):
         """
         Args:
-            db_path: 데이터베이스 경로
+            db_path: (하위 호환용, 무시됨)
         """
         self.logger = setup_logger(__name__)
         
-        if db_path is None:
-            db_dir = Path(__file__).parent.parent / "data"
-            db_dir.mkdir(exist_ok=True)
-            db_path = db_dir / "robotrader.db"
+        # 팩터 계산기 초기화 (db_path는 하위호환용으로 전달하지만 내부에서 PG 사용)
+        self.value_factor = ValueFactor(db_path)
+        self.momentum_factor = MomentumFactor(db_path)
+        self.quality_factor = QualityFactor(db_path)
+        self.growth_factor = GrowthFactor(db_path)
         
-        self.db_path = str(db_path)
-        
-        # 팩터 계산기 초기화
-        self.value_factor = ValueFactor(self.db_path)
-        self.momentum_factor = MomentumFactor(self.db_path)
-        self.quality_factor = QualityFactor(self.db_path)
-        self.growth_factor = GrowthFactor(self.db_path)
-        
-        self.logger.info(f"ML 팩터 계산기 초기화 완료: {self.db_path}")
+        self.logger.info("ML 팩터 계산기 초기화 완료 (PostgreSQL)")
     
     def calculate_total_score(self, stock_code: str, date: str = None) -> Dict[str, Any]:
-        """
-        종목의 최종 점수 계산
-        
-        Args:
-            stock_code: 종목코드
-            date: 기준일 (YYYY-MM-DD), None이면 오늘
-            
-        Returns:
-            Dict: {
-                'total_score': float,  # 최종 점수 (0-100)
-                'value': float,  # Value 팩터 점수
-                'momentum': float,  # Momentum 팩터 점수
-                'quality': float,  # Quality 팩터 점수
-                'growth': float,  # Growth 팩터 점수
-                'details': Dict  # 상세 정보
-            }
-        """
+        """종목의 최종 점수 계산"""
         try:
             if date is None:
                 date = now_kst().strftime("%Y-%m-%d")
             
             self.logger.info(f"📊 [{stock_code}] 팩터 점수 계산 시작 ({date})")
             
-            # 각 팩터 점수 계산
             value_result = self.value_factor.calculate_value_factor(stock_code, date)
             momentum_result = self.momentum_factor.calculate_momentum_factor(stock_code, date)
             quality_result = self.quality_factor.calculate_quality_factor(stock_code, date)
@@ -77,7 +54,6 @@ class MLFactorCalculator:
             quality_score = quality_result.get('quality_score', 0.0)
             growth_score = growth_result.get('growth_score', 0.0)
             
-            # 가중 평균 (문서 기준)
             total_score = (
                 value_score * 0.30 +
                 momentum_score * 0.30 +
@@ -102,10 +78,8 @@ class MLFactorCalculator:
             self.logger.info(
                 f"✅ [{stock_code}] 점수 계산 완료: "
                 f"총점={result['total_score']:.2f}, "
-                f"Value={value_score:.2f}, "
-                f"Momentum={momentum_score:.2f}, "
-                f"Quality={quality_score:.2f}, "
-                f"Growth={growth_score:.2f}"
+                f"Value={value_score:.2f}, Momentum={momentum_score:.2f}, "
+                f"Quality={quality_score:.2f}, Growth={growth_score:.2f}"
             )
             
             return result
@@ -115,50 +89,37 @@ class MLFactorCalculator:
             import traceback
             traceback.print_exc()
             return {
-                'total_score': 0.0,
-                'value': 0.0,
-                'momentum': 0.0,
-                'quality': 0.0,
-                'growth': 0.0,
-                'details': {}
+                'total_score': 0.0, 'value': 0.0, 'momentum': 0.0,
+                'quality': 0.0, 'growth': 0.0, 'details': {}
             }
     
     def save_factor_scores(self, stock_code: str, date: str = None) -> bool:
-        """
-        팩터 점수를 DB에 저장
-        
-        Args:
-            stock_code: 종목코드
-            date: 기준일 (YYYY-MM-DD), None이면 오늘
-            
-        Returns:
-            bool: 저장 성공 여부
-        """
+        """팩터 점수를 DB에 저장"""
         try:
             if date is None:
                 date = now_kst().strftime("%Y-%m-%d")
             
-            # 점수 계산
             result = self.calculate_total_score(stock_code, date)
             
-            # DB 저장
-            with sqlite3.connect(self.db_path) as conn:
+            with pg_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    INSERT OR REPLACE INTO daily_factor_scores
+                    INSERT INTO daily_factor_scores
                     (stock_code, date, value_score, momentum_score, quality_score,
                      growth_score, total_score)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (stock_code, date) DO UPDATE SET
+                        value_score = EXCLUDED.value_score,
+                        momentum_score = EXCLUDED.momentum_score,
+                        quality_score = EXCLUDED.quality_score,
+                        growth_score = EXCLUDED.growth_score,
+                        total_score = EXCLUDED.total_score
                 ''', (
-                    stock_code,
-                    date,
-                    result['value'],
-                    result['momentum'],
-                    result['quality'],
-                    result['growth'],
+                    stock_code, date,
+                    result['value'], result['momentum'],
+                    result['quality'], result['growth'],
                     result['total_score'],
                 ))
-                conn.commit()
             
             self.logger.info(f"✅ [{stock_code}] 팩터 점수 저장 완료")
             return True
@@ -168,41 +129,28 @@ class MLFactorCalculator:
             return False
     
     def save_ml_features(self, stock_code: str, date: str = None) -> bool:
-        """
-        ML 피처 (45개 지표)를 DB에 저장
-        
-        Args:
-            stock_code: 종목코드
-            date: 기준일 (YYYY-MM-DD), None이면 오늘
-            
-        Returns:
-            bool: 저장 성공 여부
-        """
+        """ML 피처 (45개 지표)를 DB에 저장"""
         try:
             if date is None:
                 date = now_kst().strftime("%Y-%m-%d")
             
-            # 각 팩터의 상세 지표 수집
             value_result = self.value_factor.calculate_value_factor(stock_code, date)
             momentum_result = self.momentum_factor.calculate_momentum_factor(stock_code, date)
             quality_result = self.quality_factor.calculate_quality_factor(stock_code, date)
             growth_result = self.growth_factor.calculate_growth_factor(stock_code, date)
             
-            # 재무 데이터 조회
             financial_data = self._get_financial_data(stock_code, date)
             price_data = self._get_price_data(stock_code, date)
             
-            # ML 피처 구성 (stock_code와 date 전달)
             ml_features = self._build_ml_features(
                 value_result, momentum_result, quality_result, growth_result,
                 financial_data, price_data, stock_code, date
             )
             
-            # DB 저장
-            with sqlite3.connect(self.db_path) as conn:
+            with pg_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    INSERT OR REPLACE INTO ml_features
+                    INSERT INTO ml_features
                     (stock_code, date, per, pbr, pcr, psr, dividend_yield,
                      dividend_growth_3yr, dividend_capacity, discount_to_nav,
                      liquidation_margin, earnings_stability, returns_1m, returns_3m,
@@ -215,46 +163,37 @@ class MLFactorCalculator:
                      revenue_growth_5yr, earnings_growth_1yr, earnings_growth_3yr,
                      op_income_growth, earnings_leverage, margin_expansion,
                      roe_improvement, growth_consistency)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                            ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (stock_code, date) DO UPDATE SET
+                        per = EXCLUDED.per, pbr = EXCLUDED.pbr, pcr = EXCLUDED.pcr,
+                        psr = EXCLUDED.psr, dividend_yield = EXCLUDED.dividend_yield
                 ''', (
                     stock_code, date,
-                    ml_features.get('per'),
-                    ml_features.get('pbr'),
-                    ml_features.get('pcr'),
-                    ml_features.get('psr'),
+                    ml_features.get('per'), ml_features.get('pbr'),
+                    ml_features.get('pcr'), ml_features.get('psr'),
                     ml_features.get('dividend_yield'),
                     ml_features.get('dividend_growth_3yr'),
                     ml_features.get('dividend_capacity'),
                     ml_features.get('discount_to_nav'),
                     ml_features.get('liquidation_margin'),
                     ml_features.get('earnings_stability'),
-                    ml_features.get('returns_1m'),
-                    ml_features.get('returns_3m'),
-                    ml_features.get('returns_6m'),
-                    ml_features.get('returns_12m'),
-                    ml_features.get('volume_trend_1m'),
-                    ml_features.get('volume_trend_3m'),
+                    ml_features.get('returns_1m'), ml_features.get('returns_3m'),
+                    ml_features.get('returns_6m'), ml_features.get('returns_12m'),
+                    ml_features.get('volume_trend_1m'), ml_features.get('volume_trend_3m'),
                     ml_features.get('relative_to_market'),
                     ml_features.get('relative_to_sector'),
                     ml_features.get('up_days_ratio'),
                     ml_features.get('proximity_to_high'),
-                    ml_features.get('roe'),
-                    ml_features.get('roa'),
-                    ml_features.get('roic'),
-                    ml_features.get('operating_margin'),
-                    ml_features.get('net_margin'),
-                    ml_features.get('debt_ratio'),
+                    ml_features.get('roe'), ml_features.get('roa'),
+                    ml_features.get('roic'), ml_features.get('operating_margin'),
+                    ml_features.get('net_margin'), ml_features.get('debt_ratio'),
                     ml_features.get('interest_coverage'),
-                    ml_features.get('current_ratio'),
-                    ml_features.get('quick_ratio'),
-                    ml_features.get('net_debt_ratio'),
-                    ml_features.get('fcf_yield'),
-                    ml_features.get('ocf_to_ni'),
-                    ml_features.get('capex_ratio'),
-                    ml_features.get('cash_ratio'),
-                    ml_features.get('earnings_quality'),
+                    ml_features.get('current_ratio'), ml_features.get('quick_ratio'),
+                    ml_features.get('net_debt_ratio'), ml_features.get('fcf_yield'),
+                    ml_features.get('ocf_to_ni'), ml_features.get('capex_ratio'),
+                    ml_features.get('cash_ratio'), ml_features.get('earnings_quality'),
                     ml_features.get('revenue_growth_1yr'),
                     ml_features.get('revenue_growth_3yr'),
                     ml_features.get('revenue_growth_5yr'),
@@ -266,7 +205,6 @@ class MLFactorCalculator:
                     ml_features.get('roe_improvement'),
                     ml_features.get('growth_consistency'),
                 ))
-                conn.commit()
             
             self.logger.info(f"✅ [{stock_code}] ML 피처 저장 완료 (45개 지표)")
             return True
@@ -284,7 +222,7 @@ class MLFactorCalculator:
         """ML 피처 구성 (45개 지표 전체)"""
         features = {}
         
-        # ===== Value 지표 (10개) =====
+        # Value 지표
         value_details = value_result.get('details', {})
         features['per'] = value_details.get('per')
         features['pbr'] = value_details.get('pbr')
@@ -292,30 +230,25 @@ class MLFactorCalculator:
         features['psr'] = value_details.get('psr')
         features['dividend_yield'] = value_details.get('dividend_yield')
         
-        # 재무 데이터에서 직접 조회
         if financial_data:
             features['dividend_growth_3yr'] = financial_data.get('dividend_growth_3yr')
             features['dividend_capacity'] = financial_data.get('dividend_capacity')
             features['discount_to_nav'] = financial_data.get('discount_to_nav')
             features['liquidation_margin'] = financial_data.get('liquidation_margin')
         
-        # 이익 안정성 (Value 팩터에서 계산된 stability_score를 사용)
-        # stability_score는 0-100 스케일이므로 0-1로 정규화
         stability_score = value_result.get('stability_score', 0)
         features['earnings_stability'] = stability_score / 100.0 if stability_score else None
         
-        # ===== Momentum 지표 (10개) =====
+        # Momentum 지표
         momentum_details = momentum_result.get('details', {})
         features['returns_1m'] = momentum_details.get('returns_1m')
         features['returns_3m'] = momentum_details.get('returns_3m')
         features['returns_6m'] = momentum_details.get('returns_6m')
         features['returns_12m'] = momentum_details.get('returns_12m')
         
-        # 거래량 추세는 가격 데이터에서 계산
         if price_data:
             price_history = self.momentum_factor._get_price_history(stock_code, date)
             if price_history is not None and len(price_history) >= 60:
-                # 1개월 거래량 추세
                 ma20 = price_history['volume'].tail(20).mean()
                 ma60 = price_history['volume'].tail(60).mean()
                 if ma60 > 0:
@@ -323,7 +256,6 @@ class MLFactorCalculator:
                 else:
                     features['volume_trend_1m'] = None
                 
-                # 3개월 거래량 추세
                 if len(price_history) >= 120:
                     ma120 = price_history['volume'].tail(120).mean()
                     if ma120 > 0:
@@ -336,15 +268,12 @@ class MLFactorCalculator:
                 features['volume_trend_1m'] = None
                 features['volume_trend_3m'] = None
         
-        # 상대 강도 (시장/섹터 대비) - 임시로 None
-        features['relative_to_market'] = None  # TODO: KOSPI 데이터 필요
-        features['relative_to_sector'] = None  # TODO: 섹터 데이터 필요
+        features['relative_to_market'] = None
+        features['relative_to_sector'] = None
         
-        # 상승일 비율 및 신고가 근접도
         if price_data:
             price_history = self.momentum_factor._get_price_history(stock_code, date)
             if price_history is not None and len(price_history) >= 20:
-                # 상승일 비율
                 recent_20 = price_history.tail(20)
                 if 'returns_1d' in recent_20.columns:
                     up_days = (recent_20['returns_1d'] > 0).sum()
@@ -356,7 +285,6 @@ class MLFactorCalculator:
                             up_days += 1
                     features['up_days_ratio'] = (up_days / (len(recent_20) - 1)) * 100 if len(recent_20) > 1 else 0
                 
-                # 52주 신고가 근접도
                 if len(price_history) >= 252:
                     current_price = price_history.iloc[-1]['close']
                     high_52w = price_history.tail(252)['high'].max()
@@ -370,13 +298,12 @@ class MLFactorCalculator:
                 features['up_days_ratio'] = None
                 features['proximity_to_high'] = None
         
-        # ===== Quality 지표 (15개) =====
+        # Quality 지표
         quality_details = quality_result.get('details', {})
         features['roe'] = quality_details.get('roe')
         features['roa'] = quality_details.get('roa')
         features['roic'] = quality_details.get('roic')
         
-        # 재무 데이터에서 직접 조회
         if financial_data:
             features['operating_margin'] = financial_data.get('operating_margin')
             features['net_margin'] = financial_data.get('net_margin')
@@ -390,55 +317,33 @@ class MLFactorCalculator:
             features['capex_ratio'] = financial_data.get('capex_ratio')
             features['cash_ratio'] = financial_data.get('cash_ratio')
         
-        # 수익 품질 (Quality 팩터에서 계산된 값)
         features['earnings_quality'] = quality_result.get('earnings_quality_score', 0) / 100.0 if quality_result.get('earnings_quality_score') else None
         
-        # ===== Growth 지표 (10개) =====
+        # Growth 지표
         growth_details = growth_result.get('details', {})
         features['revenue_growth_1yr'] = growth_details.get('revenue_growth_1yr')
         features['earnings_growth_1yr'] = growth_details.get('earnings_growth_1yr')
         
-        # Growth 팩터에서 추가 계산
         if financial_data:
-            # 재무 이력 조회
             financial_history = self.growth_factor._get_financial_history(stock_code, date, years=5)
             
             if financial_history and len(financial_history) >= 2:
-                # 매출 성장률
                 features['revenue_growth_3yr'] = self.growth_factor._calculate_cagr(financial_history, 'revenue', 3)
                 features['revenue_growth_5yr'] = self.growth_factor._calculate_cagr(financial_history, 'revenue', 5)
-                
-                # 이익 성장률
                 features['earnings_growth_3yr'] = self.growth_factor._calculate_cagr(financial_history, 'net_income', 3)
-                
-                # 영업이익 성장률
                 features['op_income_growth'] = self.growth_factor._calculate_growth_rate(financial_history, 'operating_profit', 1)
                 
-                # 성장 효율성
                 revenue_growth = self.growth_factor._calculate_growth_rate(financial_history, 'revenue', 1)
                 earnings_growth = self.growth_factor._calculate_growth_rate(financial_history, 'net_income', 1)
-                if revenue_growth != 0:
-                    features['earnings_leverage'] = earnings_growth / revenue_growth
-                else:
-                    features['earnings_leverage'] = None
+                features['earnings_leverage'] = earnings_growth / revenue_growth if revenue_growth != 0 else None
                 
-                # 마진 개선도
                 if len(financial_history) >= 2:
-                    current_margin = financial_history[-1].get('operating_margin', 0)
-                    prev_margin = financial_history[-2].get('operating_margin', 0)
-                    features['margin_expansion'] = current_margin - prev_margin
+                    features['margin_expansion'] = (financial_history[-1].get('operating_margin', 0) or 0) - (financial_history[-2].get('operating_margin', 0) or 0)
+                    features['roe_improvement'] = (financial_history[-1].get('roe', 0) or 0) - (financial_history[-2].get('roe', 0) or 0)
                 else:
                     features['margin_expansion'] = None
-                
-                # ROE 개선도
-                if len(financial_history) >= 2:
-                    current_roe = financial_history[-1].get('roe', 0)
-                    prev_roe = financial_history[-2].get('roe', 0)
-                    features['roe_improvement'] = current_roe - prev_roe
-                else:
                     features['roe_improvement'] = None
                 
-                # 성장 지속성
                 growth_quarters = 0
                 for i in range(1, min(5, len(financial_history))):
                     current_revenue = financial_history[-i].get('revenue', 0)
@@ -447,27 +352,22 @@ class MLFactorCalculator:
                         growth_quarters += 1
                 features['growth_consistency'] = growth_quarters
             else:
-                # 데이터 부족 시 None
-                features['revenue_growth_3yr'] = None
-                features['revenue_growth_5yr'] = None
-                features['earnings_growth_3yr'] = None
-                features['op_income_growth'] = None
-                features['earnings_leverage'] = None
-                features['margin_expansion'] = None
-                features['roe_improvement'] = None
-                features['growth_consistency'] = None
+                for key in ['revenue_growth_3yr', 'revenue_growth_5yr', 'earnings_growth_3yr',
+                           'op_income_growth', 'earnings_leverage', 'margin_expansion',
+                           'roe_improvement', 'growth_consistency']:
+                    features[key] = None
         
         return features
     
     def _get_financial_data(self, stock_code: str, date: str) -> Optional[Dict]:
         """재무 데이터 조회"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with pg_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     SELECT *
                     FROM financial_statements
-                    WHERE stock_code = ? AND report_date <= ?
+                    WHERE stock_code = %s AND report_date <= %s
                     ORDER BY report_date DESC
                     LIMIT 1
                 ''', (stock_code, date))
@@ -485,12 +385,12 @@ class MLFactorCalculator:
     def _get_price_data(self, stock_code: str, date: str) -> Optional[Dict]:
         """가격 데이터 조회"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with pg_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     SELECT *
                     FROM daily_prices
-                    WHERE stock_code = ? AND date = ?
+                    WHERE stock_code = %s AND date = %s
                 ''', (stock_code, date))
                 
                 row = cursor.fetchone()
@@ -502,4 +402,3 @@ class MLFactorCalculator:
         except Exception as e:
             self.logger.error(f"가격 데이터 조회 오류: {e}")
             return None
-

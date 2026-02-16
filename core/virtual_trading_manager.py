@@ -214,12 +214,11 @@ class VirtualTradingManager:
             
             # 중복 매도 방지: 해당 매수 기록이 이미 매도되었는지 확인
             try:
-                import sqlite3
-                with sqlite3.connect(self.db_manager.db_path) as conn:
+                with self.db_manager._get_connection() as conn:
                     cursor = conn.cursor()
                     cursor.execute('''
                         SELECT COUNT(*) FROM virtual_trading_records 
-                        WHERE buy_record_id = ? AND action = 'SELL'
+                        WHERE buy_record_id = %s AND action = 'SELL'
                     ''', (buy_record_id,))
                     
                     sell_count = cursor.fetchone()[0]

@@ -2,7 +2,6 @@
 
 main.py에서 분리된 상태 복원 및 후보 종목 로딩 로직을 포함합니다.
 """
-import sqlite3
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from utils.logger import setup_logger
@@ -51,22 +50,16 @@ class StateRestorationHelper:
     async def restore_todays_candidates(self):
         """DB에서 후보 종목 및 보유 종목 복원"""
         try:
-            # DB 경로
-            db_path = Path(__file__).parent.parent.parent / "data" / "robotrader.db"
-            if not db_path.exists():
-                logger.info("📊 DB 파일 없음 - 종목 복원 건너뜀")
-                return
-
             # 오늘 날짜
             today = now_kst().strftime('%Y-%m-%d')
 
             # 1. 오늘 날짜의 후보 종목 복원
-            with sqlite3.connect(str(db_path)) as conn:
+            with self.db_manager._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     SELECT DISTINCT stock_code, stock_name, score, reasons
                     FROM candidate_stocks
-                    WHERE DATE(selection_date) = ?
+                    WHERE DATE(selection_date) = %s
                     ORDER BY score DESC
                 ''', (today,))
 
@@ -127,10 +120,13 @@ class StateRestorationHelper:
                 for _, holding in holdings.iterrows():
                     stock_code = holding['stock_code']
                     stock_name = holding['stock_name']
+                    if holding['quantity'] is None or holding['buy_price'] is None:
+                        logger.warning(f"⚠️ {stock_code} quantity/buy_price가 None - 건너뜀")
+                        continue
                     quantity = int(holding['quantity'])
                     buy_price = float(holding['buy_price'])
-                    target_profit_rate = holding.get('target_profit_rate', 0.15)
-                    stop_loss_rate = holding.get('stop_loss_rate', 0.10)
+                    target_profit_rate = holding.get('target_profit_rate', 0.15) or 0.15
+                    stop_loss_rate = holding.get('stop_loss_rate', 0.10) or 0.10
 
                     # 전날 종가 조회 (공통 메서드 사용)
                     prev_close = self.get_previous_close(stock_code)
@@ -203,8 +199,8 @@ class StateRestorationHelper:
                         'stock_name': row['stock_name'],
                         'quantity': int(row['quantity']),
                         'buy_price': float(row['buy_price']),
-                        'target_profit_rate': row.get('target_profit_rate', 0.15),
-                        'stop_loss_rate': row.get('stop_loss_rate', 0.10),
+                        'target_profit_rate': row.get('target_profit_rate', 0.15) or 0.15,
+                        'stop_loss_rate': row.get('stop_loss_rate', 0.10) or 0.10,
                         'buy_record_id': row.get('buy_record_id')
                     }
 

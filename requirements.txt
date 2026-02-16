@@ -11,3 +11,6 @@ matplotlib
 finance-datareader
 pykrx
 yfinance
+psycopg2-binary
+
+psycopg2-binary>=2.9.0

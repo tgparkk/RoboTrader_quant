@@ -439,8 +439,7 @@ class QuantRebalancingService:
                 self.logger.info("📋 가상매매 모드: virtual_trading_records에서 보유종목 조회")
                 if self.db_manager:
                     try:
-                        import sqlite3
-                        with sqlite3.connect(self.db_manager.db_path) as conn:
+                        with self.db_manager._get_connection() as conn:
                             cursor = conn.cursor()
                             
                             query = '''
@@ -452,7 +451,7 @@ class QuantRebalancingService:
                             FROM virtual_trading_records buy
                             LEFT JOIN virtual_trading_records sell 
                                 ON buy.id = sell.buy_record_id AND sell.action = 'SELL'
-                            WHERE buy.action = 'BUY' AND buy.is_test = 1
+                            WHERE buy.action = 'BUY' AND buy.is_test = TRUE
                             GROUP BY buy.stock_code
                             HAVING holding_qty > 0
                             ORDER BY MAX(buy.timestamp) DESC

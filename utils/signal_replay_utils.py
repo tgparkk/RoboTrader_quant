@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
-import sqlite3
+import psycopg2
 import logging
 from typing import Dict, List, Optional
 from datetime import datetime
@@ -49,25 +49,15 @@ def get_stocks_with_selection_date(date_str: str) -> Dict[str, str]:
         Dict[str, str]: {종목코드: selection_date} 매핑 (종목코드는 6자리 문자열, selection_date는 YYYY-MM-DD 형식)
     """
     try:
-        # 데이터베이스 파일 경로 설정
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        db_path = os.path.join(project_root, 'data', 'robotrader.db')
-        
-        if not os.path.exists(db_path):
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"데이터베이스 파일을 찾을 수 없음: {db_path}")
-            return {}
-        
         # YYYYMMDD → YYYY-MM-DD 형식으로 변환
         target_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
         
-        with sqlite3.connect(db_path) as conn:
+        with psycopg2.connect(host='127.0.0.1', port=5433, dbname='robotrader_quant', user='postgres', password='postgres') as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT DISTINCT stock_code, selection_date 
                 FROM candidate_stocks 
-                WHERE DATE(selection_date) = ?
+                WHERE DATE(selection_date) = %s
                 ORDER BY score DESC
             ''', (target_date,))
             

@@ -852,10 +852,9 @@ class DayTradingBot:
             bool: 당일 데이터가 정상적으로 저장되었는지 여부
         """
         try:
-            import sqlite3
             today = now_kst().strftime('%Y-%m-%d')
 
-            conn = sqlite3.connect(self.db_manager.db_path)
+            conn = self.db_manager._get_connection()
             cursor = conn.cursor()
 
             # 당일 데이터 조회
@@ -865,7 +864,7 @@ class DayTradingBot:
                        MIN(close) as min_price,
                        MAX(close) as max_price
                 FROM daily_prices
-                WHERE date = ?
+                WHERE date = %s
                 """,
                 (today,)
             )

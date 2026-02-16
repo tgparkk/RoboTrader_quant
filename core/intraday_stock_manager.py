@@ -266,9 +266,8 @@ class IntradayStockManager:
             from core.ml_data_collector import MLDataCollector
             from pathlib import Path
             
-            # DB 경로
-            db_path = Path(__file__).parent.parent / "data" / "robotrader.db"
-            collector = MLDataCollector(str(db_path))
+            # PostgreSQL (db_path는 하위호환용, 무시됨)
+            collector = MLDataCollector()
             
             # daily_data를 daily_prices 테이블에 저장
             success = await asyncio.to_thread(

@@ -151,3 +151,8 @@ Thumbs.db
 # Cache (pkl files)
 cache/
 
+nul  
+*.sqlite_bak
+*.sqlite_backup
+tmpclaude-*
+nul

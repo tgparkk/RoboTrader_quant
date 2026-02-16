@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any
 import pickle
-import sqlite3
+import psycopg2
 
 # 프로젝트 루트를 sys.path에 추가
 project_root = Path(__file__).parent.parent
@@ -36,17 +36,15 @@ class AnalysisDataCollector:
         """
         self.logger = setup_logger(__name__)
 
-        # 데이터베이스 경로 설정
-        if db_path is None:
-            db_path = project_root / "data" / "robotrader.db"
-        self.db_path = str(db_path)
+        # PostgreSQL 사용 (db_path는 하위호환용, 무시됨)
+        self.db_path = None
 
         # 캐시 디렉토리 설정
         self.daily_cache_dir = project_root / "cache" / "daily_data"
         self.minute_cache_dir = project_root / "cache" / "minute_data"
 
         # 데이터베이스 매니저 초기화
-        self.db_manager = DatabaseManager(self.db_path)
+        self.db_manager = DatabaseManager()
 
         # KIS API 인증 초기화
         self.kis_auth = KisAuth()
@@ -206,7 +204,7 @@ class AnalysisDataCollector:
             pd.DataFrame: 후보 종목 데이터
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with psycopg2.connect(host='127.0.0.1', port=5433, dbname='robotrader_quant', user='postgres', password='postgres') as conn:
                 query = '''
                     SELECT
                         id,
@@ -217,8 +215,8 @@ class AnalysisDataCollector:
                         reasons,
                         status
                     FROM candidate_stocks
-                    WHERE DATE(selection_date) >= ?
-                    AND DATE(selection_date) <= ?
+                    WHERE DATE(selection_date) >= %s
+                    AND DATE(selection_date) <= %s
                     ORDER BY selection_date DESC, score DESC
                 '''
 

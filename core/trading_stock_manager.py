@@ -466,7 +466,9 @@ class TradingStockManager:
                                     price=float(order.price),
                                     quantity=int(order.quantity),
                                     strategy=trading_stock.selection_reason,
-                                    reason="체결"
+                                    reason="체결",
+                                    target_profit_rate=getattr(trading_stock, 'target_profit_rate', 0.15) or 0.15,
+                                    stop_loss_rate=getattr(trading_stock, 'stop_loss_rate', 0.10) or 0.10
                                 )
                             except Exception as db_err:
                                 self.logger.warning(f"⚠️ 실거래 매수 기록 저장 실패: {db_err}")
@@ -929,7 +931,9 @@ class TradingStockManager:
                                     price=float(order.price),
                                     quantity=int(order.quantity),
                                     strategy=trading_stock.selection_reason,
-                                    reason="체결(콜백)"
+                                    reason="체결(콜백)",
+                                    target_profit_rate=getattr(trading_stock, 'target_profit_rate', 0.15) or 0.15,
+                                    stop_loss_rate=getattr(trading_stock, 'stop_loss_rate', 0.10) or 0.10
                                 )
                             except Exception as db_err:
                                 self.logger.warning(f"⚠️ 실거래 매수 기록 저장 실패: {db_err}")

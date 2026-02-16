@@ -122,14 +122,8 @@ class TradingDecisionEngine:
             if score_result is None:
                 try:
                     from core.ml_factor_calculator import MLFactorCalculator
-                    from pathlib import Path
-                    
-                    if self.db_manager:
-                        db_path = self.db_manager.db_path
-                    else:
-                        db_path = Path("data/robotrader.db")
-                    
-                    calculator = MLFactorCalculator(str(db_path))
+                                        # PostgreSQL (db_path는 하위호환용, 무시됨)
+                    calculator = MLFactorCalculator()
                     score_data = calculator.calculate_total_score(stock_code)
                     
                     if score_data and score_data.get('total_score', 0) > 0:
@@ -485,12 +479,11 @@ class TradingDecisionEngine:
             strategy = None
             if buy_record_id and self.db_manager:
                 try:
-                    import sqlite3
-                    with sqlite3.connect(self.db_manager.db_path) as conn:
+                    with self.db_manager._get_connection() as conn:
                         cursor = conn.cursor()
                         cursor.execute('''
                             SELECT strategy FROM virtual_trading_records 
-                            WHERE id = ? AND action = 'BUY'
+                            WHERE id = %s AND action = 'BUY'
                         ''', (buy_record_id,))
                         
                         result = cursor.fetchone()
