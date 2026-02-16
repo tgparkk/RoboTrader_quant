@@ -1716,3 +1716,87 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"❌ DB 백업 실패: {e}")
             return None
+
+    # ============================
+    # 리밸런싱 이력 API
+    # ============================
+    def save_rebalancing_history(self, rebalancing_date, records: list):
+        """리밸런싱 이력 일괄 저장
+
+        Args:
+            rebalancing_date: 리밸런싱 날짜 (str 'YYYY-MM-DD' 또는 date)
+            records: [{'stock_code', 'stock_name', 'action', 'reason', 'rank',
+                       'total_score', 'momentum_score', 'target_profit_rate',
+                       'stop_loss_rate', 'quantity', 'price'}, ...]
+        """
+        if not records:
+            self.logger.info("저장할 리밸런싱 이력이 없습니다")
+            return
+
+        conn = self._get_connection()
+        try:
+            with conn:
+                cursor = conn.cursor()
+                for rec in records:
+                    cursor.execute('''
+                        INSERT INTO rebalancing_history
+                        (rebalancing_date, stock_code, stock_name, action, reason,
+                         rank, total_score, momentum_score,
+                         target_profit_rate, stop_loss_rate, quantity, price)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ''', (
+                        str(rebalancing_date),
+                        rec.get('stock_code', ''),
+                        rec.get('stock_name', ''),
+                        rec.get('action', ''),
+                        rec.get('reason', ''),
+                        rec.get('rank'),
+                        rec.get('total_score'),
+                        rec.get('momentum_score'),
+                        rec.get('target_profit_rate'),
+                        rec.get('stop_loss_rate'),
+                        rec.get('quantity'),
+                        rec.get('price'),
+                    ))
+            self.logger.info(f"✅ 리밸런싱 이력 {len(records)}건 저장 ({rebalancing_date})")
+        except Exception as e:
+            self.logger.error(f"리밸런싱 이력 저장 실패: {e}")
+            raise
+        finally:
+            conn.close()
+
+    def get_rebalancing_history(self, date=None, stock_code=None, limit=100):
+        """리밸런싱 이력 조회
+
+        Args:
+            date: 특정 날짜 필터 (str 'YYYY-MM-DD')
+            stock_code: 특정 종목코드 필터
+            limit: 최대 반환 건수
+
+        Returns:
+            list of dict
+        """
+        conn = self._get_connection()
+        try:
+            with conn:
+                cursor = conn.cursor()
+                query = 'SELECT id, rebalancing_date, stock_code, stock_name, action, reason, rank, total_score, momentum_score, target_profit_rate, stop_loss_rate, quantity, price, created_at FROM rebalancing_history WHERE 1=1'
+                params = []
+                if date:
+                    query += ' AND rebalancing_date = %s'
+                    params.append(str(date))
+                if stock_code:
+                    query += ' AND stock_code = %s'
+                    params.append(stock_code)
+                query += ' ORDER BY rebalancing_date DESC, id DESC LIMIT %s'
+                params.append(limit)
+
+                cursor.execute(query, params)
+                columns = [desc[0] for desc in cursor.description]
+                rows = cursor.fetchall()
+                return [dict(zip(columns, row)) for row in rows]
+        except Exception as e:
+            self.logger.error(f"리밸런싱 이력 조회 실패: {e}")
+            return []
+        finally:
+            conn.close()

@@ -327,6 +327,57 @@ class QuantRebalancingService:
                 f"매도 {len(sell_list)}개, 매수 {len(buy_list)}개, 유지 {len(keep_list)}개"
             )
             
+            # 리밸런싱 이력 저장
+            try:
+                rebal_date = f"{calc_date[:4]}-{calc_date[4:6]}-{calc_date[6:8]}"
+                history_records = []
+                for item in sell_list:
+                    history_records.append({
+                        'stock_code': item.get('stock_code', ''),
+                        'stock_name': item.get('stock_name', ''),
+                        'action': 'SELL',
+                        'reason': item.get('reason', ''),
+                        'rank': item.get('factor_rank'),
+                        'total_score': item.get('total_score'),
+                        'momentum_score': None,
+                        'target_profit_rate': None,
+                        'stop_loss_rate': None,
+                        'quantity': item.get('quantity'),
+                        'price': None,
+                    })
+                for item in buy_list:
+                    history_records.append({
+                        'stock_code': item.get('stock_code', ''),
+                        'stock_name': item.get('stock_name', ''),
+                        'action': 'BUY',
+                        'reason': item.get('reason', ''),
+                        'rank': item.get('rank'),
+                        'total_score': item.get('total_score'),
+                        'momentum_score': None,
+                        'target_profit_rate': item.get('target_profit_rate'),
+                        'stop_loss_rate': item.get('stop_loss_rate'),
+                        'quantity': None,
+                        'price': None,
+                    })
+                for item in keep_list:
+                    history_records.append({
+                        'stock_code': item.get('stock_code', ''),
+                        'stock_name': item.get('stock_name', ''),
+                        'action': 'KEEP',
+                        'reason': f"유지 {item.get('rank', '?')}위",
+                        'rank': item.get('rank'),
+                        'total_score': item.get('total_score'),
+                        'momentum_score': None,
+                        'target_profit_rate': item.get('target_profit_rate'),
+                        'stop_loss_rate': item.get('stop_loss_rate'),
+                        'quantity': None,
+                        'price': None,
+                    })
+                if history_records:
+                    self.db_manager.save_rebalancing_history(rebal_date, history_records)
+            except Exception as e:
+                self.logger.warning(f"⚠️ 리밸런싱 이력 저장 실패 (무시): {e}")
+
             return {
                 'sell_list': sell_list,
                 'buy_list': buy_list,
