@@ -508,7 +508,7 @@ class QuantRebalancingService:
                                 ON buy.id = sell.buy_record_id AND sell.action = 'SELL'
                             WHERE buy.action = 'BUY' AND buy.is_test = TRUE
                             GROUP BY buy.stock_code
-                            HAVING holding_qty > 0
+                            HAVING SUM(buy.quantity) - COALESCE(SUM(sell.quantity), 0) > 0
                             ORDER BY MAX(buy.timestamp) DESC
                             '''
                             
