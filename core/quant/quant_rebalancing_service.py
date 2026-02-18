@@ -118,12 +118,13 @@ class QuantRebalancingService:
             portfolio_date = calc_date
             target_portfolio = self.db_manager.get_quant_portfolio(portfolio_date, limit=self.target_portfolio_size)
 
-            # 오늘 날짜로 포트폴리오가 없으면 최대 7일 이전까지 역순 검색 (주말/공휴일 고려)
+            # 오늘 날짜로 포트폴리오가 없으면 최대 14일 이전까지 역순 검색
+            # (추석/설 연휴 최대 9일 + 전후 주말 고려하여 14일로 확장)
             if not target_portfolio:
-                self.logger.info(f"ℹ️ 오늘({calc_date}) 포트폴리오 없음 → 최근 7일 이내 검색 시작")
+                self.logger.info(f"ℹ️ 오늘({calc_date}) 포트폴리오 없음 → 최근 14일 이내 검색 시작")
                 current_date = datetime.strptime(calc_date, '%Y%m%d')
 
-                for days_back in range(1, 8):  # 1일 전부터 7일 전까지
+                for days_back in range(1, 15):  # 1일 전부터 14일 전까지
                     previous_date = (current_date - timedelta(days=days_back)).strftime('%Y%m%d')
                     target_portfolio = self.db_manager.get_quant_portfolio(previous_date, limit=self.target_portfolio_size)
 
@@ -135,23 +136,26 @@ class QuantRebalancingService:
                         self.logger.debug(f"   {previous_date}: 포트폴리오 없음")
 
             if not target_portfolio:
-                self.logger.error(f"❌ 목표 포트폴리오 데이터 없음: {calc_date} 기준 최근 7일 이내")
-                self.logger.warning(f"⚠️ 긴급 조치: 현재 보유 종목 전체 매도 (데이터 부재로 인한 안전 조치)")
+                self.logger.error(f"❌ 목표 포트폴리오 데이터 없음: {calc_date} 기준 최근 14일 이내")
+                self.logger.warning(
+                    f"⚠️ 포트폴리오 데이터 14일간 부재 — 전량 매도를 건너뜁니다. "
+                    f"DB 장애 또는 스크리닝 실패 가능성을 확인하세요. "
+                    f"보유 종목 {len(current_holdings)}개를 그대로 유지합니다."
+                )
 
-                # 포트폴리오 데이터가 없으면 모든 보유 종목 매도 (안전 조치)
-                emergency_sell_list = []
+                # 데이터 부재 시 보유 종목 유지 (전량 매도하지 않음)
+                keep_list = []
                 for holding in current_holdings:
-                    emergency_sell_list.append({
+                    keep_list.append({
                         'stock_code': holding['stock_code'],
                         'stock_name': holding.get('stock_name', ''),
                         'quantity': holding.get('quantity', 0),
-                        'reason': '[리밸런싱] 포트폴리오 데이터 부재 (긴급 매도)'
                     })
 
                 return {
-                    'sell_list': emergency_sell_list,
+                    'sell_list': [],
                     'buy_list': [],
-                    'keep_list': []
+                    'keep_list': keep_list
                 }
             
             self.logger.info(f"✅ 목표 포트폴리오 로드: {portfolio_date} ({len(target_portfolio)}개 종목)")
