@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from core.candidate_selector import CandidateStock
 from utils.logger import setup_logger
 from utils.korean_time import now_kst
+from config.db_config import DB_CONFIG
 
 
 @dataclass
@@ -39,16 +40,6 @@ class PriceRecord:
     low_price: float
     close_price: float
     volume: int
-
-
-# PostgreSQL 연결 설정
-DB_CONFIG = {
-    'host': '172.23.208.1',
-    'port': 5433,
-    'dbname': 'robotrader_quant',
-    'user': 'postgres',
-    'password': 'postgres',
-}
 
 
 class DatabaseManager:
