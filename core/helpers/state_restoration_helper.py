@@ -54,16 +54,20 @@ class StateRestorationHelper:
             today = now_kst().strftime('%Y-%m-%d')
 
             # 1. 오늘 날짜의 후보 종목 복원
-            with self.db_manager._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    SELECT DISTINCT stock_code, stock_name, score, reasons
-                    FROM candidate_stocks
-                    WHERE DATE(selection_date) = %s
-                    ORDER BY score DESC
-                ''', (today,))
+            conn = self.db_manager._get_connection()
+            try:
+                with conn:
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        SELECT DISTINCT stock_code, stock_name, score, reasons
+                        FROM candidate_stocks
+                        WHERE DATE(selection_date) = %s
+                        ORDER BY score DESC
+                    ''', (today,))
 
-                rows = cursor.fetchall()
+                    rows = cursor.fetchall()
+            finally:
+                self.db_manager._put_connection(conn)
 
             if not rows:
                 logger.info(f"📊 오늘({today}) 후보 종목 없음")

@@ -213,8 +213,9 @@ class VirtualTradingManager:
                 return False
             
             # 중복 매도 방지: 해당 매수 기록이 이미 매도되었는지 확인
+            conn = self.db_manager._get_connection()
             try:
-                with self.db_manager._get_connection() as conn:
+                with conn:
                     cursor = conn.cursor()
                     cursor.execute('''
                         SELECT COUNT(*) FROM virtual_trading_records 
@@ -228,6 +229,8 @@ class VirtualTradingManager:
             except Exception as check_error:
                 self.logger.error(f"❌ 중복 매도 검사 오류: {check_error}")
                 return False
+            finally:
+                self.db_manager._put_connection(conn)
                 
             # DB에 가상 매도 기록 저장
             success = self.db_manager.save_virtual_sell(

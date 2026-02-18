@@ -493,8 +493,9 @@ class QuantRebalancingService:
                 # ===== 가상 매매 모드: virtual_trading_records에서 조회 =====
                 self.logger.info("📋 가상매매 모드: virtual_trading_records에서 보유종목 조회")
                 if self.db_manager:
+                    conn = self.db_manager._get_connection()
                     try:
-                        with self.db_manager._get_connection() as conn:
+                        with conn:
                             cursor = conn.cursor()
                             
                             query = '''
@@ -531,6 +532,8 @@ class QuantRebalancingService:
                     except Exception as db_err:
                         self.logger.warning(f"⚠️ 가상 매매 보유 종목 조회 실패: {db_err}")
                         return []
+                    finally:
+                        self.db_manager._put_connection(conn)
                 return []
             
             # ===== 실전 매매 모드: KIS API 실제 계좌 잔고 조회 =====

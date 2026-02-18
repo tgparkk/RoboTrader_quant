@@ -478,8 +478,9 @@ class TradingDecisionEngine:
             # 매수 기록에서 전략명 가져오기
             strategy = None
             if buy_record_id and self.db_manager:
+                conn = self.db_manager._get_connection()
                 try:
-                    with self.db_manager._get_connection() as conn:
+                    with conn:
                         cursor = conn.cursor()
                         cursor.execute('''
                             SELECT strategy FROM virtual_trading_records 
@@ -492,6 +493,8 @@ class TradingDecisionEngine:
                             self.logger.debug(f"📊 {stock_code} 매수 기록에서 전략명 조회: {strategy}")
                 except Exception as e:
                     self.logger.error(f"❌ 매수 기록 전략명 조회 오류: {e}")
+                finally:
+                    self.db_manager._put_connection(conn)
             
             # 전략명을 찾지 못한 경우 퀀트 리밸런싱으로 설정
             if not strategy:
