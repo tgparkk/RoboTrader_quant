@@ -357,7 +357,7 @@ class TradingStockManager:
     async def _monitor_stock_states(self):
         """종목 상태 모니터링"""
         try:
-            self.logger.debug("🔄 종목 상태 모니터링 실행")
+            # self.logger.debug("🔄 종목 상태 모니터링 실행")
 
             # 주문 완료 확인
             await self._check_order_completions()
@@ -641,14 +641,14 @@ class TradingStockManager:
                 current_price_info = self.intraday_manager.get_cached_current_price(stock_code)
                 if current_price_info:
                     current_price = current_price_info.get('current_price')
-                    self.logger.debug(f"📊 {stock_code} 캐시된 현재가 사용: {current_price:,.0f}원")
+                    # self.logger.debug(f"📊 {stock_code} 캐시된 현재가 사용: {current_price:,.0f}원")
 
             # 3. data_collector fallback (최종 수단)
             if current_price is None:
                 price_data = self.data_collector.get_stock(stock_code)
                 if price_data and price_data.last_price > 0:
                     current_price = price_data.last_price
-                    self.logger.debug(f"📊 {stock_code} data_collector 현재가 사용: {current_price:,.0f}원")
+                    # self.logger.debug(f"📊 {stock_code} data_collector 현재가 사용: {current_price:,.0f}원")
 
             # 현재가 조회 실패 시 종료
             if current_price is None or current_price <= 0:
