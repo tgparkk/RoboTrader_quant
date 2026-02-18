@@ -280,6 +280,26 @@ class DatabaseManager:
                     )
                 ''')
 
+                # 리밸런싱 이력 테이블
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS rebalancing_history (
+                        id SERIAL PRIMARY KEY,
+                        rebalancing_date TEXT NOT NULL,
+                        stock_code VARCHAR(10) NOT NULL,
+                        stock_name VARCHAR(100),
+                        action VARCHAR(10) NOT NULL,
+                        reason TEXT,
+                        rank INTEGER,
+                        total_score DOUBLE PRECISION,
+                        momentum_score DOUBLE PRECISION,
+                        target_profit_rate DOUBLE PRECISION,
+                        stop_loss_rate DOUBLE PRECISION,
+                        quantity INTEGER,
+                        price DOUBLE PRECISION,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+
                 # 매매 기록 테이블 (기존)
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS trading_records (
