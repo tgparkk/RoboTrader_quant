@@ -4,6 +4,7 @@
 """
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 import json
 import subprocess
 import pandas as pd
@@ -60,19 +61,29 @@ class DatabaseManager:
         
         self.logger.info(f"데이터베이스 초기화: PostgreSQL {self.db_host}:{self.db_port}/{self.db_name}")
 
-        # 테이블 생성 (멱등)
-        self._create_tables()
-
-    def _get_connection(self):
-        """PostgreSQL 연결 생성"""
-        conn = psycopg2.connect(
+        # 연결 풀 초기화
+        self._pool = psycopg2.pool.ThreadedConnectionPool(
+            minconn=2,
+            maxconn=10,
             host=self.db_host,
             port=self.db_port,
             dbname=self.db_name,
             user=self.db_user,
             password=self.db_password,
         )
-        return conn
+        self.logger.info("DB 연결 풀 초기화 완료 (min=2, max=10)")
+
+        # 테이블 생성 (멱등)
+        self._create_tables()
+
+    def _get_connection(self):
+        """연결 풀에서 PostgreSQL 연결 획득"""
+        return self._pool.getconn()
+
+    def _put_connection(self, conn):
+        """연결을 풀에 반환"""
+        if conn and not conn.closed:
+            self._pool.putconn(conn)
 
     def get_connection(self):
         """외부 코드가 직접 연결을 얻을 수 있도록 공개 메서드 제공"""
@@ -116,7 +127,7 @@ class DatabaseManager:
             self.logger.error(f"실거래 당일 손실 카운트 조회 실패({stock_code}): {e}")
             return 0
         finally:
-            conn.close()
+            self._put_connection(conn)
     
     def _create_tables(self):
         """데이터베이스 테이블 생성 (멱등)"""
@@ -400,7 +411,7 @@ class DatabaseManager:
             self.logger.error(f"테이블 생성 실패: {e}")
             raise
         finally:
-            conn.close()
+            self._put_connection(conn)
     
     def save_candidate_stocks(self, candidates: List[CandidateStock], selection_date: datetime = None) -> bool:
         """후보 종목 목록 저장"""
@@ -455,7 +466,7 @@ class DatabaseManager:
                 
                 return True
             finally:
-                conn.close()
+                self._put_connection(conn)
                 
         except Exception as e:
             self.logger.error(f"후보 종목 저장 실패: {e}")
@@ -498,7 +509,7 @@ class DatabaseManager:
                 self.logger.debug(f"{stock_code} 가격 데이터 {len(price_data)}개 저장")
                 return True
             finally:
-                conn.close()
+                self._put_connection(conn)
                 
         except Exception as e:
             self.logger.error(f"가격 데이터 저장 실패 ({stock_code}): {e}")
@@ -551,7 +562,7 @@ class DatabaseManager:
                 self.logger.debug(f"{stock_code} 1분봉 데이터 {len(df_minute)}개 저장 ({date_str})")
                 return True
             finally:
-                conn.close()
+                self._put_connection(conn)
                 
         except Exception as e:
             self.logger.error(f"1분봉 데이터 저장 실패 ({stock_code}, {date_str}): {e}")
@@ -629,7 +640,7 @@ class DatabaseManager:
                 self.logger.info(f"재무 데이터 {len(rows)}건 저장/갱신")
                 return True
             finally:
-                conn.close()
+                self._put_connection(conn)
         
         except Exception as e:
             self.logger.error(f"재무 데이터 저장 실패: {e}")
@@ -681,7 +692,7 @@ class DatabaseManager:
                 self.logger.info(f"{calc_date} 팩터 스코어 {len(rows)}건 저장")
                 return True
             finally:
-                conn.close()
+                self._put_connection(conn)
         
         except Exception as e:
             self.logger.error(f"팩터 스코어 저장 실패: {e}")
@@ -725,7 +736,7 @@ class DatabaseManager:
                 self.logger.info(f"{calc_date} 포트폴리오 {len(rows)}건 저장")
                 return True
             finally:
-                conn.close()
+                self._put_connection(conn)
         
         except Exception as e:
             self.logger.error(f"포트폴리오 저장 실패: {e}")
@@ -759,7 +770,7 @@ class DatabaseManager:
             self.logger.error(f"quant 포트폴리오 조회 실패: {e}")
             return []
         finally:
-            conn.close()
+            self._put_connection(conn)
     
     def get_quant_factors(self, calc_date: str, stock_code: str = None) -> List[Dict[str, Any]]:
         """일자별 팩터 점수 조회"""
@@ -800,7 +811,7 @@ class DatabaseManager:
             self.logger.error(f"팩터 점수 조회 실패: {e}")
             return []
         finally:
-            conn.close()
+            self._put_connection(conn)
     
     def get_minute_data(self, stock_code: str, date_str: str) -> Optional[pd.DataFrame]:
         """1분봉 데이터를 기존 stock_prices 테이블에서 조회"""
@@ -840,7 +851,7 @@ class DatabaseManager:
             self.logger.error(f"1분봉 데이터 조회 실패 ({stock_code}, {date_str}): {e}")
             return None
         finally:
-            conn.close()
+            self._put_connection(conn)
     
     def has_minute_data(self, stock_code: str, date_str: str) -> bool:
         """해당 종목의 해당 날짜 1분봉 데이터가 DB에 있는지 확인"""
@@ -865,7 +876,7 @@ class DatabaseManager:
             self.logger.error(f"1분봉 데이터 존재 확인 실패 ({stock_code}, {date_str}): {e}")
             return False
         finally:
-            conn.close()
+            self._put_connection(conn)
 
     def get_candidate_history(self, days: int = 30) -> pd.DataFrame:
         """후보 종목 선정 이력 조회"""
@@ -896,7 +907,7 @@ class DatabaseManager:
             self.logger.error(f"후보 종목 이력 조회 실패: {e}")
             return pd.DataFrame()
         finally:
-            conn.close()
+            self._put_connection(conn)
     
     def get_price_history(self, stock_code: str, days: int = 30) -> pd.DataFrame:
         """종목별 가격 이력 조회"""
@@ -927,7 +938,7 @@ class DatabaseManager:
             self.logger.error(f"가격 이력 조회 실패 ({stock_code}): {e}")
             return pd.DataFrame()
         finally:
-            conn.close()
+            self._put_connection(conn)
     
     def get_candidate_performance(self, days: int = 30) -> pd.DataFrame:
         """후보 종목 성과 분석"""
@@ -962,7 +973,7 @@ class DatabaseManager:
             self.logger.error(f"성과 분석 조회 실패: {e}")
             return pd.DataFrame()
         finally:
-            conn.close()
+            self._put_connection(conn)
     
     def get_daily_candidate_count(self, days: int = 30) -> pd.DataFrame:
         """일별 후보 종목 선정 수"""
@@ -991,7 +1002,7 @@ class DatabaseManager:
             self.logger.error(f"일별 통계 조회 실패: {e}")
             return pd.DataFrame()
         finally:
-            conn.close()
+            self._put_connection(conn)
     
     def cleanup_old_data(self, keep_days: int = 90):
         """오래된 데이터 정리"""
@@ -1017,7 +1028,7 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"데이터 정리 실패: {e}")
         finally:
-            conn.close()
+            self._put_connection(conn)
     
     def get_database_stats(self) -> Dict[str, int]:
         """데이터베이스 통계"""
@@ -1037,7 +1048,7 @@ class DatabaseManager:
             self.logger.error(f"통계 조회 실패: {e}")
             return {}
         finally:
-            conn.close()
+            self._put_connection(conn)
 
     # ============================
     # 실거래 저장/조회 API
@@ -1084,7 +1095,7 @@ class DatabaseManager:
                 self.logger.info(f"✅ 실거래 매수 기록 저장: {stock_code} {quantity}주 @{price:,.0f}{profit_info}")
                 return rec_id
             finally:
-                conn.close()
+                self._put_connection(conn)
         except Exception as e:
             self.logger.error(f"실거래 매수 기록 저장 실패: {e}")
             return None
@@ -1178,7 +1189,7 @@ class DatabaseManager:
                 )
                 return True
             finally:
-                conn.close()
+                self._put_connection(conn)
         except Exception as e:
             self.logger.error(f"실거래 매도 기록 저장 실패: {e}")
             return False
@@ -1206,7 +1217,7 @@ class DatabaseManager:
             self.logger.error(f"실거래 미매칭 매수 조회 실패: {e}")
             return None
         finally:
-            conn.close()
+            self._put_connection(conn)
     
     def get_last_open_virtual_buy(self, stock_code: str, quantity: int = None) -> Optional[int]:
         """가상 매매: 해당 종목의 미매칭 매수(가장 최근) ID 조회"""
@@ -1248,7 +1259,7 @@ class DatabaseManager:
             self.logger.error(f"가상 매매 미매칭 매수 조회 실패: {e}")
             return None
         finally:
-            conn.close()
+            self._put_connection(conn)
     
     def save_virtual_buy(self, stock_code: str, stock_name: str, price: float,
                         quantity: int, strategy: str, reason: str,
@@ -1292,7 +1303,7 @@ class DatabaseManager:
                 self.logger.info(f"🔥 가상 매수 기록 저장: {stock_code}({stock_name}) {quantity}주 @{price:,.0f}원 - {strategy}{profit_info}")
                 return buy_record_id
             finally:
-                conn.close()
+                self._put_connection(conn)
 
         except Exception as e:
             self.logger.error(f"가상 매수 기록 저장 실패: {e}")
@@ -1398,7 +1409,7 @@ class DatabaseManager:
                                f"손익: {profit_sign}{profit_loss:,.0f}원 ({profit_rate:+.2f}%) - {strategy}")
                 return True
             finally:
-                conn.close()
+                self._put_connection(conn)
 
         except Exception as e:
             self.logger.error(f"가상 매도 기록 저장 실패: {e}")
@@ -1441,7 +1452,7 @@ class DatabaseManager:
             self.logger.error(f"미체결 포지션 조회 실패: {e}")
             return pd.DataFrame()
         finally:
-            conn.close()
+            self._put_connection(conn)
     
     def get_real_open_positions(self) -> pd.DataFrame:
         """미체결 실전 포지션 조회"""
@@ -1478,7 +1489,7 @@ class DatabaseManager:
             self.logger.error(f"실전 미체결 포지션 조회 실패: {e}")
             return pd.DataFrame()
         finally:
-            conn.close()
+            self._put_connection(conn)
 
     def get_virtual_trading_history(self, days: int = 30, include_open: bool = True) -> pd.DataFrame:
         """가상 매매 이력 조회"""
@@ -1544,7 +1555,7 @@ class DatabaseManager:
             self.logger.error(f"가상 매매 이력 조회 실패: {e}")
             return pd.DataFrame()
         finally:
-            conn.close()
+            self._put_connection(conn)
     
     def get_virtual_trading_stats(self, days: int = 30) -> Dict[str, Any]:
         """가상 매매 통계"""
@@ -1634,7 +1645,7 @@ class DatabaseManager:
             self.logger.error(f"오늘 손절 종목 조회 실패: {e}")
             return []
         finally:
-            conn.close()
+            self._put_connection(conn)
 
     def get_today_profit_taking_stocks(self, target_date: str = None, include_real: bool = False) -> List[str]:
         """오늘 익절한 종목 코드 리스트 조회"""
@@ -1675,7 +1686,7 @@ class DatabaseManager:
             self.logger.error(f"오늘 익절 종목 조회 실패: {e}")
             return []
         finally:
-            conn.close()
+            self._put_connection(conn)
 
     def backup_database(self, max_backups: int = 7) -> Optional[str]:
         """DB 백업 (pg_dump 사용)"""
@@ -1774,7 +1785,7 @@ class DatabaseManager:
             self.logger.error(f"리밸런싱 이력 저장 실패: {e}")
             raise
         finally:
-            conn.close()
+            self._put_connection(conn)
 
     def get_rebalancing_history(self, date=None, stock_code=None, limit=100):
         """리밸런싱 이력 조회
@@ -1810,4 +1821,4 @@ class DatabaseManager:
             self.logger.error(f"리밸런싱 이력 조회 실패: {e}")
             return []
         finally:
-            conn.close()
+            self._put_connection(conn)
