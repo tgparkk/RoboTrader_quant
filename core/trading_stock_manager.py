@@ -846,7 +846,7 @@ class TradingStockManager:
                     trading_stock = self.trading_stocks[stock_code]
                     trading_stock.current_order_id = new_order_id
                     trading_stock.order_history.append(new_order_id)
-                    self.logger.debug(f"🔄 {stock_code} 현재 주문ID 업데이트: {new_order_id}")
+                    self.logger.info(f"🔄 {stock_code} 현재 주문ID 업데이트: {new_order_id}")
         except Exception as e:
             self.logger.warning(f"⚠️ 현재 주문ID 업데이트 실패({stock_code}): {e}")
     
@@ -867,7 +867,7 @@ class TradingStockManager:
                 # 🆕 추가: 이미 POSITIONED 상태라면 중복 처리 방지
                 if (order.order_type == OrderType.BUY and
                     trading_stock.state == StockState.POSITIONED):
-                    self.logger.debug(f"⚠️ {order.stock_code} 이미 POSITIONED 상태 (중복 콜백 방지)")
+                    self.logger.info(f"⚠️ {order.stock_code} 이미 POSITIONED 상태 (중복 콜백 방지)")
                     return
 
                 # 🆕 레이스 컨디션 방지: 이미 처리된 주문인지 확인

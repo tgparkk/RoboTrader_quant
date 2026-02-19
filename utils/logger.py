@@ -17,7 +17,7 @@ except Exception:
 
 def setup_logger(
     name: str,
-    level: int = logging.DEBUG,
+    level: int = logging.INFO,
     file_path: Optional[Union[str, Path]] = None,
     use_kst: bool = False,
 ):

@@ -93,7 +93,7 @@ class MLDataCollector:
 
             saved_count = len(rows_to_insert)
             if saved_count > 0:
-                self.logger.debug(f"✅ [{stock_code}] 일봉 데이터 DB 저장: {saved_count}건")
+                self.logger.info(f"✅ [{stock_code}] 일봉 데이터 DB 저장: {saved_count}건")
                 return True
             else:
                 return False

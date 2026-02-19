@@ -282,7 +282,7 @@ class DayTradingBot:
             stock_code = trading_stock.stock_code
             stock_name = trading_stock.stock_name
 
-            self.logger.debug(f"🔍 매수 판단 시작: {stock_code}({stock_name})")
+            self.logger.info(f"🔍 매수 판단 시작: {stock_code}({stock_name})")
 
             # 추가 안전 검증: 현재 보유 중인 종목인지 다시 한번 확인
             positioned_stocks = self.trading_manager.get_stocks_by_state(StockState.POSITIONED)
@@ -309,14 +309,14 @@ class DayTradingBot:
                 self.logger.debug(f"❌ {stock_code} 일봉 데이터 부족: {len(daily_data)}개 (최소 20개 필요)")
                 return
             
-            self.logger.debug(f"✅ {stock_code} 일봉 데이터 조회 완료: {len(daily_data)}건")
+            self.logger.info(f"✅ {stock_code} 일봉 데이터 조회 완료: {len(daily_data)}건")
 
             # 매매 판단 엔진으로 매수 신호 확인 (일봉 데이터 사용)
             buy_signal, buy_reason, buy_info = await self.decision_engine.analyze_buy_decision(trading_stock, daily_data)
             
-            self.logger.debug(f"💡 {stock_code} 매수 판단 결과: signal={buy_signal}, reason='{buy_reason}'")
+            self.logger.info(f"💡 {stock_code} 매수 판단 결과: signal={buy_signal}, reason='{buy_reason}'")
             if buy_signal and buy_info:
-                self.logger.debug(f"💰 {stock_code} 매수 정보: 가격={buy_info['buy_price']:,.0f}원, 수량={buy_info['quantity']:,}주, 투자금={buy_info['max_buy_amount']:,.0f}원")
+                self.logger.info(f"💰 {stock_code} 매수 정보: 가격={buy_info['buy_price']:,.0f}원, 수량={buy_info['quantity']:,}주, 투자금={buy_info['max_buy_amount']:,.0f}원")
           
             
             if buy_signal and buy_info.get('quantity', 0) > 0:

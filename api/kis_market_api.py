@@ -248,7 +248,7 @@ def get_inquire_daily_itemchartprice_extended(div_code: str = "J", itm_no: str =
     if len(df) > max_count:
         df = df.tail(max_count).reset_index(drop=True)
     
-    logger.debug(f"✅ {itm_no} 일봉 연속조회 완료: {len(df)}건 ({call_count}회 호출)")
+    logger.info(f"✅ {itm_no} 일봉 연속조회 완료: {len(df)}건 ({call_count}회 호출)")
     return df
 
 

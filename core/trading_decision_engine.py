@@ -355,7 +355,7 @@ class TradingDecisionEngine:
                 current_price = buy_price
             else:
                 current_price = self._safe_float_convert(combined_data['close'].iloc[-1])
-            self.logger.debug(f"📊 {stock_code} 매수가: {current_price:,.0f}원")
+            self.logger.info(f"📊 {stock_code} 매수가: {current_price:,.0f}원")
             
             # 가상 매수 수량 설정 (VirtualTradingManager 사용)
             quantity = self.virtual_trading.get_max_quantity(current_price)

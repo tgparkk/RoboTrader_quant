@@ -206,7 +206,7 @@ def auth(svr: str = 'prod', product: str = '01') -> bool:
             return False
     else:
         my_token = saved_token
-        logger.debug('✅ 기존 토큰 사용')
+        logger.info('✅ 기존 토큰 사용')
 
     # 환경 설정
     changeTREnv(f"Bearer {my_token}", svr, product)

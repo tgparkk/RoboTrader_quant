@@ -195,13 +195,19 @@ class CandidateSelector:
         
         # 병렬 처리를 위해 배치 단위로 처리
         batch_size = 20
-        for i in range(0, len(stocks), batch_size):
+        total_stocks = len(stocks)
+        for i in range(0, total_stocks, batch_size):
             batch = stocks[i:i + batch_size]
             batch_candidates = await self._analyze_stock_batch(batch)
             candidates.extend(batch_candidates)
-            
+
+            # 진행도 로그 (100종목마다)
+            processed = min(i + batch_size, total_stocks)
+            if processed % 100 < batch_size:
+                self.logger.info(f"📊 스크리닝 진행: {processed}/{total_stocks} ({len(candidates)}개 통과)")
+
             # API 호출 제한 고려하여 잠시 대기
-            if i + batch_size < len(stocks):
+            if i + batch_size < total_stocks:
                 await asyncio.sleep(1)
         
         return candidates
@@ -267,10 +273,10 @@ class CandidateSelector:
             weekly_len = len(weekly_data) if hasattr(weekly_data, '__len__') else 0
             self.logger.debug(f"📊 {code}: 일봉 {daily_len}개, 주봉 {weekly_len}개 조회됨")
             
-            # 실제 데이터 샘플 확인
-            if hasattr(weekly_data, 'empty') and not weekly_data.empty:
-                self.logger.debug(f"📊 {code}: 주봉 컬럼 - {list(weekly_data.columns)}")
-                self.logger.debug(f"📊 {code}: 주봉 샘플 - {weekly_data.iloc[0].to_dict()}")
+            # 주봉 데이터 존재 확인
+            if hasattr(weekly_data, 'empty') and weekly_data.empty:
+                self.logger.debug(f"❌ {code}: 주봉 데이터 비어있음")
+                return None
             
             # daily_data가 DataFrame인 경우 처리
             if hasattr(daily_data, 'empty'):
@@ -302,7 +308,7 @@ class CandidateSelector:
                 self.logger.debug(f"❌ {code}: 거래대금 부족 ({volume_amount/1_000_000_000:.1f}억원)")
                 return None
             
-            self.logger.debug(f"✅ {code}: 기본 조건 통과 - 거래대금 {volume_amount/1_000_000_000:.1f}억원")
+            self.logger.info(f"✅ {code}({name}): 기본 조건 통과 - 거래대금 {volume_amount/1_000_000_000:.1f}억원")
             
             # 조건 분석
             score = 0
@@ -430,7 +436,7 @@ class CandidateSelector:
                 score += 20
                 reasons.append("당일 3% 이상 상승")
             
-            self.logger.debug(f"📊 {code}: 최종 점수 {score}점 - {', '.join(reasons) if reasons else '조건 미충족'}")
+            self.logger.info(f"📊 {code}({name}): 최종 점수 {score}점 - {', '.join(reasons) if reasons else '조건 미충족'}")
             
             # 최소 점수 기준
             if score < 50:
