@@ -744,9 +744,14 @@ class DayTradingBot:
             # DB 헬스체크
             db_ok = False
             try:
-                with self.db_manager._get_connection() as conn:
-                    conn.execute("SELECT 1")
+                conn = self.db_manager._get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute("SELECT 1")
+                    cur.close()
                     db_ok = True
+                finally:
+                    self.db_manager._put_connection(conn)
             except Exception:
                 pass
 
