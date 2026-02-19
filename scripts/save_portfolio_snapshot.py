@@ -107,26 +107,24 @@ def save_portfolio_snapshot():
 
         # DB 저장
         if snapshot_data:
-            import sqlite3
-            conn = sqlite3.connect(db.db_path)
-            cursor = conn.cursor()
+            from config.pg_helper import pg_connection
 
-            for data in snapshot_data:
-                cursor.execute('''
-                    INSERT INTO portfolio_snapshots
-                    (snapshot_time, stock_code, stock_name, quantity, buy_price, current_price,
-                     buy_value, current_value, unrealized_pl, unrealized_pl_rate,
-                     target_profit_rate, stop_loss_rate)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    data['snapshot_time'], data['stock_code'], data['stock_name'],
-                    data['quantity'], data['buy_price'], data['current_price'],
-                    data['buy_value'], data['current_value'], data['unrealized_pl'],
-                    data['unrealized_pl_rate'], data['target_profit_rate'], data['stop_loss_rate']
-                ))
+            with pg_connection() as conn:
+                cursor = conn.cursor()
 
-            conn.commit()
-            conn.close()
+                for data in snapshot_data:
+                    cursor.execute('''
+                        INSERT INTO portfolio_snapshots
+                        (snapshot_time, stock_code, stock_name, quantity, buy_price, current_price,
+                         buy_value, current_value, unrealized_pl, unrealized_pl_rate,
+                         target_profit_rate, stop_loss_rate)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ''', (
+                        data['snapshot_time'], data['stock_code'], data['stock_name'],
+                        data['quantity'], data['buy_price'], data['current_price'],
+                        data['buy_value'], data['current_value'], data['unrealized_pl'],
+                        data['unrealized_pl_rate'], data['target_profit_rate'], data['stop_loss_rate']
+                    ))
 
             logger.info(f"✅ 스냅샷 저장 완료: {success_count}개 성공, {fail_count}개 실패")
 

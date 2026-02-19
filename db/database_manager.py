@@ -1710,8 +1710,9 @@ class DatabaseManager:
             full_env = os.environ.copy()
             full_env.update(env)
 
+            pg_dump_path = r'C:\Program Files\PostgreSQL\16\bin\pg_dump.exe'
             result = subprocess.run(
-                ['pg_dump', '-h', self.db_host, '-p', str(self.db_port),
+                [pg_dump_path, '-h', self.db_host, '-p', str(self.db_port),
                  '-U', self.db_user, '-d', self.db_name, '-f', str(backup_path)],
                 env=full_env,
                 capture_output=True,

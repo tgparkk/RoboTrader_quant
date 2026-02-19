@@ -247,7 +247,7 @@ class MLDataCollector:
                                         returns_20d_list.append(ret)
                                 
                                 if returns_20d_list:
-                                    volatility_20d = np.std(returns_20d_list) if len(returns_20d_list) > 1 else 0
+                                    volatility_20d = float(np.std(returns_20d_list)) if len(returns_20d_list) > 1 else 0
 
                         market_cap = None
                         if current_market_cap > 0 and current_price > 0:
