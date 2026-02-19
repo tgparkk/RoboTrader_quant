@@ -73,8 +73,8 @@ def main():
 
     # 데이터 확인
     print("\n4. 저장된 대차대조표 데이터 확인...")
-    import sqlite3
-    conn = sqlite3.connect('data/robotrader.db')
+    import psycopg2
+    conn = psycopg2.connect(host='172.23.208.1', port=5433, dbname='robotrader_quant', user='postgres', password='postgres')
 
     for stock_code in stock_codes[:3]:  # 처음 3개만 샘플 확인
         query = f"""

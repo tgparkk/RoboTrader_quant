@@ -1,9 +1,8 @@
-import sqlite3
+import psycopg2
 import pandas as pd
 from datetime import datetime, timedelta
 
-db_path = 'd:/GIT/RoboTrader_quant/data/robotrader.db'
-conn = sqlite3.connect(db_path)
+conn = psycopg2.connect(host='172.23.208.1', port=5433, dbname='robotrader_quant', user='postgres', password='postgres')
 
 print('=' * 100)
 print('                           Data Storage Health Check')
@@ -32,18 +31,25 @@ print()
 print('[2] Financial Statements Schema')
 print('-' * 100)
 cursor = conn.cursor()
-cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%financial%'")
+cursor.execute("""
+    SELECT table_name FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name LIKE '%%financial%%'
+""")
 tables = cursor.fetchall()
 print('Financial tables:', [t[0] for t in tables])
 print()
 
 if tables:
-    for table_name, in tables:
-        cursor.execute(f'PRAGMA table_info({table_name})')
+    for (table_name,) in tables:
+        cursor.execute("""
+            SELECT column_name, data_type FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = %s
+            ORDER BY ordinal_position
+        """, (table_name,))
         columns = cursor.fetchall()
         print(f'Table: {table_name}')
-        for col in columns:
-            print(f'  - {col[1]} ({col[2]})')
+        for col_name, col_type in columns:
+            print(f'  - {col_name} ({col_type})')
         print()
 
 # 3. 재무지표 데이터 확인
@@ -60,7 +66,6 @@ df_fd = pd.read_sql_query(query, conn)
 print(df_fd.to_string(index=False))
 print()
 
-# 샘플 데이터 확인
 query = '''
 SELECT stock_code, per, pbr, roe, debt_ratio, updated_at
 FROM financial_data
@@ -102,7 +107,6 @@ print()
 print('[5] Data Consistency Check')
 print('-' * 100)
 
-# 12/24 데이터 비교
 query = '''
 SELECT
     (SELECT COUNT(DISTINCT stock_code) FROM daily_prices WHERE date = '2025-12-24') as daily_stocks,
@@ -116,7 +120,6 @@ print(f'  Factor scores: {df_check["factor_stocks"].iloc[0]} stocks')
 print(f'  Portfolio: {df_check["portfolio_stocks"].iloc[0]} stocks')
 print()
 
-# 문제 진단
 issues = []
 daily = df_check["daily_stocks"].iloc[0]
 factor = df_check["factor_stocks"].iloc[0]
@@ -180,10 +183,10 @@ print('-' * 100)
 
 query = '''
 SELECT
-    DATE(updated_at) as update_date,
+    DATE(updated_at)::text as update_date,
     COUNT(*) as updates
 FROM financial_data
-WHERE updated_at >= datetime('now', '-30 days')
+WHERE updated_at >= CURRENT_TIMESTAMP - INTERVAL '30 days'
 GROUP BY DATE(updated_at)
 ORDER BY update_date DESC
 LIMIT 10

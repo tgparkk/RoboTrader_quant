@@ -13,7 +13,7 @@ DB에 저장된 가격 + yfinance 재무데이터로 팩터 점수를 계산합�
 재무데이터 없는 종목: 가격 기반 프록시로 폴백 (중립값 50점)
 """
 import math
-import sqlite3
+import psycopg2
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
@@ -75,14 +75,14 @@ class HistoricalFactorCalculator:
         """전체 데이터를 메모리에 로드 (성능 최적화)"""
         logger.info("데이터 프리로드 시작...")
 
-        with sqlite3.connect(self.db_path) as conn:
+        with psycopg2.connect(host='172.23.208.1', port=5433, dbname='robotrader_quant', user='postgres', password='postgres') as conn:
             # 일봉 데이터 (모멘텀 계산에 12개월 여유 필요)
             extended_start = (datetime.strptime(start_date, '%Y-%m-%d') - timedelta(days=400)).strftime('%Y-%m-%d')
             self._prices_df = pd.read_sql_query(
                 """SELECT stock_code, date, open, high, low, close, volume,
                           trading_value, market_cap
                    FROM daily_prices
-                   WHERE date >= ? AND date <= ? AND stock_code != 'KS11'
+                   WHERE date >= %s AND date <= %s AND stock_code != 'KS11'
                    ORDER BY stock_code, date""",
                 conn, params=(extended_start, end_date)
             )
@@ -101,7 +101,7 @@ class HistoricalFactorCalculator:
             # 거래일 목록 (실제 백테스트 기간만)
             days = pd.read_sql_query(
                 """SELECT DISTINCT date FROM daily_prices
-                   WHERE date >= ? AND date <= ? AND stock_code != 'KS11'
+                   WHERE date >= %s AND date <= %s AND stock_code != 'KS11'
                    ORDER BY date""",
                 conn, params=(start_date, end_date)
             )
@@ -520,7 +520,7 @@ class HistoricalFactorCalculator:
 
     def _save_factors(self, calc_date: str, factor_rows: List[Dict], portfolio_size: int):
         """팩터 점수 및 포트폴리오 DB 저장"""
-        with sqlite3.connect(self.db_path) as conn:
+        with psycopg2.connect(host='172.23.208.1', port=5433, dbname='robotrader_quant', user='postgres', password='postgres') as conn:
             cursor = conn.cursor()
 
             # quant_factors 저장
@@ -536,10 +536,10 @@ class HistoricalFactorCalculator:
                 ))
 
             cursor.executemany('''
-                INSERT OR REPLACE INTO quant_factors
+                INSERT INTO quant_factors
                 (calc_date, stock_code, value_score, momentum_score,
                  quality_score, growth_score, total_score, factor_rank, factor_details)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ''', factor_insert)
 
             # quant_portfolio 저장 (상위 N개)
@@ -554,9 +554,9 @@ class HistoricalFactorCalculator:
                 ))
 
             cursor.executemany('''
-                INSERT OR REPLACE INTO quant_portfolio
+                INSERT INTO quant_portfolio
                 (calc_date, stock_code, stock_name, rank, total_score, reason)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s)
             ''', portfolio_insert)
 
             conn.commit()

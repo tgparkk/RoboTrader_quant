@@ -3,25 +3,22 @@
 """
 가상매매 DB 상태 점검 스크립트
 """
-import sqlite3
-from pathlib import Path
+import psycopg2
+from datetime import datetime
 
-project_root = Path(__file__).parent
-db_path = project_root / "data" / "robotrader.db"
+conn = psycopg2.connect(host='172.23.208.1', port=5433, dbname='robotrader_quant', user='postgres', password='postgres')
+cursor = conn.cursor()
 
 print("=" * 100)
 print("🔍 가상매매 DB 상태 점검")
 print("=" * 100)
 print()
 
-conn = sqlite3.connect(str(db_path))
-cursor = conn.cursor()
-
 # 1. is_test 플래그별 통계
 print("1️⃣ is_test 플래그별 거래 통계")
 print("-" * 100)
 cursor.execute('''
-    SELECT 
+    SELECT
         is_test,
         action,
         COUNT(*) as count,
@@ -46,7 +43,7 @@ print()
 print("2️⃣ 오늘(2026-01-20) 거래 내역 (is_test 구분)")
 print("-" * 100)
 cursor.execute('''
-    SELECT 
+    SELECT
         is_test,
         action,
         stock_code,
@@ -55,7 +52,7 @@ cursor.execute('''
         price,
         timestamp
     FROM virtual_trading_records
-    WHERE date(timestamp, 'localtime') = '2026-01-20'
+    WHERE DATE(to_timestamp(timestamp) AT TIME ZONE 'Asia/Seoul') = '2026-01-20'
     ORDER BY timestamp
 ''')
 
@@ -63,7 +60,8 @@ today_records = cursor.fetchall()
 if today_records:
     for is_test, action, stock_code, stock_name, qty, price, ts in today_records:
         test_label = "[테스트]" if is_test else "[실전]"
-        print(f"{test_label} {ts[:16]} | {action:<4} | {stock_code} ({stock_name}) | {qty}주 @{price:,.0f}원")
+        ts_str = datetime.fromtimestamp(int(ts)).strftime('%Y-%m-%d %H:%M') if isinstance(ts, (int, float)) else str(ts)[:16]
+        print(f"{test_label} {ts_str} | {action:<4} | {stock_code} ({stock_name}) | {qty}주 @{price:,.0f}원")
 else:
     print("  오늘 거래 내역 없음")
 print()
@@ -72,7 +70,7 @@ print()
 print("3️⃣ 최근 10건 거래 내역")
 print("-" * 100)
 cursor.execute('''
-    SELECT 
+    SELECT
         timestamp,
         is_test,
         action,
@@ -89,8 +87,6 @@ cursor.execute('''
 recent = cursor.fetchall()
 if recent:
     for row in recent:
-        # 디버그: 데이터 타입 확인
-        # print(f"DEBUG: row = {row}, types = {[type(x) for x in row]}")
         ts = str(row[0]) if row[0] else ""
         is_test = row[1]
         action = row[2]
@@ -99,10 +95,11 @@ if recent:
         qty = row[5]
         price = row[6]
         pl = row[7]
-        
+
         test_label = "[테스트]" if is_test else "[실전]"
+        ts_str = datetime.fromtimestamp(int(ts)).strftime('%Y-%m-%d %H:%M') if ts.isdigit() else ts[:16]
         pl_str = f"손익 {pl:,.0f}원" if pl and action == 'SELL' else ""
-        print(f"{test_label} {ts[:16]} | {action:<4} | {stock_code} ({stock_name}) | {qty}주 @{price:,.0f}원 {pl_str}")
+        print(f"{test_label} {ts_str} | {action:<4} | {stock_code} ({stock_name}) | {qty}주 @{price:,.0f}원 {pl_str}")
 else:
     print("  거래 내역 없음")
 print()
@@ -111,7 +108,7 @@ print()
 print("4️⃣ 현재 보유 종목 (is_test 구분)")
 print("-" * 100)
 cursor.execute('''
-    SELECT 
+    SELECT
         b.is_test,
         b.stock_code,
         b.stock_name,
@@ -133,7 +130,6 @@ if holdings:
     real_count = 0
     for is_test, stock_code, stock_name, qty, price, ts in holdings:
         test_label = "[테스트]" if is_test else "[실전]"
-        from datetime import datetime
         ts_str = datetime.fromtimestamp(int(ts)).strftime('%Y-%m-%d') if isinstance(ts, (int, float)) else str(ts)[:10]
         print(f"{test_label} {stock_code} ({stock_name}) | {qty}주 @{price:,.0f}원 | 매수일: {ts_str}")
         if is_test:
@@ -150,7 +146,7 @@ print()
 print("5️⃣ 전체 가상매매 통계")
 print("-" * 100)
 cursor.execute('''
-    SELECT 
+    SELECT
         is_test,
         COUNT(CASE WHEN action = 'BUY' THEN 1 END) as buys,
         COUNT(CASE WHEN action = 'SELL' THEN 1 END) as sells,

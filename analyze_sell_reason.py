@@ -1,8 +1,7 @@
-import sqlite3
+import psycopg2
 import pandas as pd
 
-db_path = 'd:/GIT/RoboTrader_quant/data/robotrader.db'
-conn = sqlite3.connect(db_path)
+conn = psycopg2.connect(host='172.23.208.1', port=5433, dbname='robotrader_quant', user='postgres', password='postgres')
 
 # 138490의 12/24 전체 순위 확인
 query_all_rank = '''
@@ -31,24 +30,20 @@ if len(df_all) > 0:
     print('[리밸런싱 매도 기준 분석]')
     print()
 
-    # Hard Stop: 점수 < 62
     if score < 62.0:
         print(f'  [1단계: 긴급 매도 (Hard Stop)]')
         print(f'  - 조건: 점수 < 62점')
         print(f'  - 실제: 점수 {score:.2f}점')
         print(f'  - 판정: 해당 (긴급 매도 대상)')
-    # Soft Stop: 점수 62~64 AND 순위 > 50
     elif 62.0 <= score < 64.0 and rank > 50:
         print(f'  [2단계: 조건부 매도 (Soft Stop)]')
         print(f'  - 조건: 점수 62~64점 AND 순위 > 50위')
         print(f'  - 실제: 점수 {score:.2f}점, {rank}위')
         print(f'  - 판정: 해당 (조건부 매도 대상)')
-    # 포트폴리오 리밸런싱
     else:
         print(f'  [3단계: 포트폴리오 리밸런싱]')
         print(f'  - 목표 포트폴리오 TOP 30 포함 여부: ')
 
-        # 포트폴리오 확인
         query_portfolio = '''
         SELECT rank, stock_name, total_score
         FROM quant_portfolio
@@ -83,7 +78,6 @@ else:
 print()
 print('=' * 80)
 
-# 12/22~12/24 팩터 점수 추이
 print()
 print('[최근 팩터 점수 추이]')
 print()

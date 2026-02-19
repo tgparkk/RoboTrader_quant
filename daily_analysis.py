@@ -10,7 +10,7 @@
     python daily_analysis.py 2026-01-20     # 특정 날짜 분석
 """
 import sys
-import sqlite3
+import psycopg2
 from pathlib import Path
 from datetime import datetime
 
@@ -38,7 +38,7 @@ def analyze_trading(target_date):
     print(f"생성 시각: {now_kst().strftime('%Y-%m-%d %H:%M:%S')}")
     print()
     
-    conn = sqlite3.connect(str(db_path))
+    conn = psycopg2.connect(host='172.23.208.1', port=5433, dbname='robotrader_quant', user='postgres', password='postgres')
     cursor = conn.cursor()
     
     # 1. 오늘 매수 내역
@@ -55,8 +55,8 @@ def analyze_trading(target_date):
                target_profit_rate, stop_loss_rate, timestamp
         FROM virtual_trading_records
         WHERE action = 'BUY'
-          AND timestamp >= ?
-          AND timestamp < ?
+          AND timestamp >= %s
+          AND timestamp < %s
         ORDER BY timestamp
     ''', (target_timestamp_start, target_timestamp_end))
     
@@ -94,8 +94,8 @@ def analyze_trading(target_date):
                profit_loss, profit_rate, timestamp
         FROM virtual_trading_records
         WHERE action = 'SELL'
-          AND timestamp >= ?
-          AND timestamp < ?
+          AND timestamp >= %s
+          AND timestamp < %s
         ORDER BY timestamp
     ''', (target_timestamp_start, target_timestamp_end))
     

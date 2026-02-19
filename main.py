@@ -578,6 +578,7 @@ class DayTradingBot:
                         #     self._ml_screening_task is None):
                         #     self.logger.info(f"🔍 08:55+ ML 스크리닝 스케줄 트리거 ({current_time.strftime('%H:%M:%S')})")
                         #     self._ml_screening_task = asyncio.create_task(self._run_ml_screening())
+                        pass
 
                 # 15:35 장 마감 후 일일 매매 리포트 생성
                 if (current_time.hour == 15 and current_time.minute >= 35):
@@ -916,6 +917,7 @@ class DayTradingBot:
             if len(daily_data) >= 2:
                 last_entry = daily_data[-1]
                 # today인지 판단할 수 없으므로 마지막 이전 값 사용
+                pass
                 return getattr(daily_data[-2], "close_price", 0.0)
 
             return 0.0

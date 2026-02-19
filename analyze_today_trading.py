@@ -1,8 +1,8 @@
 """오늘자 가상매매 분석 (is_test=1 기준)"""
-import sqlite3
+import psycopg2
 from datetime import datetime
 
-conn = sqlite3.connect('data/robotrader.db')
+conn = psycopg2.connect(host='172.23.208.1', port=5433, dbname='robotrader_quant', user='postgres', password='postgres')
 cursor = conn.cursor()
 
 today = '2026-01-19'
@@ -14,11 +14,11 @@ print()
 
 # 1. 오늘 매매 기록
 cursor.execute('''
-    SELECT action, stock_code, stock_name, quantity, price, 
-           datetime(timestamp, 'unixepoch', 'localtime') as trade_time,
+    SELECT action, stock_code, stock_name, quantity, price,
+           to_char(to_timestamp(timestamp) AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') as trade_time,
            target_profit_rate, stop_loss_rate, strategy
     FROM virtual_trading_records
-    WHERE date(timestamp, 'unixepoch', 'localtime') = ? AND is_test = 1
+    WHERE DATE(to_timestamp(timestamp) AT TIME ZONE 'Asia/Seoul') = %s AND is_test = 1
     ORDER BY timestamp
 ''', (today,))
 
@@ -46,7 +46,7 @@ if records:
             stop_str = f"{stop*100:.1f}%" if stop else "N/A"
             print(f"  {ts} | {code} {name:20s} | {qty:4d}주 @{price:>10,.0f}원 = {amount:>12,.0f}원 | "
                   f"익절 {target_str} 손절 {stop_str}")
-    
+
     print("\n💸 매도 내역:")
     print("-" * 100)
     sell_found = False
@@ -58,10 +58,10 @@ if records:
             amount = qty * price
             total_sell_amount += amount
             print(f"  {ts} | {code} {name:20s} | {qty:4d}주 @{price:>10,.0f}원 = {amount:>12,.0f}원")
-    
+
     if not sell_found:
         print("  매도 없음")
-    
+
     print()
     print(f"총 매수: {buy_count}건, {total_buy_amount:,.0f}원")
     print(f"총 매도: {sell_count}건, {total_sell_amount:,.0f}원")
@@ -74,7 +74,7 @@ print()
 cursor.execute('''
     SELECT b.stock_code, b.stock_name, b.quantity, b.price,
            b.target_profit_rate, b.stop_loss_rate,
-           datetime(b.timestamp, 'unixepoch', 'localtime') as buy_time
+           to_char(to_timestamp(b.timestamp) AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') as buy_time
     FROM virtual_trading_records b
     WHERE b.action = 'BUY' AND b.is_test = 1
       AND NOT EXISTS (
@@ -92,36 +92,35 @@ print("=" * 100)
 
 if holdings:
     total_value = 0
-    
-    # 최근 종가 가져오기
+
     for code, name, qty, price, target, stop, buy_time in holdings:
         cursor.execute('''
             SELECT close FROM daily_prices
-            WHERE stock_code = ?
+            WHERE stock_code = %s
             ORDER BY date DESC
             LIMIT 1
         ''', (code,))
-        
+
         price_row = cursor.fetchone()
         current_price = price_row[0] if price_row else price
-        
+
         buy_value = qty * price
         current_value = qty * current_price
         unrealized_pl = current_value - buy_value
         unrealized_pl_rate = (unrealized_pl / buy_value * 100) if buy_value > 0 else 0
-        
+
         total_value += current_value
-        
+
         pl_emoji = "🟢" if unrealized_pl >= 0 else "🔴"
         pl_sign = "+" if unrealized_pl >= 0 else ""
-        
+
         target_str = f"{target*100:.0f}%" if target else "N/A"
         stop_str = f"{stop*100:.0f}%" if stop else "N/A"
-        
+
         print(f"{code} {name:20s} | {qty:4d}주 @{price:>9,.0f}원 → {current_price:>9,.0f}원 | "
               f"{pl_emoji}{pl_sign}{unrealized_pl_rate:>6.1f}% ({pl_sign}{unrealized_pl:>10,.0f}원) | "
               f"익절{target_str} 손절{stop_str}")
-    
+
     print("-" * 100)
     print(f"{'총 평가금액:':<80} {total_value:>15,.0f}원")
 else:
@@ -152,7 +151,7 @@ print("=" * 100)
 if stats and stats[0] > 0:
     total_trades, total_pl, win_count, loss_count, avg_rate, max_rate, min_rate = stats
     win_rate = (win_count / total_trades * 100) if total_trades > 0 else 0
-    
+
     print(f"총 매도 거래: {total_trades:,}건")
     print(f"  - 익절: {win_count}건 ({win_rate:.1f}%)")
     print(f"  - 손절: {loss_count}건 ({100-win_rate:.1f}%)")
@@ -168,14 +167,14 @@ print()
 
 # 4. 최근 7일 매매 현황
 cursor.execute('''
-    SELECT 
-        date(timestamp, 'unixepoch', 'localtime') as trade_date,
+    SELECT
+        DATE(to_timestamp(timestamp) AT TIME ZONE 'Asia/Seoul')::text as trade_date,
         action,
         COUNT(*) as count,
         SUM(quantity * price) as amount
     FROM virtual_trading_records
     WHERE is_test = 1
-      AND date(timestamp, 'unixepoch', 'localtime') >= date('now', '-7 days')
+      AND DATE(to_timestamp(timestamp) AT TIME ZONE 'Asia/Seoul') >= CURRENT_DATE - INTERVAL '7 days'
     GROUP BY trade_date, action
     ORDER BY trade_date DESC, action
 ''')
@@ -194,7 +193,7 @@ if recent_trades:
                 print()
             print(f"📅 {trade_date}:")
             current_date = trade_date
-        
+
         emoji = "💰" if action == "BUY" else "💸"
         action_kr = "매수" if action == "BUY" else "매도"
         print(f"  {emoji} {action_kr}: {count:2d}건, {amount:>12,.0f}원")

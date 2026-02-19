@@ -2,7 +2,7 @@
 """
 데이터 수집 상태 요약 리포트
 """
-import sqlite3
+import psycopg2
 import pickle
 import pandas as pd
 from pathlib import Path
@@ -25,12 +25,12 @@ def get_recent_dates_with_stocks(db_path: str, days: int = 7) -> Dict[str, int]:
         today = now_kst().date()
         start_date = (today - timedelta(days=days)).strftime('%Y-%m-%d')
         
-        with sqlite3.connect(db_path) as conn:
+        with psycopg2.connect(host='172.23.208.1', port=5433, dbname='robotrader_quant', user='postgres', password='postgres') as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT DATE(selection_date) as date, COUNT(DISTINCT stock_code) as cnt
                 FROM candidate_stocks
-                WHERE DATE(selection_date) >= ?
+                WHERE DATE(selection_date) >= %s
                 GROUP BY DATE(selection_date)
                 ORDER BY date DESC
             ''', (start_date,))
@@ -89,12 +89,12 @@ def get_stocks_by_date(db_path: str, date_str: str) -> List[str]:
         else:
             target_date = date_str
         
-        with sqlite3.connect(db_path) as conn:
+        with psycopg2.connect(host='172.23.208.1', port=5433, dbname='robotrader_quant', user='postgres', password='postgres') as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT DISTINCT stock_code
                 FROM candidate_stocks
-                WHERE DATE(selection_date) = ?
+                WHERE DATE(selection_date) = %s
             ''', (target_date,))
             
             return [row[0].zfill(6) for row in cursor.fetchall()]
