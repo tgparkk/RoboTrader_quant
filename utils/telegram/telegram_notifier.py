@@ -85,8 +85,8 @@ class TelegramNotifier:
             self.is_initialized = True
             self.logger.info("✅ 텔레그램 봇 초기화 완료")
             
-            # 초기화 메시지 전송
-            await self.send_system_start()
+            # 시스템 시작 알림은 telegram_integration.initialize()에서 발송
+            # (여기서 발송하면 중복 발송됨)
             
             return True
             
@@ -229,27 +229,25 @@ class TelegramNotifier:
     async def send_order_placed(self, stock_code: str, stock_name: str, order_type: str, 
                               quantity: int, price: float, order_id: str):
         """주문 실행 알림"""
-        message = self.templates['order_placed'].format(
-            stock_code=stock_code,
-            stock_name=stock_name,
-            order_type="매수" if order_type.lower() == "buy" else "매도",
-            quantity=quantity,
-            price=price,
-            order_id=order_id
-        )
+        price_str = "시장가" if price == 0 else f"{price:,}원"
+        message = (f"📝 *주문 실행*\n"
+                   f"종목: {stock_name}({stock_code})\n"
+                   f"구분: {'매수' if order_type.lower() == 'buy' else '매도'}\n"
+                   f"수량: {quantity:,}주\n"
+                   f"가격: {price_str}\n"
+                   f"주문ID: {order_id}")
         await self.send_message(message)
     
     async def send_order_filled(self, stock_code: str, stock_name: str, order_type: str,
                               quantity: int, price: float, pnl: float = 0):
         """주문 체결 알림"""
-        message = self.templates['order_filled'].format(
-            stock_code=stock_code,
-            stock_name=stock_name,
-            order_type="매수" if order_type.lower() == "buy" else "매도",
-            quantity=quantity,
-            price=price,
-            pnl=pnl
-        )
+        price_str = "시장가" if price == 0 else f"{price:,}원"
+        message = (f"✅ *주문 체결*\n"
+                   f"종목: {stock_name}({stock_code})\n"
+                   f"구분: {'매수' if order_type.lower() == 'buy' else '매도'}\n"
+                   f"수량: {quantity:,}주\n"
+                   f"가격: {price_str}\n"
+                   f"손익: {pnl:+,.0f}원")
         await self.send_message(message)
     
     async def send_order_cancelled(self, stock_code: str, stock_name: str, 
