@@ -791,8 +791,14 @@ class OrderManager:
                 self.logger.info(f"✅ 타임아웃 취소 성공: {order_id}")
             else:
                 self.logger.error(f"❌ 타임아웃 취소 실패: {order_id}")
-                # 🆕 취소 실패 시에도 강제로 상태 정리 (타임아웃이므로 이미 무효한 주문으로 판단)
+                # 🆕 취소 실패 시 체결 여부 최종 확인 (취소 실패 = 이미 체결된 경우가 많음)
                 if order_id in self.pending_orders:
+                    filled_in_cancel_fail = await self._final_fill_check_on_timeout(order_id)
+                    if filled_in_cancel_fail:
+                        self.logger.info(f"✅ 취소 실패 → 체결 확인됨, DB 저장 완료: {order_id}")
+                        return  # 체결 처리 완료, 더 이상 할 것 없음
+
+                    # 체결도 아닌 경우 강제 상태 정리
                     order = self.pending_orders[order_id]
                     order.status = OrderStatus.TIMEOUT  # 타임아웃 상태로 변경
                     self._move_to_completed(order_id)
@@ -853,8 +859,13 @@ class OrderManager:
                         'order_type': order.order_type.value
                     }, "3분봉 4개 경과")
             else:
-                # 🆕 4분봉 타임아웃 취소 실패 시에도 강제로 상태 정리
+                # 🆕 4분봉 타임아웃 취소 실패 시 체결 여부 최종 확인 (안전장치)
                 if order_id in self.pending_orders:
+                    filled_in_cancel_fail = await self._final_fill_check_on_timeout(order_id)
+                    if filled_in_cancel_fail:
+                        self.logger.info(f"✅ 3분봉 취소 실패 → 체결 확인됨, DB 저장 완료: {order_id}")
+                        return
+
                     order = self.pending_orders[order_id]
                     order.status = OrderStatus.TIMEOUT
                     self._move_to_completed(order_id)
@@ -890,6 +901,119 @@ class OrderManager:
             except:
                 pass
     
+    async def _final_fill_check_on_timeout(self, order_id: str) -> bool:
+        """
+        타임아웃/취소실패 시 체결 여부 최종 확인 및 DB 저장 안전장치.
+        
+        Returns:
+            True if order was actually filled and saved to DB, False otherwise.
+        """
+        try:
+            if order_id not in self.pending_orders:
+                return False
+
+            order = self.pending_orders[order_id]
+            self.logger.info(f"🔍 타임아웃 최종 체결 확인 (안전장치): {order_id} ({order.stock_code})")
+
+            loop = asyncio.get_event_loop()
+            status_data = await loop.run_in_executor(
+                self.executor,
+                self.api_manager.get_order_status,
+                order_id
+            )
+
+            if not status_data:
+                self.logger.warning(f"⚠️ 최종 체결 확인 실패 (API 응답 없음): {order_id}")
+                return False
+
+            # 체결 수량 파싱
+            try:
+                filled_qty = int(str(status_data.get('tot_ccld_qty', 0)).replace(',', '').strip() or 0)
+            except Exception:
+                filled_qty = 0
+            try:
+                remaining_qty = int(str(status_data.get('rmn_qty', 0)).replace(',', '').strip() or 0)
+            except Exception:
+                remaining_qty = 0
+
+            self.logger.info(f"📊 최종 확인 결과 [{order_id}]: filled={filled_qty}, remaining={remaining_qty}, order_qty={order.quantity}")
+
+            # 전량 체결 확인
+            if filled_qty > 0 and filled_qty == order.quantity and remaining_qty == 0:
+                # 체결가 추출
+                filled_price = order.price
+                try:
+                    avg_prvs = status_data.get('avg_prvs', status_data.get('ccld_unpr', ''))
+                    if avg_prvs and str(avg_prvs).replace(',', '').strip():
+                        filled_price = float(str(avg_prvs).replace(',', '').strip())
+                except (ValueError, TypeError):
+                    pass
+
+                # 시장가 주문(price=0)이고 체결가도 못 가져온 경우 → 현재가 조회
+                if filled_price == 0:
+                    try:
+                        price_data = await loop.run_in_executor(
+                            self.executor,
+                            self.api_manager.get_current_price,
+                            order.stock_code
+                        )
+                        if price_data and price_data.current_price > 0:
+                            filled_price = price_data.current_price
+                            self.logger.info(f"📊 시장가 체결가를 현재가로 대체: {filled_price:,.0f}원")
+                    except Exception:
+                        pass
+
+                if filled_price == 0:
+                    self.logger.error(f"❌ 체결가를 확인할 수 없음 (price=0): {order_id} — DB 저장 불가")
+                    return False
+
+                self.logger.info(f"✅ 타임아웃 안전장치: 체결 확인됨! {order_id} ({order.stock_code}) "
+                               f"{filled_qty}주 @{filled_price:,.0f}원")
+
+                order.filled_price = filled_price
+                order.filled_quantity = filled_qty
+                order.remaining_quantity = 0
+                order.status = OrderStatus.FILLED
+                self._move_to_completed(order_id)
+
+                # DB에 거래 기록 저장
+                await self._save_real_trade_to_db(order, filled_price)
+
+                # TradingStockManager 콜백
+                if self.trading_manager:
+                    try:
+                        await self.trading_manager.on_order_filled(order)
+                    except Exception as cb_err:
+                        self.logger.error(f"❌ 안전장치 체결 콜백 오류: {cb_err}")
+
+                # 텔레그램 알림
+                if self.telegram:
+                    stock_name = order.stock_name or f'Stock_{order.stock_code}'
+                    order_type_str = "매수" if order.order_type == OrderType.BUY else "매도"
+                    await self.telegram.notify_system_status(
+                        f"🔒 타임아웃 안전장치 발동: {order.stock_code}({stock_name}) "
+                        f"{order_type_str} {filled_qty}주 @{filled_price:,.0f}원 체결 확인 → DB 저장 완료"
+                    )
+
+                return True
+
+            # 부분 체결인 경우도 기록 (전량은 아니지만 일부 체결됨)
+            elif filled_qty > 0 and filled_qty < order.quantity:
+                self.logger.warning(f"⚠️ 타임아웃 안전장치: 부분 체결 감지 {order_id} — "
+                                  f"{filled_qty}/{order.quantity}주 (DB 저장은 전량 체결 시만)")
+                # 부분 체결은 복잡하므로 알림만 보내고 수동 처리 유도
+                if self.telegram:
+                    await self.telegram.notify_system_status(
+                        f"⚠️ 부분 체결+타임아웃: {order.stock_code} {filled_qty}/{order.quantity}주 체결 — 수동 확인 필요"
+                    )
+                return False
+
+            return False
+
+        except Exception as e:
+            self.logger.error(f"❌ 타임아웃 최종 체결 확인 오류 {order_id}: {e}")
+            return False
+
     async def _check_price_adjustment(self, order_id: str):
         """가격 정정 검토"""
         try:

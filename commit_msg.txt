@@ -1,9 +1,10 @@
-fix_fund_manager_init_load_existing_positions_from_db
+safety_add_final_fill_check_on_timeout_path
 
-- Load unsold positions from real_trading_records on startup
-- Set invested_funds before calculating available_funds
-- Prevents over-estimation of buy capacity (APBK0952 error)
-- Add load_invested_funds_from_db() method to FundManager
-- Call it in main.py after update_total_funds for real trading mode
+- Add _final_fill_check_on_timeout() method as safety net
+- On timeout cancel failure, check if order was actually filled via API
+- If filled, save to DB and trigger callbacks (prevents missing SELL records)
+- Handle market price orders (price=0) by falling back to current price
+- Apply same safety net to 4-candle timeout path
+- Addresses issue where filled orders were marked as TIMEOUT without DB record
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
