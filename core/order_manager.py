@@ -655,10 +655,12 @@ class OrderManager:
                         avg_prvs = status_data.get('avg_prvs', status_data.get('ccld_unpr', ''))
                         if avg_prvs and str(avg_prvs).replace(',', '').strip():
                             filled_price = float(str(avg_prvs).replace(',', '').strip())
-                            if filled_price != order.price:
+                            if filled_price != order.price and order.price > 0:
                                 slippage = filled_price - order.price
                                 slippage_pct = (slippage / order.price) * 100
                                 self.logger.info(f"📊 실제 체결가: {filled_price:,.0f}원 (주문가 {order.price:,.0f}원, 슬리피지 {slippage:+,.0f}원/{slippage_pct:+.2f}%)")
+                            elif order.price == 0:
+                                self.logger.info(f"📊 시장가 주문 체결가: {filled_price:,.0f}원")
                     except (ValueError, TypeError) as e:
                         self.logger.warning(f"⚠️ 체결가 파싱 오류: {e}, 주문가 사용")
                         filled_price = order.price
@@ -763,11 +765,23 @@ class OrderManager:
             self.logger.warning(f"⏰ 5분 타임아웃 처리: {order_id} ({order.stock_code}) "
                               f"- 경과시간: {elapsed_time:.0f}초")
 
+            # 🆕 타임아웃 직전 체결 여부 최종 재확인 (체결됐는데 인식 못한 경우 방지)
+            try:
+                self.logger.info(f"🔍 타임아웃 전 체결 상태 최종 재확인: {order_id}")
+                await self._check_order_status(order_id)
+                # _check_order_status에서 체결 확인되면 pending에서 제거됨
+                if order_id not in self.pending_orders:
+                    self.logger.info(f"✅ 타임아웃 직전 재확인에서 체결 확인됨: {order_id} — 타임아웃 취소")
+                    return
+            except Exception as recheck_err:
+                self.logger.warning(f"⚠️ 타임아웃 전 재확인 실패: {order_id} - {recheck_err}")
+
             # 🆕 타임아웃 텔레그램 알림
+            price_str = "시장가" if order.price == 0 else f"{order.price:,.0f}원"
             if self.telegram:
                 order_type_str = "매수" if order.order_type == OrderType.BUY else "매도"
                 await self.telegram.notify_system_status(
-                    f"⏰ 주문 타임아웃: {order.stock_code} {order_type_str} {order.quantity}주 @{order.price:,.0f}원 ({elapsed_time:.0f}초 경과)"
+                    f"⏰ 주문 타임아웃: {order.stock_code} {order_type_str} {order.quantity}주 @{price_str} ({elapsed_time:.0f}초 경과)"
                 )
 
             # 미체결 주문 취소
@@ -987,6 +1001,15 @@ class OrderManager:
             stock_name = order.stock_name or f'Stock_{order.stock_code}'
 
             if order.order_type == OrderType.BUY:
+                # trading_stock에서 TP/SL 가져오기
+                target_profit_rate = None
+                stop_loss_rate = None
+                if self.trading_manager:
+                    trading_stock = self.trading_manager.get_trading_stock(order.stock_code)
+                    if trading_stock:
+                        target_profit_rate = getattr(trading_stock, 'target_profit_rate', None)
+                        stop_loss_rate = getattr(trading_stock, 'stop_loss_rate', None)
+
                 # 실전 매수 기록 저장 (real_trading_records 테이블)
                 buy_record_id = self.db_manager.save_real_buy(
                     stock_code=order.stock_code,
@@ -994,7 +1017,9 @@ class OrderManager:
                     price=filled_price,
                     quantity=order.quantity,
                     strategy="리밸런싱",
-                    reason="실전매매"
+                    reason="실전매매",
+                    target_profit_rate=target_profit_rate,
+                    stop_loss_rate=stop_loss_rate
                 )
                 if buy_record_id:
                     self.logger.info(f"💾 실전 매수 기록 저장: {order.stock_code} {order.quantity}주 @{filled_price:,.0f}원 (ID: {buy_record_id})")
