@@ -62,14 +62,7 @@ class DayTradingBot:
 
         # 설정 초기화
         self.config = load_config()
-
-        # paper_trading 설정 존재 여부 검증 (모듈간 기본값 불일치 방지)
-        if not hasattr(self.config, 'paper_trading'):
-            raise SystemExit("CRITICAL: paper_trading 설정이 없습니다. trading_config.json을 확인하세요.")
-
-        trading_mode = "가상매매" if self.config.paper_trading else "실전매매"
-        self.logger.info(f"💰 매매 모드: {trading_mode} (paper_trading={self.config.paper_trading})")
-
+        
         # 리밸런싱 모드 상태 로깅
         if getattr(self.config, 'rebalancing_mode', False):
             self.logger.info("🔄 리밸런싱 모드 활성화: 09:05 리밸런싱으로 매수, 장중 손절/익절 매도 판단 활성화")
@@ -100,7 +93,6 @@ class DayTradingBot:
         self.trading_manager.set_decision_engine(self.decision_engine)
 
         self.fund_manager = FundManager()  # 🆕 자금 관리자
-        self.decision_engine.fund_manager = self.fund_manager  # 매도 시 투자금 회수용
         self.quant_screening_service = QuantScreeningService(
             self.api_manager, self.db_manager, self.candidate_selector
         )
@@ -118,15 +110,13 @@ class DayTradingBot:
 
         # 🆕 일일 매매 리포트 초기화
         self._last_daily_report_date = None
-        self._last_db_backup_date = None
 
         # 🆕 리밸런싱 서비스 초기화 (9단계)
         self.rebalancing_service = QuantRebalancingService(
             api_manager=self.api_manager,
             db_manager=self.db_manager,
             order_manager=self.order_manager,
-            telegram=self.telegram,
-            fund_manager=self.fund_manager
+            telegram=self.telegram
         )
         self.rebalancing_service.rebalancing_period = RebalancingPeriod.DAILY  # 일간 리밸런싱
         self._last_rebalancing_date = None  # 마지막 리밸런싱 실행 날짜
@@ -143,8 +133,7 @@ class DayTradingBot:
             keep_list_updater=self.keep_list_updater,
             notification_helper=self.notification_helper,
             telegram_integration=self.telegram,
-            db_manager=self.db_manager,
-            fund_manager=self.fund_manager
+            db_manager=self.db_manager
         )
         self.screening_task_runner = ScreeningTaskRunner(
             quant_screening_service=self.quant_screening_service,
@@ -179,13 +168,7 @@ class DayTradingBot:
         try:
             self.logger.info("🚀 주식 단타 거래 시스템 초기화 시작")
 
-            # 0-1. 실전매매 모드 로깅 (자동 진행)
-            if not self.config.paper_trading:
-                self.logger.info("💰 실전매매 모드로 자동 시작")
-                print(f"  매매 모드: 실전매매 (paper_trading=False)")
-                print(f"  시작 시각: {now_kst().strftime('%Y-%m-%d %H:%M:%S')}")
-
-            # 0-2. 오늘 거래시간 정보 출력 (특수일 확인)
+            # 0. 오늘 거래시간 정보 출력 (특수일 확인)
             today_info = MarketHours.get_today_info('KRX')
             self.logger.info(f"📅 오늘 거래시간 정보:\n{today_info}")
 
@@ -211,10 +194,6 @@ class DayTradingBot:
                 else:
                     self.logger.warning("⚠️ 잔고 조회 실패 - 기본값 1천만원으로 설정")
                     self.fund_manager.update_total_funds(10000000)
-                
-                # 🆕 DB에서 기존 보유 종목 투자금 로드 → invested_funds 반영
-                invested = self.fund_manager.load_invested_funds_from_db(self.db_manager)
-                self.logger.info(f"💰 기존 보유 투자금 반영: {invested:,.0f}원 → 가용자금: {self.fund_manager.available_funds:,.0f}원")
 
             # 2. 시장 상태 확인
             market_status = get_market_status()
@@ -286,7 +265,7 @@ class DayTradingBot:
             stock_code = trading_stock.stock_code
             stock_name = trading_stock.stock_name
 
-            self.logger.info(f"🔍 매수 판단 시작: {stock_code}({stock_name})")
+            self.logger.debug(f"🔍 매수 판단 시작: {stock_code}({stock_name})")
 
             # 추가 안전 검증: 현재 보유 중인 종목인지 다시 한번 확인
             positioned_stocks = self.trading_manager.get_stocks_by_state(StockState.POSITIONED)
@@ -313,14 +292,14 @@ class DayTradingBot:
                 self.logger.debug(f"❌ {stock_code} 일봉 데이터 부족: {len(daily_data)}개 (최소 20개 필요)")
                 return
             
-            self.logger.info(f"✅ {stock_code} 일봉 데이터 조회 완료: {len(daily_data)}건")
+            self.logger.debug(f"✅ {stock_code} 일봉 데이터 조회 완료: {len(daily_data)}건")
 
             # 매매 판단 엔진으로 매수 신호 확인 (일봉 데이터 사용)
             buy_signal, buy_reason, buy_info = await self.decision_engine.analyze_buy_decision(trading_stock, daily_data)
             
-            self.logger.info(f"💡 {stock_code} 매수 판단 결과: signal={buy_signal}, reason='{buy_reason}'")
+            self.logger.debug(f"💡 {stock_code} 매수 판단 결과: signal={buy_signal}, reason='{buy_reason}'")
             if buy_signal and buy_info:
-                self.logger.info(f"💰 {stock_code} 매수 정보: 가격={buy_info['buy_price']:,.0f}원, 수량={buy_info['quantity']:,}주, 투자금={buy_info['max_buy_amount']:,.0f}원")
+                self.logger.debug(f"💰 {stock_code} 매수 정보: 가격={buy_info['buy_price']:,.0f}원, 수량={buy_info['quantity']:,}주, 투자금={buy_info['max_buy_amount']:,.0f}원")
           
             
             if buy_signal and buy_info.get('quantity', 0) > 0:
@@ -357,43 +336,37 @@ class DayTradingBot:
                 if current_stock:
                     self.logger.debug(f"🔍 매수 전 상태 확인: {stock_code} 현재상태={current_stock.state.value}")
                 
-                if self.decision_engine.is_virtual_mode:
-                    # [가상매매 모드]
+                # [리얼매매 코드 - 활성화]
+                try:
+                    # 3분 단위로 정규화된 캔들 시점을 전달하여 중복 신호 방지
+                    # [실제 매수 코드 - 주석처리]
+                    # raw_candle_time = data_3min['datetime'].iloc[-1]
+                    # minute_normalized = (raw_candle_time.minute // 3) * 3
+                    # current_candle_time = raw_candle_time.replace(minute=minute_normalized, second=0, microsecond=0)
+                    # await self.decision_engine.execute_real_buy(
+                    #     trading_stock,
+                    #     buy_reason,
+                    #     buy_info['buy_price'],
+                    #     buy_info['quantity'],
+                    #     candle_time=current_candle_time
+                    # )
+                    # # 상태는 주문 처리 로직에서 자동으로 변경됨 (SELECTED -> BUY_PENDING -> POSITIONED)
+                    # self.logger.info(f"🔥 실제 매수 주문 완료: {stock_code}({stock_name}) - {buy_reason}")
+                    pass
+                except Exception as e:
+                    self.logger.error(f"❌ 실제 매수 처리 오류: {e}")
+                    
+                # [가상매매 코드 - 활성화]
+                try:
+                    await self.decision_engine.execute_virtual_buy(trading_stock, data_3min, buy_reason)
+                    # 상태를 POSITIONED로 반영하여 이후 매도 판단 루프에 포함
                     try:
-                        await self.decision_engine.execute_virtual_buy(trading_stock, daily_data, buy_reason, buy_price=buy_info['buy_price'])
-                        # 상태를 POSITIONED로 반영하여 이후 매도 판단 루프에 포함
-                        try:
-                            self.trading_manager._change_stock_state(stock_code, StockState.POSITIONED, "가상 매수 체결")
-                        except Exception:
-                            pass
-                        self.logger.info(f"🔥 가상 매수 완료 처리: {stock_code}({stock_name}) - {buy_reason}")
-                    except Exception as e:
-                        self.logger.error(f"❌ 가상 매수 처리 오류: {e}")
-                else:
-                    # [실전매매 모드]
-                    buy_amount = buy_info['buy_price'] * buy_info['quantity']
-                    reserve_order_id = f"PRE-{stock_code}-{int(now_kst().timestamp())}"
-                    reserved = self.fund_manager.reserve_funds(reserve_order_id, buy_amount)
-                    if not reserved:
-                        self.logger.warning(f"❌ {stock_code} 자금 예약 실패: {buy_amount:,.0f}원")
-                        return
-                    try:
-                        # 체결 시 fund_manager confirm용 예약 ID 저장
-                        trading_stock._reserve_order_id = reserve_order_id
-                        trading_stock._reserve_amount = buy_amount
-                        await self.decision_engine.execute_real_buy(
-                            trading_stock,
-                            buy_reason,
-                            buy_info['buy_price'],
-                            buy_info['quantity']
-                        )
-                        # confirm_order는 체결 콜백(on_order_filled/_check_buy_order_completion)에서 호출
-                        self.logger.info(f"🔥 실제 매수 주문 완료: {stock_code}({stock_name}) - {buy_reason}")
-                    except Exception as e:
-                        # 주문 실패 시 예약 해제 보장
-                        self.fund_manager.cancel_order(reserve_order_id)
-                        trading_stock._reserve_order_id = None
-                        self.logger.error(f"❌ 실제 매수 처리 오류 (자금 예약 해제됨): {e}")
+                        self.trading_manager._change_stock_state(stock_code, StockState.POSITIONED, "가상 매수 체결")
+                    except Exception:
+                        pass
+                    self.logger.info(f"🔥 가상 매수 완료 처리: {stock_code}({stock_name}) - {buy_reason}")
+                except Exception as e:
+                    self.logger.error(f"❌ 가상 매수 처리 오류: {e}")
                     
             else:
                 #self.logger.debug(f"📊 {stock_code}({stock_name}) 매수 신호 없음")
@@ -425,20 +398,19 @@ class DayTradingBot:
                 # 매도 후보로 변경
                 success = self.trading_manager.move_to_sell_candidate(stock_code, sell_reason)
                 if success:
-                    if self.decision_engine.is_virtual_mode:
-                        # [가상매매 모드]
-                        try:
-                            await self.decision_engine.execute_virtual_sell(trading_stock, None, sell_reason)
-                            self.logger.info(f"📉 가상 매도 완료 처리: {stock_code}({stock_name}) - {sell_reason}")
-                        except Exception as e:
-                            self.logger.error(f"❌ 가상 매도 처리 오류: {e}")
-                    else:
-                        # [실전매매 모드]
-                        try:
-                            await self.decision_engine.execute_real_sell(trading_stock, sell_reason)
-                            self.logger.info(f"📉 실제 매도 주문 완료: {stock_code}({stock_name}) - {sell_reason}")
-                        except Exception as e:
-                            self.logger.error(f"❌ 실제 매도 처리 오류: {e}")
+                    # [실제 매도 주문 실행 - 주석처리]
+                    # try:
+                    #     await self.decision_engine.execute_real_sell(trading_stock, sell_reason)
+                    #     self.logger.info(f"📉 실제 매도 주문 완료: {stock_code}({stock_name}) - {sell_reason}")
+                    # except Exception as e:
+                    #     self.logger.error(f"❌ 실제 매도 처리 오류: {e}")
+                    
+                    # [가상매매 코드 - 활성화]
+                    try:
+                        await self.decision_engine.execute_virtual_sell(trading_stock, None, sell_reason)
+                        self.logger.info(f"📉 가상 매도 완료 처리: {stock_code}({stock_name}) - {sell_reason}")
+                    except Exception as e:
+                        self.logger.error(f"❌ 가상 매도 처리 오류: {e}")
         except Exception as e:
             self.logger.error(f"❌ {trading_stock.stock_code} 매도 판단 오류: {e}")
     
@@ -477,8 +449,8 @@ class DayTradingBot:
                         await asyncio.sleep(60)
                         continue
                     
-                    # 09:05 시점 체크 (시초가 형성 후) — 09:05~09:30 범위 (재시작 대응)
-                    if current_time.hour == 9 and 5 <= current_time.minute <= 30:
+                    # 09:05 시점 체크 (시초가 형성 후)
+                    if current_time.hour == 9 and current_time.minute == 5:
                         # 하루에 한 번만 실행
                         today_str = current_time.strftime('%Y%m%d')
                         if self._last_rebalancing_date != today_str:
@@ -519,11 +491,7 @@ class DayTradingBot:
     
     async def _execute_rebalancing_async(self, plan):
         """리밸런싱 실행 (비동기 버전)"""
-        self.decision_engine.rebalancing_in_progress = True
-        try:
-            await self.rebalancing_executor.execute_rebalancing(plan)
-        finally:
-            self.decision_engine.rebalancing_in_progress = False
+        await self.rebalancing_executor.execute_rebalancing(plan)
     
     async def _system_monitoring_task(self):
         """시스템 모니터링 태스크"""
@@ -546,19 +514,6 @@ class DayTradingBot:
                     last_api_refresh = current_time
 
                 
-                # 08:20 DB 백업 + 이전 완료 주문 정리 (장 시작 전)
-                if current_time.hour == 8 and current_time.minute >= 20:
-                    if self._last_db_backup_date != current_time.date():
-                        self._last_db_backup_date = current_time.date()
-                        try:
-                            backup_path = self.db_manager.backup_database()
-                            if backup_path:
-                                self.logger.info(f"📦 장 시작 전 DB 백업 완료: {backup_path}")
-                        except Exception as backup_err:
-                            self.logger.error(f"❌ DB 백업 오류: {backup_err}")
-                        # 이전 완료 주문 메모리 정리
-                        self.order_manager.cleanup_old_completed_orders()
-
                 # 08:30 전일 데이터 수집 및 08:55 퀀트 스크리닝 실행 (장 시작 전)
                 if current_time.hour == 8:
                     # 08:30 전일 일봉 + 재무데이터 수집
@@ -745,34 +700,13 @@ class DayTradingBot:
             if hasattr(self, 'candidate_selector') and hasattr(self.candidate_selector, 'get_selection_statistics'):
                 selection_stats = self.candidate_selector.get_selection_statistics()
             
-            # DB 헬스체크
-            db_ok = False
-            try:
-                conn = self.db_manager._get_connection()
-                try:
-                    cur = conn.cursor()
-                    cur.execute("SELECT 1")
-                    cur.close()
-                    db_ok = True
-                finally:
-                    self.db_manager._put_connection(conn)
-            except Exception:
-                pass
-
-            # 서킷 브레이커 상태
-            circuit_status = "🟢 정상"
-            if kis_auth._circuit_breaker_open_until and now_kst() < kis_auth._circuit_breaker_open_until:
-                circuit_status = f"🔴 차단 중 (해제: {kis_auth._circuit_breaker_open_until.strftime('%H:%M:%S')})"
-
             status_lines = [
                 f"📊 시스템 상태 [{current_time.strftime('%H:%M:%S')}]",
                 f"  - 시장 상태: {market_status}",
                 f"  - 미체결 주문: {order_summary['pending_count']}건",
                 f"  - 완료 주문: {order_summary['completed_count']}건",
                 f"  - 데이터 수집: {data_counts}",
-                f"  - API 통계: 총 {api_stats['total_calls']}회 호출, 성공률 {api_stats['success_rate']}%, 속도제한 {api_stats['rate_limit_errors']}회 ({api_stats['rate_limit_rate']}%)",
-                f"  - 서킷 브레이커: {circuit_status}",
-                f"  - DB 상태: {'🟢 정상' if db_ok else '🔴 연결 실패'}"
+                f"  - API 통계: 총 {api_stats['total_calls']}회 호출, 성공률 {api_stats['success_rate']}%, 속도제한 {api_stats['rate_limit_errors']}회 ({api_stats['rate_limit_rate']}%)"
             ]
             
             # 후보 선정 통계 추가
@@ -862,9 +796,10 @@ class DayTradingBot:
             bool: 당일 데이터가 정상적으로 저장되었는지 여부
         """
         try:
+            import sqlite3
             today = now_kst().strftime('%Y-%m-%d')
 
-            conn = self.db_manager._get_connection()
+            conn = sqlite3.connect(self.db_manager.db_path)
             cursor = conn.cursor()
 
             # 당일 데이터 조회
@@ -874,7 +809,7 @@ class DayTradingBot:
                        MIN(close) as min_price,
                        MAX(close) as max_price
                 FROM daily_prices
-                WHERE date = %s
+                WHERE date = ?
                 """,
                 (today,)
             )
@@ -1055,50 +990,29 @@ class DayTradingBot:
             await self.telegram.notify_error("Emergency Position Sync", e)
 
     async def shutdown(self):
-        """시스템 종료 (미체결 주문 완료 대기 포함)"""
+        """시스템 종료"""
         try:
             self.logger.info("🛑 시스템 종료 시작")
-
-            # 1. 미체결 주문 완료 대기 (최대 60초)
-            if hasattr(self, 'order_manager') and self.order_manager.pending_orders:
-                pending_count = len(self.order_manager.pending_orders)
-                self.logger.info(f"⏳ 미체결 주문 {pending_count}건 완료 대기 중 (최대 60초)...")
-                try:
-                    deadline = asyncio.get_event_loop().time() + 60.0
-                    while self.order_manager.pending_orders and asyncio.get_event_loop().time() < deadline:
-                        await asyncio.sleep(1)
-                    remaining = len(self.order_manager.pending_orders)
-                    if remaining > 0:
-                        self.logger.warning(f"⚠️ 미체결 주문 {remaining}건 대기 타임아웃 - 강제 종료")
-                    else:
-                        self.logger.info("✅ 모든 미체결 주문 처리 완료")
-                except Exception as wait_err:
-                    self.logger.warning(f"미체결 주문 대기 중 오류: {wait_err}")
-
-            # 2. 데이터 수집 중단
+            
+            # 데이터 수집 중단
             self.data_collector.stop_collection()
-
-            # 3. 주문 모니터링 중단
+            
+            # 주문 모니터링 중단
             self.order_manager.stop_monitoring()
-
-            # 4. ThreadPoolExecutor 정리
-            if hasattr(self.order_manager, 'executor'):
-                self.order_manager.executor.shutdown(wait=False)
-                self.logger.info("ThreadPoolExecutor 종료 완료")
-
-            # 5. 텔레그램 통합 종료
+            
+            # 텔레그램 통합 종료
             await self.telegram.shutdown()
-
-            # 6. API 매니저 종료
+            
+            # API 매니저 종료
             self.api_manager.shutdown()
-
-            # 7. PID 파일 삭제
+            
+            # PID 파일 삭제
             if self.pid_file.exists():
                 self.pid_file.unlink()
                 self.logger.info("PID 파일 삭제 완료")
-
+            
             self.logger.info("✅ 시스템 종료 완료")
-
+            
         except Exception as e:
             self.logger.error(f"❌ 시스템 종료 중 오류: {e}")
 

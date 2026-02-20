@@ -1,8 +1,9 @@
-hotfix: add move_to_sell_candidate before execute_sell_order
+fix_fund_manager_init_load_existing_positions_from_db
 
-- execute_sell_order requires SELL_CANDIDATE state but was called from POSITIONED
-- Add state transition via move_to_sell_candidate() before sell order
-- Fixes TP sell failure for stocks like 005850 (SL) that hit target profit
-- Import StockState in execute_real_sell method
+- Load unsold positions from real_trading_records on startup
+- Set invested_funds before calculating available_funds
+- Prevents over-estimation of buy capacity (APBK0952 error)
+- Add load_invested_funds_from_db() method to FundManager
+- Call it in main.py after update_total_funds for real trading mode
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

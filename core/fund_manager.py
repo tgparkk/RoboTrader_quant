@@ -4,6 +4,7 @@
 import threading
 from typing import Dict, Optional
 from datetime import datetime
+import pandas as pd
 from utils.logger import setup_logger
 
 
@@ -194,6 +195,51 @@ class FundManager:
             self.logger.info(f"💰 투자 회수: {amount:,.0f}원 "
                            f"(가용: {self.available_funds:,.0f}원)")
     
+    def load_invested_funds_from_db(self, db_manager) -> float:
+        """
+        DB에서 미매도 보유 종목의 투자금을 조회하여 invested_funds를 초기화.
+        시작 시 한 번 호출하여 기존 보유분을 반영한다.
+        
+        Args:
+            db_manager: DatabaseManager 인스턴스 (get_real_open_positions 메서드 필요)
+            
+        Returns:
+            float: 로드된 투자금 합계
+        """
+        with self._lock:
+            try:
+                open_positions: pd.DataFrame = db_manager.get_real_open_positions()
+                
+                if open_positions.empty:
+                    self.logger.info("💰 DB 미매도 포지션 없음 - invested_funds=0")
+                    return 0.0
+                
+                # 투자금 = quantity * buy_price
+                total_invested = float((open_positions['quantity'] * open_positions['buy_price']).sum())
+                
+                self.invested_funds = total_invested
+                # 가용 자금 재계산
+                self.available_funds = self.total_funds - self.reserved_funds - self.invested_funds
+                
+                self.logger.info(
+                    f"💰 DB에서 보유 종목 {len(open_positions)}개 로드 - "
+                    f"투자금: {total_invested:,.0f}원, 가용자금: {self.available_funds:,.0f}원"
+                )
+                
+                # 개별 종목 로깅
+                for _, row in open_positions.iterrows():
+                    amt = row['quantity'] * row['buy_price']
+                    self.logger.info(
+                        f"  📌 {row['stock_code']} {row['stock_name']} "
+                        f"{int(row['quantity'])}주 × {row['buy_price']:,.0f}원 = {amt:,.0f}원"
+                    )
+                
+                return total_invested
+                
+            except Exception as e:
+                self.logger.error(f"❌ DB에서 투자금 로드 실패: {e}")
+                return 0.0
+
     def get_status(self) -> Dict[str, float]:
         """자금 현황 조회"""
         with self._lock:
