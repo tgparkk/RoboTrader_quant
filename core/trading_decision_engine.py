@@ -404,6 +404,7 @@ class TradingDecisionEngine:
     
     async def execute_real_sell(self, trading_stock, sell_reason):
         """실제 매도 주문 실행 (판단 로직 제외, 주문만 처리)"""
+        from core.models import StockState
         try:
             stock_code = trading_stock.stock_code
             stock_name = trading_stock.stock_name
@@ -414,6 +415,13 @@ class TradingDecisionEngine:
                 return False
             
             quantity = trading_stock.position.quantity
+            
+            # 매도 후보 상태로 전환 (execute_sell_order는 SELL_CANDIDATE만 허용)
+            if trading_stock.state != StockState.SELL_CANDIDATE:
+                moved = self.trading_manager.move_to_sell_candidate(stock_code, sell_reason)
+                if not moved:
+                    self.logger.error(f"❌ {stock_code} 매도 후보 전환 실패 (현재: {trading_stock.state.value})")
+                    return False
             
             # 시장가 매도 주문 실행
             success = await self.trading_manager.execute_sell_order(

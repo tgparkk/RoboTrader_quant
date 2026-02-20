@@ -1,10 +1,8 @@
-docs: Update .cursor/rules with latest project structure
+hotfix: add move_to_sell_candidate before execute_sell_order
 
-- Add project_overview.mdc: 프로젝트 전체 개요 및 핵심 개념
-- Add data_structure.mdc: DB 스키마 및 데이터 관리 전략
-- Add trading_strategy.mdc: 퀀트 매매 전략 및 리밸런싱 로직
-- Update analysis.mdc: 일일 분석 도구 및 모니터링 방법
-- Update strategy.mdc: 시스템 아키텍처 및 모듈 구조
+- execute_sell_order requires SELL_CANDIDATE state but was called from POSITIONED
+- Add state transition via move_to_sell_candidate() before sell order
+- Fixes TP sell failure for stocks like 005850 (SL) that hit target profit
+- Import StockState in execute_real_sell method
 
-README.md와 SYSTEM_FLOW.md 기반으로 전체 재작성
-과거 눌림목 매매 전략 관련 내용 제거, 현재 퀀트 전략 반영
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
