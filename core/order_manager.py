@@ -727,7 +727,7 @@ class OrderManager:
                         order.filled_quantity = filled_qty
                         order.remaining_quantity = remaining_qty
 
-                        # 🆕 부분 체결가 추출
+                        # 🆕 부분 체결가 추출 (시장가 주문도 안전하게 처리)
                         partial_filled_price = order.price
                         try:
                             avg_prvs = status_data.get('avg_prvs', status_data.get('ccld_unpr', ''))
@@ -735,6 +735,17 @@ class OrderManager:
                                 partial_filled_price = float(str(avg_prvs).replace(',', '').strip())
                         except (ValueError, TypeError):
                             partial_filled_price = order.price
+
+                        # 시장가 주문(price=0)이면 현재가로 폴백
+                        if partial_filled_price == 0:
+                            try:
+                                from api.kis_auth import get_current_price
+                                price_data = await get_current_price(order.stock_code)
+                                if price_data and price_data.current_price > 0:
+                                    partial_filled_price = price_data.current_price
+                                    self.logger.info(f"📊 부분 체결가 현재가 폴백: {partial_filled_price:,.0f}원")
+                            except Exception:
+                                self.logger.warning(f"⚠️ {order.stock_code} 부분 체결가 확인 불가 (price=0)")
 
                         self.logger.info(f"🔄 주문 부분 체결: {order_id} ({order.stock_code}) - "
                                        f"{filled_qty}/{order.quantity}주 @{partial_filled_price:,.0f}원 (잔여 {remaining_qty}주)")
@@ -764,6 +775,11 @@ class OrderManager:
                                     )
                                     if new_id:
                                         self.logger.info(f"✅ 잔여 매도 재주문 성공: {new_id}")
+                                        # trading_stock의 current_order_id를 새 주문으로 업데이트
+                                        if self.trading_manager:
+                                            self.trading_manager.update_current_order(
+                                                order.stock_code, new_id
+                                            )
                                     else:
                                         self.logger.error(f"❌ 잔여 매도 재주문 실패: {order.stock_code}")
                                 except Exception as retry_err:
@@ -1209,30 +1225,35 @@ class OrderManager:
             stock_name = order.stock_name or f'Stock_{order.stock_code}'
 
             if order.order_type == OrderType.BUY:
-                # trading_stock에서 TP/SL 가져오기
-                target_profit_rate = None
-                stop_loss_rate = None
-                if self.trading_manager:
-                    trading_stock = self.trading_manager.get_trading_stock(order.stock_code)
-                    if trading_stock:
-                        target_profit_rate = getattr(trading_stock, 'target_profit_rate', None)
-                        stop_loss_rate = getattr(trading_stock, 'stop_loss_rate', None)
-
-                # 실전 매수 기록 저장 (real_trading_records 테이블)
-                buy_record_id = self.db_manager.save_real_buy(
-                    stock_code=order.stock_code,
-                    stock_name=stock_name,
-                    price=filled_price,
-                    quantity=order.quantity,
-                    strategy="리밸런싱",
-                    reason="실전매매",
-                    target_profit_rate=target_profit_rate,
-                    stop_loss_rate=stop_loss_rate
-                )
-                if buy_record_id:
-                    self.logger.info(f"💾 실전 매수 기록 저장: {order.stock_code} {order.quantity}주 @{filled_price:,.0f}원 (ID: {buy_record_id})")
+                # 이중 저장 방지: 콜백/모니터링에서도 save_real_buy를 호출하므로 여기서 플래그 설정
+                if getattr(order, '_real_buy_saved', False):
+                    self.logger.debug(f"⏭️ {order.stock_code} 실전 매수 기록 이미 저장됨 — 스킵")
                 else:
-                    self.logger.error(f"❌ 실전 매수 기록 저장 실패: {order.stock_code}")
+                    # trading_stock에서 TP/SL 가져오기
+                    target_profit_rate = None
+                    stop_loss_rate = None
+                    if self.trading_manager:
+                        trading_stock = self.trading_manager.get_trading_stock(order.stock_code)
+                        if trading_stock:
+                            target_profit_rate = getattr(trading_stock, 'target_profit_rate', None)
+                            stop_loss_rate = getattr(trading_stock, 'stop_loss_rate', None)
+
+                    # 실전 매수 기록 저장 (real_trading_records 테이블)
+                    buy_record_id = self.db_manager.save_real_buy(
+                        stock_code=order.stock_code,
+                        stock_name=stock_name,
+                        price=filled_price,
+                        quantity=order.quantity,
+                        strategy="리밸런싱",
+                        reason="실전매매",
+                        target_profit_rate=target_profit_rate,
+                        stop_loss_rate=stop_loss_rate
+                    )
+                    if buy_record_id:
+                        order._real_buy_saved = True
+                        self.logger.info(f"💾 실전 매수 기록 저장: {order.stock_code} {order.quantity}주 @{filled_price:,.0f}원 (ID: {buy_record_id})")
+                    else:
+                        self.logger.error(f"❌ 실전 매수 기록 저장 실패: {order.stock_code}")
 
             elif order.order_type == OrderType.SELL:
                 # 실전매매: 항상 real_trading_records에서 buy_record_id 조회

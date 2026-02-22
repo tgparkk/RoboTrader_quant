@@ -469,22 +469,26 @@ class TradingStockManager:
                                 self.decision_engine.fund_manager.confirm_order(reserve_id, actual_amount)
                                 trading_stock._reserve_order_id = None
 
-                        # 실거래 매수 기록 저장 (실전매매 모드에서만)
+                        # 실거래 매수 기록 저장 (실전매매 모드에서만, 이중 저장 방지)
                         if not (self.decision_engine and self.decision_engine.is_virtual_mode):
-                            try:
-                                db = self.decision_engine.db_manager
-                                db.save_real_buy(
-                                    stock_code=trading_stock.stock_code,
-                                    stock_name=trading_stock.stock_name,
-                                    price=float(order.price),
-                                    quantity=int(order.quantity),
-                                    strategy=trading_stock.selection_reason,
-                                    reason="체결",
-                                    target_profit_rate=getattr(trading_stock, 'target_profit_rate', 0.15) or 0.15,
-                                    stop_loss_rate=getattr(trading_stock, 'stop_loss_rate', 0.10) or 0.10
-                                )
-                            except Exception as db_err:
-                                self.logger.warning(f"⚠️ 실거래 매수 기록 저장 실패: {db_err}")
+                            if getattr(order, '_real_buy_saved', False):
+                                self.logger.debug(f"⏭️ {trading_stock.stock_code} 실전 매수 기록 이미 저장됨 (모니터링 스킵)")
+                            else:
+                                try:
+                                    db = self.decision_engine.db_manager
+                                    db.save_real_buy(
+                                        stock_code=trading_stock.stock_code,
+                                        stock_name=trading_stock.stock_name,
+                                        price=float(order.price),
+                                        quantity=int(order.quantity),
+                                        strategy=trading_stock.selection_reason,
+                                        reason="체결",
+                                        target_profit_rate=getattr(trading_stock, 'target_profit_rate', 0.15) or 0.15,
+                                        stop_loss_rate=getattr(trading_stock, 'stop_loss_rate', 0.10) or 0.10
+                                    )
+                                    order._real_buy_saved = True
+                                except Exception as db_err:
+                                    self.logger.warning(f"⚠️ 실거래 매수 기록 저장 실패: {db_err}")
 
                         self.logger.info(f"✅ {trading_stock.stock_code} 매수 완료")
 
@@ -499,11 +503,13 @@ class TradingStockManager:
                         # 매수 실패 - 매수 후보로 되돌림
                         with self._lock:
                             trading_stock.clear_current_order()
+                            trading_stock.order_processed = False  # 방어적 리셋
+                            trading_stock.is_buying = False
                             # 매수 실패 시 원래 상태로 복귀
                             original_state = StockState.COMPLETED if "재거래" in trading_stock.selection_reason else StockState.SELECTED
                             self._change_stock_state(
-                                trading_stock.stock_code, 
-                                original_state, 
+                                trading_stock.stock_code,
+                                original_state,
                                 f"매수 실패: {order.status.value}"
                             )
                     
@@ -585,6 +591,8 @@ class TradingStockManager:
                         # 매도 실패 - 매도 후보로 되돌림
                         with self._lock:
                             trading_stock.clear_current_order()
+                            trading_stock.order_processed = False  # 방어적 리셋
+                            trading_stock.is_selling = False
                             self._change_stock_state(
                                 trading_stock.stock_code,
                                 StockState.SELL_CANDIDATE,
@@ -953,27 +961,39 @@ class TradingStockManager:
                                 self.decision_engine.fund_manager.confirm_order(reserve_id, actual_amount)
                                 trading_stock._reserve_order_id = None
 
-                        # 실거래 매수 기록 저장 (실전매매 모드에서만)
+                        # 실거래 매수 기록 저장 (실전매매 모드에서만, 이중 저장 방지)
                         if not (self.decision_engine and self.decision_engine.is_virtual_mode):
-                            try:
-                                db = self.decision_engine.db_manager
-                                db.save_real_buy(
-                                    stock_code=trading_stock.stock_code,
-                                    stock_name=trading_stock.stock_name,
-                                    price=float(order.price),
-                                    quantity=int(order.quantity),
-                                    strategy=trading_stock.selection_reason,
-                                    reason="체결(콜백)",
-                                    target_profit_rate=getattr(trading_stock, 'target_profit_rate', 0.15) or 0.15,
-                                    stop_loss_rate=getattr(trading_stock, 'stop_loss_rate', 0.10) or 0.10
-                                )
-                            except Exception as db_err:
-                                self.logger.warning(f"⚠️ 실거래 매수 기록 저장 실패: {db_err}")
+                            if getattr(order, '_real_buy_saved', False):
+                                self.logger.debug(f"⏭️ {trading_stock.stock_code} 실전 매수 기록 이미 저장됨 (콜백 스킵)")
+                            else:
+                                try:
+                                    db = self.decision_engine.db_manager
+                                    db.save_real_buy(
+                                        stock_code=trading_stock.stock_code,
+                                        stock_name=trading_stock.stock_name,
+                                        price=float(order.price),
+                                        quantity=int(order.quantity),
+                                        strategy=trading_stock.selection_reason,
+                                        reason="체결(콜백)",
+                                        target_profit_rate=getattr(trading_stock, 'target_profit_rate', 0.15) or 0.15,
+                                        stop_loss_rate=getattr(trading_stock, 'stop_loss_rate', 0.10) or 0.10
+                                    )
+                                    order._real_buy_saved = True
+                                except Exception as db_err:
+                                    self.logger.warning(f"⚠️ 실거래 매수 기록 저장 실패: {db_err}")
 
                         self.logger.info(f"✅ 매수 체결 처리 완료 (콜백): {trading_stock.stock_code}")
                     else:
                         self.logger.warning(f"⚠️ 예상치 못한 상태에서 매수 체결: {trading_stock.state.value}")
-                
+                        # 예상치 못한 상태에서도 자금 예약 해제 (10분 잠김 방지)
+                        if self.decision_engine and self.decision_engine.fund_manager:
+                            reserve_id = getattr(trading_stock, '_reserve_order_id', None)
+                            if reserve_id:
+                                actual_amount = float(order.price) * int(order.quantity)
+                                self.decision_engine.fund_manager.confirm_order(reserve_id, actual_amount)
+                                trading_stock._reserve_order_id = None
+                                self.logger.info(f"💰 예상치 못한 상태 매수 체결 — 자금 예약 확정: {reserve_id}")
+
                 elif order.order_type == OrderType.SELL:
                     # 매도 체결
                     if trading_stock.state == StockState.SELL_PENDING:
@@ -1028,7 +1048,12 @@ class TradingStockManager:
                             self.logger.info(f"🔄 {trading_stock.stock_code} 즉시 재거래 준비 완료 (COMPLETED 상태 유지)")
                     else:
                         self.logger.warning(f"⚠️ 예상치 못한 상태에서 매도 체결: {trading_stock.state.value}")
-                        
+                        # 예상치 못한 상태에서도 투자금 회수 시도 (자금 잠김 방지)
+                        if self.decision_engine and self.decision_engine.fund_manager:
+                            sell_amount = float(order.price) * int(order.quantity)
+                            self.decision_engine.fund_manager.release_investment(sell_amount)
+                            self.logger.info(f"💰 예상치 못한 상태 매도 체결 — 투자금 회수: {sell_amount:,.0f}원")
+
         except Exception as e:
             self.logger.error(f"❌ 주문 체결 콜백 처리 오류: {e}")
     
