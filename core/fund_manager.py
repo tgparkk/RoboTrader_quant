@@ -240,6 +240,52 @@ class FundManager:
                 self.logger.error(f"❌ DB에서 투자금 로드 실패: {e}")
                 return 0.0
 
+    def reconcile_stale_reservations(self, max_age_minutes: int = 10):
+        """오래된 미확정 예약 자동 해제 (자금 누수 방지)"""
+        with self._lock:
+            if not self.order_reservations:
+                return
+
+            from utils.korean_time import now_kst
+            current_ts = int(now_kst().timestamp())
+            stale = []
+
+            for oid, amount in self.order_reservations.items():
+                try:
+                    # 예약 ID 형식: "REB-{code}-{timestamp}" 또는 "PRE-{code}-{timestamp}"
+                    ts = int(oid.rsplit('-', 1)[1])
+                    age_minutes = (current_ts - ts) / 60
+                    if age_minutes > max_age_minutes:
+                        stale.append((oid, amount, age_minutes))
+                except (ValueError, IndexError):
+                    pass
+
+            for oid, amount, age in stale:
+                self.reserved_funds -= amount
+                self.available_funds += amount
+                del self.order_reservations[oid]
+                self.logger.warning(
+                    f"⚠️ 미확정 예약 자동 해제: {oid} ({amount:,.0f}원, 경과: {age:.0f}분)"
+                )
+
+    def reconcile_funds_from_positions(self, positions: list):
+        """복원된 포지션 기반 자금 재계산 (재시작 시 정합성 보장)"""
+        with self._lock:
+            total = sum(
+                float(p['quantity']) * float(p['buy_price'])
+                for p in positions
+            )
+            old = self.invested_funds
+            self.invested_funds = total
+            self.available_funds = self.total_funds - self.reserved_funds - self.invested_funds
+            if abs(old - total) > 1:
+                self.logger.warning(
+                    f"💰 자금 정합성 보정: invested {old:,.0f}원 → {total:,.0f}원 "
+                    f"(차이: {total - old:+,.0f}원)"
+                )
+            else:
+                self.logger.info(f"💰 자금 정합성 확인: invested={total:,.0f}원")
+
     def get_status(self) -> Dict[str, float]:
         """자금 현황 조회"""
         with self._lock:

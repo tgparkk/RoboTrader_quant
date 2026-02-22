@@ -312,22 +312,26 @@ class TradingStockManager:
                 # 매도 주문 중 상태로 변경
                 self._change_stock_state(stock_code, StockState.SELL_PENDING, f"매도 주문: {reason}")
             
-            # 매도 주문 실행
-            order_id = await self.order_manager.place_sell_order(stock_code, quantity, price, market=market)
-            
+            # 매도 주문 실행 (API 예외도 안전하게 처리)
+            order_id = None
+            try:
+                order_id = await self.order_manager.place_sell_order(stock_code, quantity, price, market=market)
+            except Exception as api_err:
+                self.logger.error(f"❌ {stock_code} 매도 API 호출 실패: {api_err}")
+
             if order_id:
                 with self._lock:
-                    trading_stock = self.trading_stocks[stock_code]
-                    trading_stock.add_order(order_id)
-                
+                    if stock_code in self.trading_stocks:
+                        self.trading_stocks[stock_code].add_order(order_id)
                 self.logger.info(f"📉 {stock_code} 매도 주문 성공: {order_id}")
                 return True
             else:
-                # 주문 실패 시 매도 후보로 되돌림
+                # 주문 실패 → 반드시 SELL_CANDIDATE로 복원
                 with self._lock:
-                    self._change_stock_state(stock_code, StockState.SELL_CANDIDATE, "매도 주문 실패")
+                    if stock_code in self.trading_stocks:
+                        self._change_stock_state(stock_code, StockState.SELL_CANDIDATE, "매도 주문 실패")
                 return False
-                
+
         except Exception as e:
             self.logger.error(f"❌ {stock_code} 매도 주문 오류: {e}")
             # 오류 시 매도 후보로 되돌림
@@ -406,6 +410,15 @@ class TradingStockManager:
                     #self.logger.info(f"✅ 매칭된 완료 주문 발견: {order.order_id} - 상태: {order.status.value}")
                     
                     if order.status == OrderStatus.FILLED:
+                        # Race condition 방지: 콜백에서 이미 처리했는지 확인
+                        with self._lock:
+                            if trading_stock.order_processed:
+                                self.logger.debug(
+                                    f"⚠️ {trading_stock.stock_code} 매수 이미 처리됨 (콜백) — 모니터링 스킵"
+                                )
+                                break
+                            trading_stock.order_processed = True  # 처리 선점
+
                         # 매수 완료 - 포지션 상태로 변경
                         with self._lock:
                             trading_stock.set_position(order.quantity, order.price)
@@ -512,6 +525,15 @@ class TradingStockManager:
                     order.stock_code == trading_stock.stock_code):
                     
                     if order.status == OrderStatus.FILLED:
+                        # Race condition 방지: 콜백에서 이미 처리했는지 확인
+                        with self._lock:
+                            if trading_stock.order_processed:
+                                self.logger.debug(
+                                    f"⚠️ {trading_stock.stock_code} 매도 이미 처리됨 (콜백) — 모니터링 스킵"
+                                )
+                                break
+                            trading_stock.order_processed = True  # 처리 선점
+
                         # 매수가 캡처 (clear_position 전에)
                         cached_buy_price = None
                         if trading_stock.position and trading_stock.position.avg_price:
@@ -683,11 +705,21 @@ class TradingStockManager:
                 # 09:00~09:05 사이에는 손절 체크 안 함 (익절만)
                 from utils.korean_time import now_kst
                 current_time = now_kst()
+                # 리밸런싱 플래그 체크 (10분 타임아웃 안전장치)
+                rebalancing_active = False
+                if hasattr(self, 'decision_engine') and self.decision_engine:
+                    engine = self.decision_engine
+                    if getattr(engine, 'rebalancing_in_progress', False):
+                        started = getattr(engine, '_rebalancing_started_at', None)
+                        if started:
+                            elapsed = (current_time - started).total_seconds() / 60
+                            if elapsed <= 10:
+                                rebalancing_active = True
+
                 is_before_rebalancing = (
                     current_time.hour == 9 and
                     current_time.minute < 5
-                ) or (hasattr(self, 'decision_engine') and self.decision_engine and
-                      getattr(self.decision_engine, 'rebalancing_in_progress', False))
+                ) or rebalancing_active
 
                 # 목표 익절률 체크
                 if hasattr(trading_stock, 'target_profit_rate') and trading_stock.target_profit_rate:

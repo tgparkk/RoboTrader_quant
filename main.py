@@ -225,7 +225,17 @@ class DayTradingBot:
             
             # 4. DB에서 오늘 날짜의 후보 종목 복원
             await self._restore_todays_candidates()
-            
+
+            # 5. 자금 정합성 검증 (복원 완료 후, 실전매매 모드)
+            if not getattr(self.config, 'paper_trading', True) and self.fund_manager:
+                from core.models import StockState
+                positioned = self.trading_manager.get_stocks_by_state(StockState.POSITIONED)
+                positions = [
+                    {'quantity': ts.position.quantity, 'buy_price': ts.position.avg_price}
+                    for ts in positioned if ts.position
+                ]
+                self.fund_manager.reconcile_funds_from_positions(positions)
+
             self.logger.info("✅ 시스템 초기화 완료")
             return True
             
@@ -519,11 +529,11 @@ class DayTradingBot:
     
     async def _execute_rebalancing_async(self, plan):
         """리밸런싱 실행 (비동기 버전)"""
-        self.decision_engine.rebalancing_in_progress = True
+        self.decision_engine.set_rebalancing_in_progress(True)
         try:
             await self.rebalancing_executor.execute_rebalancing(plan)
         finally:
-            self.decision_engine.rebalancing_in_progress = False
+            self.decision_engine.set_rebalancing_in_progress(False)
     
     async def _system_monitoring_task(self):
         """시스템 모니터링 태스크"""
@@ -615,6 +625,10 @@ class DayTradingBot:
                 if (current_time - last_market_check).total_seconds() >= 30 * 60:  # 30분
                     await self._log_system_status()
                     last_market_check = current_time
+
+                    # 자금 예약 미확정 자동 해제 (30분마다)
+                    if self.fund_manager:
+                        self.fund_manager.reconcile_stale_reservations(max_age_minutes=10)
                 
         except Exception as e:
             self.logger.error(f"❌ 시스템 모니터링 태스크 오류: {e}")

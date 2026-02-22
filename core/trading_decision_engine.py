@@ -60,8 +60,9 @@ class TradingDecisionEngine:
         # 자금 관리자 (나중에 main에서 설정)
         self.fund_manager = None
 
-        # 리밸런싱 진행 중 플래그 (손절 일시 중단용)
+        # 리밸런싱 진행 중 플래그 (손절 일시 중단용, 10분 타임아웃)
         self.rebalancing_in_progress = False
+        self._rebalancing_started_at = None
 
         # 🆕 추세 모멘텀 분석기 초기화
         from core.trend_momentum_analyzer import TrendMomentumAnalyzer
@@ -74,6 +75,16 @@ class TradingDecisionEngine:
         # 쿨다운은 TradingStock 모델에서 관리 (is_buy_cooldown_active 메서드 사용)
 
         self.logger.info("🧠 매매 판단 엔진 초기화 완료 (추세 기반 청산: ON)")
+
+    def set_rebalancing_in_progress(self, in_progress: bool):
+        """리밸런싱 플래그 설정 (타임스탬프 추적 포함)"""
+        from utils.korean_time import now_kst
+        self.rebalancing_in_progress = in_progress
+        self._rebalancing_started_at = now_kst() if in_progress else None
+        if in_progress:
+            self.logger.info("🔄 리밸런싱 시작 → 손절 일시 중단")
+        else:
+            self.logger.info("🔄 리밸런싱 완료 → 손절 재개")
 
     def _safe_float_convert(self, value):
         """쉼표가 포함된 문자열을 안전하게 float로 변환"""
@@ -582,13 +593,28 @@ class TradingDecisionEngine:
             target_profit_rate = getattr(trading_stock, 'target_profit_rate', 0.15)
             stop_loss_rate = getattr(trading_stock, 'stop_loss_rate', 0.10)
 
-            # 리밸런싱 진행 중이면 손절 중단 (익절만 허용)
-            # 플래그 기반이므로 09:05 전 뿐만 아니라 리밸런싱이 길어져도 대응 가능
+            # 리밸런싱 진행 중이면 손절 중단 (익절만 허용, 10분 타임아웃)
             from utils.korean_time import now_kst
             current_time = now_kst()
             is_before_rebalancing = (
                 current_time.hour == 9 and current_time.minute < 5
-            ) or self.rebalancing_in_progress
+            )
+
+            # 리밸런싱 플래그 체크 (10분 타임아웃 안전장치)
+            if self.rebalancing_in_progress:
+                if self._rebalancing_started_at:
+                    elapsed_minutes = (current_time - self._rebalancing_started_at).total_seconds() / 60
+                    if elapsed_minutes > 10:
+                        self.logger.critical(
+                            f"🚨 rebalancing_in_progress가 {elapsed_minutes:.0f}분 동안 True 유지 → 강제 해제"
+                        )
+                        self.rebalancing_in_progress = False
+                        self._rebalancing_started_at = None
+                    else:
+                        is_before_rebalancing = True
+                else:
+                    # 타임스탬프 없이 플래그만 켜진 경우 → 안전 리셋
+                    self.rebalancing_in_progress = False
 
             # 익절 조건 확인
             if profit_rate >= target_profit_rate:

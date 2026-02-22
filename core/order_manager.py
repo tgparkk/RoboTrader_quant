@@ -744,6 +744,39 @@ class OrderManager:
                             await self.telegram.notify_system_status(
                                 f"⚠️ 부분 체결: {order.stock_code} {filled_qty}/{order.quantity}주 체결, {remaining_qty}주 미체결"
                             )
+
+                        # 매도 부분 체결: 잔량 시장가 재주문 (최대 3회)
+                        if order.order_type == OrderType.SELL:
+                            retries = getattr(order, '_partial_retries', 0)
+                            if retries < 3:
+                                order._partial_retries = retries + 1
+                                self.logger.info(
+                                    f"🔄 {order.stock_code} 잔여 {remaining_qty}주 시장가 매도 재주문 "
+                                    f"(시도 {retries+1}/3)"
+                                )
+                                try:
+                                    await self.cancel_order(order_id)
+                                except Exception:
+                                    pass
+                                try:
+                                    new_id = await self.place_sell_order(
+                                        order.stock_code, remaining_qty, 0, market=True
+                                    )
+                                    if new_id:
+                                        self.logger.info(f"✅ 잔여 매도 재주문 성공: {new_id}")
+                                    else:
+                                        self.logger.error(f"❌ 잔여 매도 재주문 실패: {order.stock_code}")
+                                except Exception as retry_err:
+                                    self.logger.error(f"❌ 잔여 매도 재주문 오류: {retry_err}")
+                            else:
+                                self.logger.warning(
+                                    f"⚠️ {order.stock_code} 부분 체결 재시도 초과 (3회) — 수동 처리 필요"
+                                )
+                                if self.telegram:
+                                    await self.telegram.notify_system_status(
+                                        f"🚨 {order.stock_code} 부분 체결 재시도 초과 — "
+                                        f"{filled_qty}주 체결, {remaining_qty}주 미체결. 수동 처리 필요"
+                                    )
                     else:
                         self.logger.warning(f"⚠️ 수량 불일치: 체결({filled_qty}) + 잔여({remaining_qty}) ≠ 주문({order.quantity})")
                 else:
@@ -964,8 +997,25 @@ class OrderManager:
                         pass
 
                 if filled_price == 0:
-                    self.logger.error(f"❌ 체결가를 확인할 수 없음 (price=0): {order_id} — DB 저장 불가")
-                    return False
+                    # 최후 수단: 주문가로 대체
+                    if order.price > 0:
+                        filled_price = order.price
+                        self.logger.warning(
+                            f"⚠️ 체결가 0 → 주문가({order.price:,.0f}원)로 대체: {order_id}"
+                        )
+                    else:
+                        # 시장가 주문 + 가격 미확인 → 체결은 처리하되 수동 확인 필요
+                        self.logger.critical(
+                            f"🚨 체결가 확인 불가 (price=0): {order_id} ({order.stock_code}) "
+                            f"— 체결 처리 진행, 가격 0원 기록. 수동 확인 필요"
+                        )
+                        if self.telegram:
+                            try:
+                                await self.telegram.notify_system_status(
+                                    f"🚨 {order.stock_code} 체결가=0원 기록됨 — 수동 가격 확인 필요"
+                                )
+                            except Exception:
+                                pass
 
                 self.logger.info(f"✅ 타임아웃 안전장치: 체결 확인됨! {order_id} ({order.stock_code}) "
                                f"{filled_qty}주 @{filled_price:,.0f}원")
@@ -997,16 +1047,50 @@ class OrderManager:
 
                 return True
 
-            # 부분 체결인 경우도 기록 (전량은 아니지만 일부 체결됨)
+            # 부분 체결인 경우: 체결분을 DB에 기록하고 처리
             elif filled_qty > 0 and filled_qty < order.quantity:
-                self.logger.warning(f"⚠️ 타임아웃 안전장치: 부분 체결 감지 {order_id} — "
-                                  f"{filled_qty}/{order.quantity}주 (DB 저장은 전량 체결 시만)")
-                # 부분 체결은 복잡하므로 알림만 보내고 수동 처리 유도
+                remaining_qty = order.quantity - filled_qty
+                self.logger.warning(
+                    f"⚠️ 타임아웃+부분 체결: {order_id} ({order.stock_code}) "
+                    f"{filled_qty}/{order.quantity}주 체결, 잔여 {remaining_qty}주"
+                )
+
+                # 체결가 추출
+                partial_price = order.price
+                try:
+                    avg_prvs = status_data.get('avg_prvs', status_data.get('ccld_unpr', ''))
+                    if avg_prvs and str(avg_prvs).replace(',', '').strip():
+                        partial_price = float(str(avg_prvs).replace(',', '').strip())
+                except (ValueError, TypeError):
+                    pass
+
+                if partial_price == 0 and order.price > 0:
+                    partial_price = order.price
+
+                # 체결분만 처리 (수량을 체결분으로 조정)
+                original_qty = order.quantity
+                order.quantity = filled_qty
+                order.filled_quantity = filled_qty
+                order.filled_price = partial_price
+                order.remaining_quantity = 0
+                order.status = OrderStatus.FILLED
+                self._move_to_completed(order_id)
+
+                await self._save_real_trade_to_db(order, partial_price)
+
+                if self.trading_manager:
+                    try:
+                        await self.trading_manager.on_order_filled(order)
+                    except Exception as cb_err:
+                        self.logger.error(f"❌ 부분 체결 콜백 오류: {cb_err}")
+
                 if self.telegram:
                     await self.telegram.notify_system_status(
-                        f"⚠️ 부분 체결+타임아웃: {order.stock_code} {filled_qty}/{order.quantity}주 체결 — 수동 확인 필요"
+                        f"⚠️ 타임아웃+부분 체결 처리: {order.stock_code} "
+                        f"{filled_qty}/{original_qty}주 @{partial_price:,.0f}원 DB 저장 완료. "
+                        f"잔여 {remaining_qty}주 수동 확인 필요"
                     )
-                return False
+                return True
 
             return False
 
@@ -1151,16 +1235,12 @@ class OrderManager:
                     self.logger.error(f"❌ 실전 매수 기록 저장 실패: {order.stock_code}")
 
             elif order.order_type == OrderType.SELL:
-                # 매수 기록 ID 조회
-                buy_record_id = None
-                if self.trading_manager:
-                    trading_stock = self.trading_manager.get_trading_stock(order.stock_code)
-                    if trading_stock and hasattr(trading_stock, '_virtual_buy_record_id'):
-                        buy_record_id = trading_stock._virtual_buy_record_id
-
-                # buy_record_id가 없으면 DB에서 조회 (real 테이블)
+                # 실전매매: 항상 real_trading_records에서 buy_record_id 조회
+                buy_record_id = self.db_manager.get_last_open_real_buy(order.stock_code)
                 if not buy_record_id:
-                    buy_record_id = self.db_manager.get_last_open_real_buy(order.stock_code)
+                    self.logger.warning(
+                        f"⚠️ {order.stock_code} 실전 매수 기록 없음 — 매도 기록은 buy_record_id=None으로 저장"
+                    )
 
                 # 실전 매도 기록 저장 (real_trading_records 테이블)
                 success = self.db_manager.save_real_sell(

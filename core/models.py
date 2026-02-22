@@ -181,6 +181,10 @@ class TradingStock:
     last_buy_time: Optional[datetime] = None  # 마지막 매수 체결 시간
     buy_cooldown_minutes: int = 25  # 매수 쿨다운 시간 (분)
 
+    # 자금 예약 정보 (fund_manager 연동)
+    _reserve_order_id: Optional[str] = None
+    _reserve_amount: Optional[float] = None
+
     # 📊 패턴 데이터 로깅용 ID (매매 결과 연결)
     last_pattern_id: Optional[str] = None
 

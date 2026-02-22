@@ -7,7 +7,7 @@ from typing import List, Dict
 from utils.logger import setup_logger
 from config.constants import REBALANCING_ORDER_INTERVAL, SELL_ORDER_WAIT_TIMEOUT
 from utils.korean_time import now_kst
-from core.models import StockState
+from core.models import StockState, OrderStatus
 
 logger = setup_logger(__name__)
 
@@ -186,7 +186,19 @@ class RebalancingExecutor:
 
             logger.info(f"🔄 리밸런싱 실행: 매도 {len(sell_list)}개, 매수 {len(buy_list)}개")
 
-            # 1단계: 매도 주문 (시장가 전량)
+            # 1단계: 매도 주문 전 — 이미 매도 진행/완료된 종목 제외
+            for sell_item in sell_list[:]:  # 사본으로 반복
+                stock_code = sell_item['stock_code']
+                trading_stock = self.trading_manager.get_trading_stock(stock_code)
+                if trading_stock:
+                    if trading_stock.state == StockState.SELL_PENDING:
+                        logger.info(f"⏭️ {stock_code} 리밸런싱 매도 스킵: 이미 매도 진행 중 (손절/익절)")
+                        sell_list.remove(sell_item)
+                    elif trading_stock.state == StockState.COMPLETED:
+                        logger.info(f"⏭️ {stock_code} 리밸런싱 매도 스킵: 이미 매도 완료")
+                        sell_list.remove(sell_item)
+
+            # 매도 주문 (시장가 전량)
             sell_results = []
             for sell_item in sell_list:
                 stock_code = sell_item['stock_code']
@@ -246,25 +258,42 @@ class RebalancingExecutor:
                 logger.info(f"⏳ 매도 주문 체결 확인 중... (최대 {SELL_ORDER_WAIT_TIMEOUT//60}분)")
                 await self.order_wait_helper.wait_for_sell_orders_completion(sell_results, max_wait_seconds=SELL_ORDER_WAIT_TIMEOUT)
 
-                # 🆕 매도 완료된 종목의 trading_manager 상태 정리 (유령 포지션 방지)
+                # 🆕 매도 완료된 종목의 trading_manager 상태 정리 (체결 확인 후에만)
                 for sell_result in sell_results:
-                    if sell_result.get('success'):
-                        stock_code = sell_result['stock_code']
-                        stock_name = sell_result.get('stock_name', stock_code)
+                    if not sell_result.get('success'):
+                        continue
+
+                    stock_code = sell_result['stock_code']
+                    stock_name = sell_result.get('stock_name', stock_code)
+                    order_id = sell_result.get('order_id')
+
+                    # 실제 체결 여부 확인 (completed_orders에서 FILLED 상태 조회)
+                    order_filled = False
+                    if order_id:
+                        for completed in self.order_manager.get_completed_orders():
+                            if completed.order_id == order_id and completed.status == OrderStatus.FILLED:
+                                order_filled = True
+                                break
+
+                    if order_filled:
+                        # 체결 확인됨 → 안전하게 정리
                         trading_stock = self.trading_manager.get_trading_stock(stock_code)
                         if trading_stock:
                             with self.trading_manager._lock:
-                                # 포지션 및 주문 정보 정리
                                 trading_stock.clear_position()
                                 trading_stock.clear_current_order()
                                 trading_stock.is_buying = False
-                                # 상태를 COMPLETED로 변경
                                 self.trading_manager._change_stock_state(
                                     stock_code,
                                     StockState.COMPLETED,
-                                    f"리밸런싱 매도 완료"
+                                    f"리밸런싱 매도 체결 확인"
                                 )
-                            logger.info(f"✅ {stock_code}({stock_name}) 리밸런싱 매도 후 상태 정리 완료 → COMPLETED")
+                            logger.info(f"✅ {stock_code}({stock_name}) 매도 체결 확인 → COMPLETED")
+                    else:
+                        # 미체결 → 포지션 유지 (수동 확인 필요)
+                        logger.warning(
+                            f"⚠️ {stock_code}({stock_name}) 리밸런싱 매도 미체결 — 포지션 유지 (수동 확인 필요)"
+                        )
 
             # 1.5단계: 유지 대상 종목의 목표 익절/손절률 갱신
             keep_list = plan.get('keep_list', [])
