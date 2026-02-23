@@ -67,28 +67,41 @@ class HistoricalDataCollector:
         self._print_data_summary()
 
     def collect_stock_universe(self) -> tuple:
-        """FDR StockListing으로 KOSPI 종목 유니버스 수집"""
+        """FDR StockListing으로 KOSPI + KOSDAQ 종목 유니버스 수집"""
         import FinanceDataReader as fdr
 
-        logger.info("종목 유니버스 수집 (FinanceDataReader)...")
+        logger.info("종목 유니버스 수집 (FinanceDataReader: KOSPI + KOSDAQ)...")
 
-        df = fdr.StockListing('KOSPI')
-        if df is None or df.empty:
+        kospi_df = fdr.StockListing('KOSPI')
+        kosdaq_df = fdr.StockListing('KOSDAQ')
+
+        if kospi_df is None or kospi_df.empty:
             logger.error("KOSPI 종목 리스트 조회 실패")
             return set(), {}
+        if kosdaq_df is None or kosdaq_df.empty:
+            logger.warning("KOSDAQ 종목 리스트 조회 실패 - KOSPI만 진행")
+            kosdaq_df = pd.DataFrame()
 
         all_codes = set()
         shares_map = {}
         name_rows = []
+        self._kosdaq_codes = set()
 
-        for _, row in df.iterrows():
-            code = str(row['Code']).strip()
-            name = str(row.get('Name', code)).strip()
-            shares = int(row.get('Stocks', 0))
-            all_codes.add(code)
-            shares_map[code] = shares
-            name_rows.append((code, name, shares, None))
+        for df, market in [(kospi_df, 'KOSPI'), (kosdaq_df, 'KOSDAQ')]:
+            if df.empty:
+                continue
+            for _, row in df.iterrows():
+                code = str(row['Code']).strip()
+                name = str(row.get('Name', code)).strip()
+                shares = int(row.get('Stocks', 0))
+                all_codes.add(code)
+                shares_map[code] = shares
+                name_rows.append((code, name, shares, None))
+                if market == 'KOSDAQ':
+                    self._kosdaq_codes.add(code)
 
+        kospi_count = len(all_codes) - len(self._kosdaq_codes)
+        logger.info(f"KOSPI {kospi_count}개, KOSDAQ {len(self._kosdaq_codes)}개")
         logger.warning("주의: FDR은 현재 상장 종목만 반환 (상폐종목 미포함, 생존자 편향 존재)")
 
         with pg_connection(self._db_config) as conn:
@@ -198,7 +211,8 @@ class HistoricalDataCollector:
 
         for i, code in enumerate(stock_codes, 1):
             try:
-                ticker = yf.Ticker(f'{code}.KS')
+                suffix = '.KQ' if code in getattr(self, '_kosdaq_codes', set()) else '.KS'
+                ticker = yf.Ticker(f'{code}{suffix}')
                 income = ticker.quarterly_income_stmt
                 balance = ticker.quarterly_balance_sheet
 

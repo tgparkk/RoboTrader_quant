@@ -566,6 +566,15 @@ class DayTradingBot:
                                 self.logger.info(f"📦 장 시작 전 DB 백업 완료: {backup_path}")
                         except Exception as backup_err:
                             self.logger.error(f"❌ DB 백업 오류: {backup_err}")
+                        # 종목 리스트 갱신 (KOSPI + KOSDAQ)
+                        try:
+                            from scripts.update_stock_list import update_stock_list
+                            stock_result = update_stock_list()
+                            if stock_result:
+                                self.logger.info(f"📋 종목 리스트 갱신: KOSPI {stock_result['kospi']}개, KOSDAQ {stock_result['kosdaq']}개")
+                        except Exception as stock_err:
+                            self.logger.error(f"❌ 종목 리스트 갱신 오류: {stock_err}")
+
                         # 이전 완료 주문 메모리 정리
                         self.order_manager.cleanup_old_completed_orders()
 

@@ -133,27 +133,27 @@ class CandidateSelector:
     async def _apply_basic_filters(self, stocks: List[Dict]) -> List[Dict]:
         """
         1차 기본 필터링
-        - KOSPI 종목만
-        - 우선주 제외 
+        - KOSPI/KOSDAQ 종목만
+        - 우선주 제외
         - 기타 기본 조건
         """
         filtered = []
         excluded_counts = {
-            'non_kospi': 0,
+            'non_allowed_market': 0,
             'preferred': 0,
             'convertible': 0,
             'etf': 0,
             'passed': 0
         }
-        
+
         for stock in stocks:
             try:
                 code = stock.get('code', '')
                 name = stock.get('name', '')
-                
-                # KOSPI 종목만
-                if stock.get('market') != 'KOSPI':
-                    excluded_counts['non_kospi'] += 1
+
+                # KOSPI + KOSDAQ만 허용
+                if stock.get('market') not in ('KOSPI', 'KOSDAQ'):
+                    excluded_counts['non_allowed_market'] += 1
                     continue
                 
                 # 우선주 제외 (종목코드 끝자리가 5인 경우나 이름에 '우' 포함)
@@ -179,7 +179,7 @@ class CandidateSelector:
                 continue
         
         self.logger.info(f"1차 필터링 결과: "
-                        f"비KOSPI({excluded_counts['non_kospi']}), "
+                        f"비허용마켓({excluded_counts['non_allowed_market']}), "
                         f"우선주({excluded_counts['preferred']}), "
                         f"전환({excluded_counts['convertible']}), "
                         f"ETF({excluded_counts['etf']}), "
