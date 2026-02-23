@@ -220,7 +220,8 @@ class RebalancingExecutor:
                         stock_code=stock_code,
                         quantity=quantity,
                         price=current_price,  # 시장가는 가격 0으로 주문하지만, 여기서는 현재가 사용
-                        market=True  # 시장가 주문
+                        market=True,  # 시장가 주문
+                        reason=sell_reason  # 매도 사유 전달 (DB 기록용)
                     )
 
                     if order_id:
@@ -303,19 +304,15 @@ class RebalancingExecutor:
             # 2단계: 매수 주문 (동등 비중, 시장가)
             buy_results = []
 
-            # 🆕 오늘 손절/익절한 종목 조회 (재매수 차단)
-            today_no_rebuy_stocks = []
+            # 🆕 오늘 손절한 종목 조회 (재매수 차단 — 손절만, 익절은 허용)
+            today_stop_loss_stocks = []
             if self.db_manager:
                 today_stop_loss_stocks = self.db_manager.get_today_stop_loss_stocks(include_real=True)
-                today_profit_taking_stocks = self.db_manager.get_today_profit_taking_stocks(include_real=True)
-                today_no_rebuy_stocks = list(set(today_stop_loss_stocks + today_profit_taking_stocks))
 
                 if today_stop_loss_stocks:
                     logger.info(f"🚫 당일 손절 재매수 차단: {len(today_stop_loss_stocks)}개 ({', '.join(today_stop_loss_stocks)})")
-                if today_profit_taking_stocks:
-                    logger.info(f"🚫 당일 익절 재매수 차단: {len(today_profit_taking_stocks)}개 ({', '.join(today_profit_taking_stocks)})")
-                if not today_no_rebuy_stocks:
-                    logger.info(f"✅ 당일 매도 종목 없음 (재매수 제한 없음)")
+                else:
+                    logger.info(f"✅ 당일 손절 종목 없음 (재매수 제한 없음)")
 
             # 🆕 코스피 변동률 조회 (1회만)
             market_change = self._get_market_change_rate()
@@ -361,10 +358,9 @@ class RebalancingExecutor:
 
                 reserved = False
                 try:
-                    # 🆕 오늘 손절/익절한 종목은 재매수 금지
-                    if stock_code in today_no_rebuy_stocks:
-                        reason = "손절" if stock_code in today_stop_loss_stocks else "익절"
-                        logger.warning(f"⚠️ {stock_code}({stock_name}) 매수 스킵: 오늘 {reason}한 종목 - 재매수 금지")
+                    # 🆕 오늘 손절한 종목은 재매수 금지 (익절 후 퀀트 상위 재진입은 허용)
+                    if stock_code in today_stop_loss_stocks:
+                        logger.warning(f"⚠️ {stock_code}({stock_name}) 매수 스킵: 오늘 손절한 종목 - 재매수 금지")
                         continue
 
                     # 현재가 조회

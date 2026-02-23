@@ -225,7 +225,8 @@ class OrderManager:
             return None
     
     async def place_sell_order(self, stock_code: str, quantity: int, price: float,
-                              timeout_seconds: int = None, market: bool = False) -> Optional[str]:
+                              timeout_seconds: int = None, market: bool = False,
+                              reason: str = "") -> Optional[str]:
         """매도 주문 실행"""
         try:
             timeout_seconds = timeout_seconds or self.config.order_management.sell_timeout_seconds
@@ -243,7 +244,8 @@ class OrderManager:
                     quantity=quantity,
                     timestamp=now_kst(),
                     status=OrderStatus.FILLED,
-                    remaining_quantity=0
+                    remaining_quantity=0,
+                    reason=reason or ""
                 )
                 self.completed_orders.append(order)
                 self.logger.info(f"🧪(가상) 매도 체결: {fake_order_id} - {stock_code} {quantity}주 @{price:,.0f}원 ({'시장가' if market else '지정가'})")
@@ -329,7 +331,8 @@ class OrderManager:
                     timestamp=now_kst(),
                     status=OrderStatus.PENDING,
                     remaining_quantity=quantity,
-                    stock_name=stock_name  # 🆕 종목명 저장
+                    stock_name=stock_name,  # 🆕 종목명 저장
+                    reason=reason or ""  # 매도 사유 저장
                 )
 
                 # 미체결 관리에 추가
@@ -771,7 +774,8 @@ class OrderManager:
                                     pass
                                 try:
                                     new_id = await self.place_sell_order(
-                                        order.stock_code, remaining_qty, 0, market=True
+                                        order.stock_code, remaining_qty, 0, market=True,
+                                        reason=order.reason or ""
                                     )
                                     if new_id:
                                         self.logger.info(f"✅ 잔여 매도 재주문 성공: {new_id}")
@@ -1108,6 +1112,21 @@ class OrderManager:
                     )
                 return True
 
+            # 모순 상태: filled=0, remaining=0 → 실제 계좌 보유 확인 필요
+            elif filled_qty == 0 and remaining_qty == 0 and order.quantity > 0:
+                self.logger.warning(
+                    f"⚠️ 타임아웃+모순 상태: {order_id} ({order.stock_code}) "
+                    f"filled=0, remaining=0, order={order.quantity}주 — KIS API 동기화 지연 의심. "
+                    f"실제 계좌에서 보유 여부를 수동 확인해주세요."
+                )
+                if self.telegram:
+                    stock_name = order.stock_name or f'Stock_{order.stock_code}'
+                    order_type_str = "매수" if order.order_type == OrderType.BUY else "매도"
+                    await self.telegram.notify_system_status(
+                        f"🚨 {order.stock_code}({stock_name}) {order_type_str} {order.quantity}주 "
+                        f"체결 상태 확인 불가 (API 모순 응답). 증권사 앱에서 보유 확인 필요!"
+                    )
+
             return False
 
         except Exception as e:
@@ -1185,9 +1204,10 @@ class OrderManager:
                     )
                 else:
                     new_order_id = await self.place_sell_order(
-                        order.stock_code, 
-                        order.remaining_quantity, 
-                        new_price
+                        order.stock_code,
+                        order.remaining_quantity,
+                        new_price,
+                        reason=order.reason or ""
                     )
                 
                 if new_order_id:
@@ -1256,27 +1276,33 @@ class OrderManager:
                         self.logger.error(f"❌ 실전 매수 기록 저장 실패: {order.stock_code}")
 
             elif order.order_type == OrderType.SELL:
-                # 실전매매: 항상 real_trading_records에서 buy_record_id 조회
-                buy_record_id = self.db_manager.get_last_open_real_buy(order.stock_code)
-                if not buy_record_id:
-                    self.logger.warning(
-                        f"⚠️ {order.stock_code} 실전 매수 기록 없음 — 매도 기록은 buy_record_id=None으로 저장"
-                    )
-
-                # 실전 매도 기록 저장 (real_trading_records 테이블)
-                success = self.db_manager.save_real_sell(
-                    stock_code=order.stock_code,
-                    stock_name=stock_name,
-                    price=filled_price,
-                    quantity=order.quantity,
-                    strategy="리밸런싱",
-                    reason="실전매매",
-                    buy_record_id=buy_record_id
-                )
-                if success:
-                    self.logger.info(f"💾 실전 매도 기록 저장: {order.stock_code} {order.quantity}주 @{filled_price:,.0f}원")
+                # 이중 저장 방지: 콜백에서 이미 저장했으면 스킵
+                if getattr(order, '_real_sell_saved', False):
+                    self.logger.debug(f"⏭️ {order.stock_code} 실전 매도 기록 이미 저장됨 — 스킵")
                 else:
-                    self.logger.error(f"❌ 실전 매도 기록 저장 실패: {order.stock_code}")
+                    # 실전매매: 항상 real_trading_records에서 buy_record_id 조회
+                    buy_record_id = self.db_manager.get_last_open_real_buy(order.stock_code)
+                    if not buy_record_id:
+                        self.logger.warning(
+                            f"⚠️ {order.stock_code} 실전 매수 기록 없음 — 매도 기록은 buy_record_id=None으로 저장"
+                        )
+
+                    # 실전 매도 기록 저장 — order.reason에 실제 매도 사유 사용
+                    sell_reason = order.reason or "실전매매"
+                    success = self.db_manager.save_real_sell(
+                        stock_code=order.stock_code,
+                        stock_name=stock_name,
+                        price=filled_price,
+                        quantity=order.quantity,
+                        strategy="리밸런싱",
+                        reason=sell_reason,
+                        buy_record_id=buy_record_id
+                    )
+                    if success:
+                        order._real_sell_saved = True
+                        self.logger.info(f"💾 실전 매도 기록 저장: {order.stock_code} {order.quantity}주 @{filled_price:,.0f}원 (사유: {sell_reason})")
+                    else:
+                        self.logger.error(f"❌ 실전 매도 기록 저장 실패: {order.stock_code}")
 
         except Exception as e:
             self.logger.error(f"❌ 실전 거래 DB 저장 오류: {e}")

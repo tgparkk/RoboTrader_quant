@@ -100,6 +100,7 @@ class Order:
     target_profit_rate: Optional[float] = None  # 🆕 목표 익절률 (DB 기록용)
     stop_loss_rate: Optional[float] = None  # 🆕 목표 손절률 (DB 기록용)
     stock_name: Optional[str] = None  # 🆕 종목명 (DB 기록용)
+    reason: Optional[str] = None  # 매매 사유 (DB 기록용, 재매수 차단 쿼리에 사용)
 
     def __post_init__(self):
         """초기화 후 처리"""

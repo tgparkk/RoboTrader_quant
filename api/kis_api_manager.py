@@ -763,12 +763,19 @@ class KISAPIManager:
                     # 🔧 검증: 체결량 + 잔여량 = 주문량이어야 함
                     expected_filled = max(0, total_order_qty - remaining_qty)
                     if filled_qty != expected_filled:
-                        self.logger.warning(f"⚠️ 체결량 불일치 감지: {order_id} - "
-                                          f"체결내역: {filled_qty}주, 계산값: {expected_filled}주")
-                        # 🚨 핵심 수정: 실제 체결 내역만 신뢰 (계산값 사용 금지)
-                        # 실제 체결 내역이 없으면 무조건 체결량 0
-                        self.logger.info(f"📊 실제 체결 내역 기준: {filled_qty}주 (계산값 {expected_filled}주는 무시)")
-                        # filled_qty는 그대로 유지 (실제 체결 내역 기준)
+                        # 🆕 모순 상태 감지: rmn_qty=0이면서 filled=0 (KIS API 동기화 지연)
+                        if remaining_qty == 0 and filled_qty == 0 and total_order_qty > 0:
+                            self.logger.warning(
+                                f"⚠️ KIS API 모순 감지: {order_id} - "
+                                f"잔여=0, 체결내역=0, 주문={total_order_qty}주. "
+                                f"체결 내역 동기화 지연으로 판단하여 미체결(잔여={total_order_qty})로 처리"
+                            )
+                            # rmn_qty를 원래 주문수량으로 복원 (아직 체결 미확인)
+                            remaining_qty = total_order_qty
+                        else:
+                            self.logger.warning(f"⚠️ 체결량 불일치 감지: {order_id} - "
+                                              f"체결내역: {filled_qty}주, 계산값: {expected_filled}주")
+                            self.logger.info(f"📊 실제 체결 내역 기준: {filled_qty}주 (계산값 {expected_filled}주는 무시)")
                         
                 except (ValueError, TypeError) as e:
                     self.logger.error(f"❌ 미체결 주문 수량 파싱 오류: {order_id} - {e}")

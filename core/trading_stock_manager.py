@@ -315,7 +315,7 @@ class TradingStockManager:
             # 매도 주문 실행 (API 예외도 안전하게 처리)
             order_id = None
             try:
-                order_id = await self.order_manager.place_sell_order(stock_code, quantity, price, market=market)
+                order_id = await self.order_manager.place_sell_order(stock_code, quantity, price, market=market, reason=reason)
             except Exception as api_err:
                 self.logger.error(f"❌ {stock_code} 매도 API 호출 실패: {api_err}")
 
@@ -554,27 +554,32 @@ class TradingStockManager:
                                 StockState.COMPLETED,
                                 f"매도 완료: {order.quantity}주 @{order.price:,.0f}원"
                             )
-                        # 실거래 매도 기록 저장 (실전매매 모드에서만)
+                        # 실거래 매도 기록 저장 (실전매매 모드에서만, 이중 저장 방지)
                         profit_rate = 0.0
                         if not (self.decision_engine and self.decision_engine.is_virtual_mode):
-                            try:
-                                db = self.decision_engine.db_manager
-                                buy_id = db.get_last_open_real_buy(trading_stock.stock_code)
+                            if getattr(order, '_real_sell_saved', False):
+                                self.logger.debug(f"⏭️ {trading_stock.stock_code} 실전 매도 기록 이미 저장됨 (모니터링 스킵)")
+                            else:
+                                try:
+                                    db = self.decision_engine.db_manager
+                                    buy_id = db.get_last_open_real_buy(trading_stock.stock_code)
 
-                                if buy_id and cached_buy_price:
-                                    profit_rate = ((float(order.price) - cached_buy_price) / cached_buy_price) * 100
+                                    if buy_id and cached_buy_price:
+                                        profit_rate = ((float(order.price) - cached_buy_price) / cached_buy_price) * 100
 
-                                db.save_real_sell(
-                                    stock_code=trading_stock.stock_code,
-                                    stock_name=trading_stock.stock_name,
-                                    price=float(order.price),
-                                    quantity=int(order.quantity),
-                                    strategy=trading_stock.selection_reason,
-                                    reason="체결",
-                                    buy_record_id=buy_id
-                                )
-                            except Exception as db_err:
-                                self.logger.warning(f"⚠️ 실거래 매도 기록 저장 실패: {db_err}")
+                                    sell_reason = order.reason or "체결"
+                                    db.save_real_sell(
+                                        stock_code=trading_stock.stock_code,
+                                        stock_name=trading_stock.stock_name,
+                                        price=float(order.price),
+                                        quantity=int(order.quantity),
+                                        strategy=trading_stock.selection_reason,
+                                        reason=sell_reason,
+                                        buy_record_id=buy_id
+                                    )
+                                    order._real_sell_saved = True
+                                except Exception as db_err:
+                                    self.logger.warning(f"⚠️ 실거래 매도 기록 저장 실패: {db_err}")
 
                         # fund_manager 투자금 회수
                         if self.decision_engine and self.decision_engine.fund_manager:
@@ -1014,27 +1019,32 @@ class TradingStockManager:
                             f"매도 체결 (콜백): {order.quantity}주 @{order.price:,.0f}원"
                         )
 
-                        # 실거래 매도 기록 저장 (실전매매 모드에서만)
+                        # 실거래 매도 기록 저장 (실전매매 모드에서만, 이중 저장 방지)
                         profit_rate = 0.0
                         if not (self.decision_engine and self.decision_engine.is_virtual_mode):
-                            try:
-                                db = self.decision_engine.db_manager
-                                buy_id = db.get_last_open_real_buy(trading_stock.stock_code)
+                            if getattr(order, '_real_sell_saved', False):
+                                self.logger.debug(f"⏭️ {trading_stock.stock_code} 실전 매도 기록 이미 저장됨 (콜백 스킵)")
+                            else:
+                                try:
+                                    db = self.decision_engine.db_manager
+                                    buy_id = db.get_last_open_real_buy(trading_stock.stock_code)
 
-                                if buy_id and cached_buy_price:
-                                    profit_rate = ((float(order.price) - cached_buy_price) / cached_buy_price) * 100
+                                    if buy_id and cached_buy_price:
+                                        profit_rate = ((float(order.price) - cached_buy_price) / cached_buy_price) * 100
 
-                                db.save_real_sell(
-                                    stock_code=trading_stock.stock_code,
-                                    stock_name=trading_stock.stock_name,
-                                    price=float(order.price),
-                                    quantity=int(order.quantity),
-                                    strategy=trading_stock.selection_reason,
-                                    reason="체결(콜백)",
-                                    buy_record_id=buy_id
-                                )
-                            except Exception as db_err:
-                                self.logger.warning(f"⚠️ 실거래 매도 기록 저장 실패: {db_err}")
+                                    sell_reason = order.reason or "체결(콜백)"
+                                    db.save_real_sell(
+                                        stock_code=trading_stock.stock_code,
+                                        stock_name=trading_stock.stock_name,
+                                        price=float(order.price),
+                                        quantity=int(order.quantity),
+                                        strategy=trading_stock.selection_reason,
+                                        reason=sell_reason,
+                                        buy_record_id=buy_id
+                                    )
+                                    order._real_sell_saved = True
+                                except Exception as db_err:
+                                    self.logger.warning(f"⚠️ 실거래 매도 기록 저장 실패: {db_err}")
 
                         # fund_manager 투자금 회수
                         if self.decision_engine and self.decision_engine.fund_manager:
