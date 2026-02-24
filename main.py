@@ -134,7 +134,11 @@ class DayTradingBot:
         # 🆕 헬퍼 초기화
         self.notification_helper = RebalancingNotificationHelper(self.telegram)
         self.order_wait_helper = OrderWaitHelper(self.api_manager)
-        self.keep_list_updater = KeepListUpdater(self.trading_manager)
+        self.keep_list_updater = KeepListUpdater(
+            self.trading_manager,
+            db_manager=self.db_manager,
+            paper_trading=self.config.paper_trading
+        )
         self.rebalancing_executor = RebalancingExecutor(
             api_manager=self.api_manager,
             order_manager=self.order_manager,

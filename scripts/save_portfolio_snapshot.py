@@ -42,8 +42,13 @@ def save_portfolio_snapshot():
 
         logger.info(f"📸 포트폴리오 스냅샷 저장 시작: {snapshot_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-        # 현재 보유 종목 조회
-        holdings = db.get_virtual_open_positions()
+        # 현재 보유 종목 조회 (매매 모드에 따라 분기)
+        from config.settings import load_trading_config
+        config = load_trading_config()
+        if getattr(config, 'paper_trading', True):
+            holdings = db.get_virtual_open_positions()
+        else:
+            holdings = db.get_real_open_positions()
 
         if holdings.empty:
             logger.info("📦 보유 종목 없음 - 스냅샷 저장 생략")

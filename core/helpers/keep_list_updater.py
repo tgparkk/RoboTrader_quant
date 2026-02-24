@@ -11,12 +11,16 @@ logger = setup_logger(__name__)
 class KeepListUpdater:
     """유지 종목 목표율 업데이트"""
 
-    def __init__(self, trading_manager):
+    def __init__(self, trading_manager, db_manager=None, paper_trading: bool = True):
         """
         Args:
             trading_manager: TradingStockManager 인스턴스
+            db_manager: DatabaseManager 인스턴스 (DB 반영용)
+            paper_trading: 가상매매 여부 (False면 real_trading_records 갱신)
         """
         self.trading_manager = trading_manager
+        self.db_manager = db_manager
+        self.paper_trading = paper_trading
 
     async def update_keep_list_profit_loss(self, keep_list: List[Dict]):
         """
@@ -63,6 +67,14 @@ class KeepListUpdater:
 
                 trading_stock.target_profit_rate = target_profit_rate
                 trading_stock.stop_loss_rate = stop_loss_rate
+
+                # DB에도 반영 (재시작 시 복원을 위해)
+                if self.db_manager:
+                    self.db_manager.update_position_targets(
+                        stock_code, target_profit_rate, stop_loss_rate,
+                        use_real=not self.paper_trading
+                    )
+
                 updated_count += 1
 
                 if abs(old_profit - target_profit_rate) > 0.001 or abs(old_loss - stop_loss_rate) > 0.001:

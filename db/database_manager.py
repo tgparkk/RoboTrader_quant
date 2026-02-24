@@ -1491,6 +1491,34 @@ class DatabaseManager:
         finally:
             self._put_connection(conn)
 
+    def update_position_targets(self, stock_code: str, target_profit_rate: float,
+                                stop_loss_rate: float, use_real: bool = False) -> bool:
+        """보유 중인 BUY 레코드의 target_profit_rate / stop_loss_rate 갱신
+
+        keep_list_updater에서 리밸런싱 시 TP/SL 재계산 후 DB에 반영하기 위해 사용.
+        재시작 시 state_restoration_helper가 DB에서 읽으므로 반드시 DB도 갱신해야 함.
+        """
+        table = 'real_trading_records' if use_real else 'virtual_trading_records'
+        conn = self._get_connection()
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute(f'''
+                    UPDATE {table}
+                    SET target_profit_rate = %s, stop_loss_rate = %s
+                    WHERE stock_code = %s AND action = 'BUY'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM {table} s
+                          WHERE s.buy_record_id = {table}.id AND s.action = 'SELL'
+                      )
+                ''', (float(target_profit_rate), float(stop_loss_rate), stock_code))
+                return cursor.rowcount > 0
+        except Exception as e:
+            self.logger.error(f"포지션 목표율 갱신 실패 ({stock_code}): {e}")
+            return False
+        finally:
+            self._put_connection(conn)
+
     def get_virtual_trading_history(self, days: int = 30, include_open: bool = True) -> pd.DataFrame:
         """가상 매매 이력 조회"""
         conn = self._get_connection()
