@@ -999,6 +999,20 @@ class TradingStockManager:
                                 trading_stock._reserve_order_id = None
                                 self.logger.info(f"💰 예상치 못한 상태 매수 체결 — 자금 예약 확정: {reserve_id}")
 
+                        # 방어적 포지션 설정: 예상치 못한 상태에서도 포지션을 복원하여 매도 모니터링 활성화
+                        trading_stock.order_processed = True
+                        trading_stock.is_buying = False
+                        trading_stock.set_position(order.quantity, order.price)
+                        trading_stock.clear_current_order()
+                        from utils.korean_time import now_kst as _now_kst
+                        trading_stock.set_buy_time(_now_kst())
+                        self._change_stock_state(
+                            trading_stock.stock_code,
+                            StockState.POSITIONED,
+                            f"매수 체결 복원 (예상치 못한 상태): {order.quantity}주 @{order.price:,.0f}원"
+                        )
+                        self.logger.info(f"✅ 예상치 못한 상태 매수 체결 → POSITIONED 복원: {trading_stock.stock_code} {order.quantity}주 @{order.price:,.0f}원")
+
                 elif order.order_type == OrderType.SELL:
                     # 매도 체결
                     if trading_stock.state == StockState.SELL_PENDING:

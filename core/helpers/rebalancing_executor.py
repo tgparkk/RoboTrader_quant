@@ -448,6 +448,16 @@ class RebalancingExecutor:
                         trading_stock._reserve_order_id = reserve_order_id
                         trading_stock._reserve_amount = buy_amount
 
+                    # BUY_PENDING 상태로 전환 (체결 콜백에서 POSITIONED 전환을 위해 필수)
+                    if trading_stock:
+                        with self.trading_manager._lock:
+                            trading_stock.is_buying = True
+                            trading_stock.order_processed = False
+                            self.trading_manager._change_stock_state(
+                                stock_code, StockState.BUY_PENDING,
+                                f"리밸런싱 매수 주문"
+                            )
+
                     # 시장가 매수 주문 (목표 익절/손절률 직접 전달)
                     order_id = await self.order_manager.place_buy_order(
                         stock_code=stock_code,
@@ -460,6 +470,10 @@ class RebalancingExecutor:
                     )
 
                     if order_id:
+
+                        # 주문 ID를 trading_stock에 등록 (체결 추적용)
+                        if trading_stock:
+                            trading_stock.add_order(order_id)
 
                         buy_results.append({
                             'stock_code': stock_code,
@@ -474,6 +488,14 @@ class RebalancingExecutor:
                         logger.info(f"✅ 리밸런싱 매수 주문: {stock_code}({stock_name}) {target_quantity}주 시장가 (목표: {target_amount:,.0f}원)")
                     else:
                         # 주문 실패 → 자금 예약 해제
+                        # 상태 복원: BUY_PENDING → SELECTED
+                        if trading_stock:
+                            with self.trading_manager._lock:
+                                trading_stock.is_buying = False
+                                self.trading_manager._change_stock_state(
+                                    stock_code, StockState.SELECTED,
+                                    f"리밸런싱 매수 주문 실패"
+                                )
                         if self.fund_manager and reserved:
                             self.fund_manager.cancel_order(reserve_order_id)
 
@@ -494,6 +516,15 @@ class RebalancingExecutor:
                     if self.fund_manager and reserved:
                         self.fund_manager.cancel_order(reserve_order_id)
                     logger.error(f"❌ 리밸런싱 매수 오류 {stock_code}: {e}")
+                    # 상태 복원: BUY_PENDING → SELECTED (예외 시)
+                    trading_stock = self.trading_manager.get_trading_stock(stock_code)
+                    if trading_stock and trading_stock.state == StockState.BUY_PENDING:
+                        with self.trading_manager._lock:
+                            trading_stock.is_buying = False
+                            self.trading_manager._change_stock_state(
+                                stock_code, StockState.SELECTED,
+                                f"리밸런싱 매수 예외: {e}"
+                            )
                     buy_results.append({
                         'stock_code': stock_code,
                         'stock_name': stock_name,
