@@ -331,47 +331,84 @@ class QuantRebalancingService:
                 f"매도 {len(sell_list)}개, 매수 {len(buy_list)}개, 유지 {len(keep_list)}개"
             )
             
-            # 리밸런싱 이력 저장
+            # 리밸런싱 이력 저장 (종목별 팩터 점수 포함)
             try:
                 rebal_date = f"{calc_date[:4]}-{calc_date[4:6]}-{calc_date[6:8]}"
                 history_records = []
                 for item in sell_list:
+                    stock_code = item.get('stock_code', '')
+                    fd = factors_map.get(stock_code, {})
                     history_records.append({
-                        'stock_code': item.get('stock_code', ''),
+                        'stock_code': stock_code,
                         'stock_name': item.get('stock_name', ''),
                         'action': 'SELL',
                         'reason': item.get('reason', ''),
                         'rank': item.get('factor_rank'),
                         'total_score': item.get('total_score'),
-                        'momentum_score': None,
+                        'momentum_score': fd.get('momentum_score'),
+                        'value_score': fd.get('value_score'),
+                        'quality_score': fd.get('quality_score'),
+                        'growth_score': fd.get('growth_score'),
+                        'composite_score': None,
                         'target_profit_rate': None,
                         'stop_loss_rate': None,
                         'quantity': item.get('quantity'),
                         'price': None,
                     })
                 for item in buy_list:
+                    stock_code = item.get('stock_code', '')
+                    fd = factors_map.get(stock_code, {})
+                    rank = item.get('rank', 50)
+                    momentum = fd.get('momentum_score', 50)
+                    total = item.get('total_score', 0)
+                    # composite_score 계산 (TP/SL 등급 결정에 사용되는 가중평균)
+                    rank_score = (51 - rank) / 50 * 100 if rank <= 50 else 0
+                    composite = (
+                        rank_score * self.profit_loss_calculator.rank_weight +
+                        min(100, max(0, total)) * self.profit_loss_calculator.score_weight +
+                        min(100, max(0, momentum)) * self.profit_loss_calculator.momentum_weight
+                    )
                     history_records.append({
-                        'stock_code': item.get('stock_code', ''),
+                        'stock_code': stock_code,
                         'stock_name': item.get('stock_name', ''),
                         'action': 'BUY',
                         'reason': item.get('reason', ''),
-                        'rank': item.get('rank'),
-                        'total_score': item.get('total_score'),
-                        'momentum_score': None,
+                        'rank': rank,
+                        'total_score': total,
+                        'momentum_score': momentum,
+                        'value_score': fd.get('value_score'),
+                        'quality_score': fd.get('quality_score'),
+                        'growth_score': fd.get('growth_score'),
+                        'composite_score': composite,
                         'target_profit_rate': item.get('target_profit_rate'),
                         'stop_loss_rate': item.get('stop_loss_rate'),
                         'quantity': None,
                         'price': None,
                     })
                 for item in keep_list:
+                    stock_code = item.get('stock_code', '')
+                    fd = factors_map.get(stock_code, {})
+                    rank = item.get('rank', 50)
+                    momentum = fd.get('momentum_score', 50)
+                    total = item.get('total_score', 0)
+                    rank_score = (51 - rank) / 50 * 100 if rank <= 50 else 0
+                    composite = (
+                        rank_score * self.profit_loss_calculator.rank_weight +
+                        min(100, max(0, total)) * self.profit_loss_calculator.score_weight +
+                        min(100, max(0, momentum)) * self.profit_loss_calculator.momentum_weight
+                    )
                     history_records.append({
-                        'stock_code': item.get('stock_code', ''),
+                        'stock_code': stock_code,
                         'stock_name': item.get('stock_name', ''),
                         'action': 'KEEP',
                         'reason': f"유지 {item.get('rank', '?')}위",
-                        'rank': item.get('rank'),
-                        'total_score': item.get('total_score'),
-                        'momentum_score': None,
+                        'rank': rank,
+                        'total_score': total,
+                        'momentum_score': momentum,
+                        'value_score': fd.get('value_score'),
+                        'quality_score': fd.get('quality_score'),
+                        'growth_score': fd.get('growth_score'),
+                        'composite_score': composite,
                         'target_profit_rate': item.get('target_profit_rate'),
                         'stop_loss_rate': item.get('stop_loss_rate'),
                         'quantity': None,

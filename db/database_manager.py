@@ -1777,8 +1777,9 @@ class DatabaseManager:
         Args:
             rebalancing_date: 리밸런싱 날짜 (str 'YYYY-MM-DD' 또는 date)
             records: [{'stock_code', 'stock_name', 'action', 'reason', 'rank',
-                       'total_score', 'momentum_score', 'target_profit_rate',
-                       'stop_loss_rate', 'quantity', 'price'}, ...]
+                       'total_score', 'momentum_score', 'value_score',
+                       'quality_score', 'growth_score', 'composite_score',
+                       'target_profit_rate', 'stop_loss_rate', 'quantity', 'price'}, ...]
         """
         if not records:
             self.logger.info("저장할 리밸런싱 이력이 없습니다")
@@ -1793,8 +1794,9 @@ class DatabaseManager:
                         INSERT INTO rebalancing_history
                         (rebalancing_date, stock_code, stock_name, action, reason,
                          rank, total_score, momentum_score,
+                         value_score, quality_score, growth_score, composite_score,
                          target_profit_rate, stop_loss_rate, quantity, price)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ''', (
                         str(rebalancing_date),
                         rec.get('stock_code', ''),
@@ -1804,6 +1806,10 @@ class DatabaseManager:
                         rec.get('rank'),
                         rec.get('total_score'),
                         rec.get('momentum_score'),
+                        rec.get('value_score'),
+                        rec.get('quality_score'),
+                        rec.get('growth_score'),
+                        rec.get('composite_score'),
                         rec.get('target_profit_rate'),
                         rec.get('stop_loss_rate'),
                         rec.get('quantity'),
@@ -1831,7 +1837,7 @@ class DatabaseManager:
         try:
             with conn:
                 cursor = conn.cursor()
-                query = 'SELECT id, rebalancing_date, stock_code, stock_name, action, reason, rank, total_score, momentum_score, target_profit_rate, stop_loss_rate, quantity, price, created_at FROM rebalancing_history WHERE 1=1'
+                query = 'SELECT id, rebalancing_date, stock_code, stock_name, action, reason, rank, total_score, momentum_score, value_score, quality_score, growth_score, composite_score, target_profit_rate, stop_loss_rate, quantity, price, created_at FROM rebalancing_history WHERE 1=1'
                 params = []
                 if date:
                     query += ' AND rebalancing_date = %s'
