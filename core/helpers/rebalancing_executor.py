@@ -351,6 +351,15 @@ class RebalancingExecutor:
                 except Exception as bal_err:
                     logger.error(f"❌ 매수 전 잔고 조회 오류: {bal_err}")
 
+            # 2차 방어: 매도 대기 후 손절 목록 재확인
+            # (리밸런싱 매도 단계 중 동시 실행된 손절 매도가 DB에 기록되었을 수 있음)
+            if self.db_manager:
+                fresh_stop_loss = self.db_manager.get_today_stop_loss_stocks(include_real=True)
+                new_stops = set(fresh_stop_loss) - set(today_stop_loss_stocks)
+                if new_stops:
+                    logger.warning(f"🔄 매도 단계 중 추가 손절 감지: {', '.join(new_stops)}")
+                    today_stop_loss_stocks = list(set(today_stop_loss_stocks) | set(fresh_stop_loss))
+
             for buy_item in buy_list:
                 stock_code = buy_item['stock_code']
                 target_amount = buy_item['target_amount']

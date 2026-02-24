@@ -495,24 +495,30 @@ class DayTradingBot:
                             # 리밸런싱 필요 여부 확인
                             if self.rebalancing_service.should_rebalance(today_str):
                                 self.logger.info(f"🔄 리밸런싱 시작: {today_str}")
-                                
-                                # 리밸런싱 계획 계산
-                                plan = self.rebalancing_service.calculate_rebalancing_plan(today_str)
-                                
-                                # 리밸런싱 실행 (매도/매수 또는 유지 대상 목표 익절/손절률 갱신)
-                                if plan:
-                                    if plan.get('sell_list') or plan.get('buy_list'):
-                                        # 매도/매수 실행
-                                        await self._execute_rebalancing_async(plan)
-                                        self._last_rebalancing_date = today_str
-                                        self.logger.info(f"✅ 리밸런싱 완료: {today_str}")
+
+                                # 손절 중단 플래그를 plan 계산 전에 설정
+                                # (plan 계산 중 async 양보 시 모니터링 루프의 손절 실행 방지)
+                                self.decision_engine.set_rebalancing_in_progress(True)
+                                try:
+                                    # 리밸런싱 계획 계산
+                                    plan = self.rebalancing_service.calculate_rebalancing_plan(today_str)
+
+                                    # 리밸런싱 실행 (매도/매수 또는 유지 대상 목표 익절/손절률 갱신)
+                                    if plan:
+                                        if plan.get('sell_list') or plan.get('buy_list'):
+                                            # 매도/매수 실행 (플래그 이미 설정됨)
+                                            await self.rebalancing_executor.execute_rebalancing(plan)
+                                            self._last_rebalancing_date = today_str
+                                            self.logger.info(f"✅ 리밸런싱 완료: {today_str}")
+                                        else:
+                                            # 유지 대상만 있는 경우 (매도/매수 없음)
+                                            self._last_rebalancing_date = today_str
+                                            self.logger.info(f"✅ 리밸런싱 완료: 유지 {len(plan.get('keep_list', []))}개")
                                     else:
-                                        # 유지 대상만 있는 경우 (매도/매수 없음)
+                                        self.logger.info(f"ℹ️ 리밸런싱 불필요: 목표 포트와 동일")
                                         self._last_rebalancing_date = today_str
-                                        self.logger.info(f"✅ 리밸런싱 완료: 유지 {len(plan.get('keep_list', []))}개")
-                                else:
-                                    self.logger.info(f"ℹ️ 리밸런싱 불필요: 목표 포트와 동일")
-                                    self._last_rebalancing_date = today_str
+                                finally:
+                                    self.decision_engine.set_rebalancing_in_progress(False)
                             else:
                                 self.logger.debug(f"⏭️ 리밸런싱 스킵: 주기 조건 미충족")
                                 self._last_rebalancing_date = today_str
@@ -526,14 +532,6 @@ class DayTradingBot:
                     
         except Exception as e:
             self.logger.error(f"❌ 리밸런싱 태스크 오류: {e}")
-    
-    async def _execute_rebalancing_async(self, plan):
-        """리밸런싱 실행 (비동기 버전)"""
-        self.decision_engine.set_rebalancing_in_progress(True)
-        try:
-            await self.rebalancing_executor.execute_rebalancing(plan)
-        finally:
-            self.decision_engine.set_rebalancing_in_progress(False)
     
     async def _system_monitoring_task(self):
         """시스템 모니터링 태스크"""
