@@ -6,6 +6,15 @@
 PORTFOLIO_SIZE = 10  # 퀀트/ML 포트폴리오 종목 수 (15→10 축소, 백테스트 최적화)
 QUANT_CANDIDATE_LIMIT = 50  # 장중 퀀트 후보 종목 최대 수
 
+# 스마트 Hard Cap: 포트폴리오 평균 점수에 따라 보유 상한 동적 조절
+# (threshold, buffer) 형태 — 평균 점수 >= threshold 이면 max = PORTFOLIO_SIZE + buffer
+SMART_HARD_CAP_TIERS = [
+    (75.0, 5),  # 평균 >= 75점 → target + 5 = 15
+    (72.0, 3),  # 평균 >= 72점 → target + 3 = 13
+    (0.0,  2),  # 그 외        → target + 2 = 12
+]
+REBALANCING_SELL_COOLDOWN_DAYS = 3  # 리밸런싱 매도 후 재매수 차단 일수 (요요 방지)
+
 # 리밸런싱 주문 관련
 REBALANCING_ORDER_INTERVAL = 0.1  # 리밸런싱 주문 간 대기 시간 (초)
 SELL_ORDER_WAIT_TIMEOUT = 300  # 매도 주문 체결 대기 최대 시간 (초, 5분)

@@ -1716,6 +1716,93 @@ class DatabaseManager:
         finally:
             self._put_connection(conn)
 
+    def get_today_bought_stocks(self, target_date: str = None, include_real: bool = False) -> List[str]:
+        """당일 매수한 종목 코드 리스트 조회 (Hard Cap 당일 매수 보호용)"""
+        conn = self._get_connection()
+        try:
+            if target_date is None:
+                target_date = now_kst().strftime('%Y-%m-%d')
+
+            with conn:
+                cursor = conn.cursor()
+
+                cursor.execute('''
+                    SELECT DISTINCT stock_code
+                    FROM virtual_trading_records
+                    WHERE action = 'BUY'
+                      AND timestamp::date = %s
+                ''', (target_date,))
+
+                result = cursor.fetchall()
+                bought_stocks = set(row[0] for row in result)
+
+                if include_real:
+                    cursor.execute('''
+                        SELECT DISTINCT stock_code
+                        FROM real_trading_records
+                        WHERE action = 'BUY'
+                          AND timestamp::date = %s
+                    ''', (target_date,))
+
+                    real_result = cursor.fetchall()
+                    bought_stocks.update(row[0] for row in real_result)
+
+                bought_list = list(bought_stocks)
+
+                if bought_list:
+                    self.logger.debug(f"당일 매수 종목: {len(bought_list)}개 ({', '.join(bought_list)})")
+
+                return bought_list
+
+        except Exception as e:
+            self.logger.error(f"당일 매수 종목 조회 실패: {e}")
+            return []
+        finally:
+            self._put_connection(conn)
+
+    def get_recent_rebalancing_sold_stocks(self, days: int = 3, include_real: bool = False) -> List[str]:
+        """최근 N일간 리밸런싱으로 매도한 종목 코드 리스트 (요요 방지 쿨다운)"""
+        conn = self._get_connection()
+        try:
+            with conn:
+                cursor = conn.cursor()
+
+                cursor.execute('''
+                    SELECT DISTINCT stock_code
+                    FROM virtual_trading_records
+                    WHERE action = 'SELL'
+                      AND timestamp::date >= CURRENT_DATE - %s
+                      AND reason LIKE '%%리밸런싱%%'
+                ''', (days,))
+
+                result = cursor.fetchall()
+                rebal_sold = set(row[0] for row in result)
+
+                if include_real:
+                    cursor.execute('''
+                        SELECT DISTINCT stock_code
+                        FROM real_trading_records
+                        WHERE action = 'SELL'
+                          AND timestamp::date >= CURRENT_DATE - %s
+                          AND reason LIKE '%%리밸런싱%%'
+                    ''', (days,))
+
+                    real_result = cursor.fetchall()
+                    rebal_sold.update(row[0] for row in real_result)
+
+                rebal_sold_list = list(rebal_sold)
+
+                if rebal_sold_list:
+                    self.logger.info(f"최근 {days}일 리밸런싱 매도 종목: {len(rebal_sold_list)}개 ({', '.join(rebal_sold_list)})")
+
+                return rebal_sold_list
+
+        except Exception as e:
+            self.logger.error(f"리밸런싱 매도 종목 조회 실패: {e}")
+            return []
+        finally:
+            self._put_connection(conn)
+
     def backup_database(self, max_backups: int = 7) -> Optional[str]:
         """DB 백업 (pg_dump 사용)"""
         try:

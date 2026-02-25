@@ -314,6 +314,19 @@ class RebalancingExecutor:
                 else:
                     logger.info(f"✅ 당일 손절 종목 없음 (재매수 제한 없음)")
 
+            # 🆕 최근 N일 리밸런싱 매도 종목 쿨다운 (요요 방지)
+            from config.constants import REBALANCING_SELL_COOLDOWN_DAYS
+            recent_rebal_sold = []
+            if self.db_manager:
+                recent_rebal_sold = self.db_manager.get_recent_rebalancing_sold_stocks(
+                    days=REBALANCING_SELL_COOLDOWN_DAYS, include_real=True
+                )
+                if recent_rebal_sold:
+                    logger.info(
+                        f"🔄 리밸런싱 매도 쿨다운 ({REBALANCING_SELL_COOLDOWN_DAYS}일): "
+                        f"{len(recent_rebal_sold)}개 ({', '.join(recent_rebal_sold)})"
+                    )
+
             # 🆕 코스피 변동률 조회 (1회만)
             market_change = self._get_market_change_rate()
 
@@ -370,6 +383,11 @@ class RebalancingExecutor:
                     # 🆕 오늘 손절한 종목은 재매수 금지 (익절 후 퀀트 상위 재진입은 허용)
                     if stock_code in today_stop_loss_stocks:
                         logger.warning(f"⚠️ {stock_code}({stock_name}) 매수 스킵: 오늘 손절한 종목 - 재매수 금지")
+                        continue
+
+                    # 🆕 리밸런싱 매도 쿨다운 (요요 방지)
+                    if stock_code in recent_rebal_sold:
+                        logger.info(f"⏳ {stock_code}({stock_name}) 매수 스킵: 리밸런싱 매도 후 쿨다운 ({REBALANCING_SELL_COOLDOWN_DAYS}일)")
                         continue
 
                     # 현재가 조회
