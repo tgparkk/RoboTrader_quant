@@ -206,6 +206,9 @@ class DayTradingBot:
                 total_funds = 10000000  # 가상매매 모드: 1천만원
                 self.fund_manager.update_total_funds(total_funds)
                 self.logger.info(f"💰 자금 관리자 초기화 완료 (가상매매 모드): {total_funds:,.0f}원")
+                # 가상매매에서도 기존 보유 종목 투자금 로드 → invested_funds 반영
+                invested = self.fund_manager.load_invested_funds_from_db(self.db_manager, virtual=True)
+                self.logger.info(f"💰 가상매매 기존 투자금 반영: {invested:,.0f}원 → 가용자금: {self.fund_manager.available_funds:,.0f}원")
             else:
                 balance_info = self.api_manager.get_account_balance()
                 if balance_info:

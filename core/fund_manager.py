@@ -195,20 +195,24 @@ class FundManager:
             self.logger.info(f"💰 투자 회수: {amount:,.0f}원 "
                            f"(가용: {self.available_funds:,.0f}원)")
     
-    def load_invested_funds_from_db(self, db_manager) -> float:
+    def load_invested_funds_from_db(self, db_manager, virtual: bool = False) -> float:
         """
         DB에서 미매도 보유 종목의 투자금을 조회하여 invested_funds를 초기화.
         시작 시 한 번 호출하여 기존 보유분을 반영한다.
-        
+
         Args:
-            db_manager: DatabaseManager 인스턴스 (get_real_open_positions 메서드 필요)
-            
+            db_manager: DatabaseManager 인스턴스
+            virtual: True면 가상매매 포지션 조회, False면 실전매매
+
         Returns:
             float: 로드된 투자금 합계
         """
         with self._lock:
             try:
-                open_positions: pd.DataFrame = db_manager.get_real_open_positions()
+                if virtual:
+                    open_positions: pd.DataFrame = db_manager.get_virtual_open_positions()
+                else:
+                    open_positions: pd.DataFrame = db_manager.get_real_open_positions()
                 
                 if open_positions.empty:
                     self.logger.info("💰 DB 미매도 포지션 없음 - invested_funds=0")

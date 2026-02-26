@@ -277,6 +277,18 @@ class RebalancingExecutor:
                                 break
 
                     if order_filled:
+                        # fund_manager 매도 대금 회수 (clear_current_order 전에 실행해야 함)
+                        if self.fund_manager:
+                            for completed in self.order_manager.get_completed_orders():
+                                if completed.order_id == order_id and completed.status == OrderStatus.FILLED:
+                                    sell_amount = float(completed.price) * int(completed.quantity)
+                                    self.fund_manager.release_investment(sell_amount)
+                                    logger.info(
+                                        f"💰 리밸런싱 매도 자금 회수: {stock_code}({stock_name}) "
+                                        f"{sell_amount:,.0f}원 → 가용잔고: {self.fund_manager.available_funds:,.0f}원"
+                                    )
+                                    break
+
                         # 체결 확인됨 → 안전하게 정리
                         trading_stock = self.trading_manager.get_trading_stock(stock_code)
                         if trading_stock:
