@@ -59,11 +59,8 @@ class HistoricalFactorCalculator:
     MIN_LISTING_DAYS = 250
 
     def __init__(self, db_path: str = None):
-        if db_path is None:
-            db_dir = Path(__file__).parent.parent / "data"
-            db_path = str(db_dir / "backtest.db")
-
-        self.db_path = db_path
+        from config.db_config import BACKTEST_DB_CONFIG
+        self._db_config = BACKTEST_DB_CONFIG
 
         # 메모리 캐시 (전체 데이터 미리 로드)
         self._prices_df: Optional[pd.DataFrame] = None
@@ -75,14 +72,14 @@ class HistoricalFactorCalculator:
         """전체 데이터를 메모리에 로드 (성능 최적화)"""
         logger.info("데이터 프리로드 시작...")
 
-        with psycopg2.connect(host='172.23.208.1', port=5433, dbname='robotrader_quant', user='postgres', password='postgres') as conn:
+        with psycopg2.connect(**self._db_config) as conn:
             # 일봉 데이터 (모멘텀 계산에 12개월 여유 필요)
             extended_start = (datetime.strptime(start_date, '%Y-%m-%d') - timedelta(days=400)).strftime('%Y-%m-%d')
             self._prices_df = pd.read_sql_query(
                 """SELECT stock_code, date, open, high, low, close, volume,
                           trading_value, market_cap
                    FROM daily_prices
-                   WHERE date >= %s AND date <= %s AND stock_code != 'KS11'
+                   WHERE date >= %s AND date <= %s AND stock_code NOT IN ('KS11', 'KQ11')
                    ORDER BY stock_code, date""",
                 conn, params=(extended_start, end_date)
             )
@@ -101,7 +98,7 @@ class HistoricalFactorCalculator:
             # 거래일 목록 (실제 백테스트 기간만)
             days = pd.read_sql_query(
                 """SELECT DISTINCT date FROM daily_prices
-                   WHERE date >= %s AND date <= %s AND stock_code != 'KS11'
+                   WHERE date >= %s AND date <= %s AND stock_code NOT IN ('KS11', 'KQ11')
                    ORDER BY date""",
                 conn, params=(start_date, end_date)
             )
@@ -117,96 +114,112 @@ class HistoricalFactorCalculator:
         if self._prices_df is None:
             self.preload_data(start_date, end_date)
 
+        # 프리인덱싱: O(1) 조회용 딕셔너리 구축
+        logger.info("인덱스 구축 중...")
+        self._prices_by_stock = {}
+        for code, group in self._prices_df.groupby('stock_code'):
+            self._prices_by_stock[code] = group.sort_values('date').reset_index(drop=True)
+
+        self._fin_by_stock = {}
+        if self._financial_df is not None and len(self._financial_df) > 0:
+            for code, group in self._financial_df.groupby('stock_code'):
+                self._fin_by_stock[code] = group.sort_values('report_date').reset_index(drop=True)
+
+        self._date_stocks = {}
+        for date, group in self._prices_df.groupby('date'):
+            self._date_stocks[date] = group
+
+        logger.info(f"인덱스 구축 완료: {len(self._prices_by_stock):,} 종목")
+
         total_days = len(self._trading_days)
         logger.info(f"팩터 계산 시작: {total_days}일")
 
+        import time as _time
+        t0 = _time.time()
         for i, calc_date in enumerate(self._trading_days, 1):
             self._calculate_factors_for_date(calc_date, portfolio_size)
 
             if i % 50 == 0 or i == total_days:
-                logger.info(f"  팩터 계산 진행: {i}/{total_days} ({i/total_days:.0%})")
+                elapsed = _time.time() - t0
+                rate = i / elapsed if elapsed > 0 else 0
+                eta = (total_days - i) / rate if rate > 0 else 0
+                logger.info(f"  팩터 계산 진행: {i}/{total_days} ({i/total_days:.0%}) "
+                           f"[{elapsed:.0f}s, {rate:.1f}일/s, ETA {eta:.0f}s]")
 
         logger.info("팩터 계산 완료")
 
     def _calculate_factors_for_date(self, calc_date: str, portfolio_size: int = 50):
-        """특정 날짜의 팩터 점수 계산"""
-        # 해당 날짜까지의 가격 데이터
-        price_mask = self._prices_df['date'] <= calc_date
-        prices_up_to = self._prices_df[price_mask]
-
-        if prices_up_to.empty:
+        """특정 날짜의 팩터 점수 계산 (프리인덱스 기반 O(stocks) 처리)"""
+        # 오늘 데이터가 있는 종목 (O(1) 조회)
+        today_df = self._date_stocks.get(calc_date)
+        if today_df is None or today_df.empty:
             return
-
-        # 해당 날짜에 가격 데이터가 있는 종목만
-        today_prices = prices_up_to[prices_up_to['date'] == calc_date]
-        if today_prices.empty:
-            return
-
-        # 해당 날짜 이전 가장 최근 재무데이터
-        fin_up_to = None
-        if self._financial_df is not None and len(self._financial_df) > 0:
-            fin_mask = self._financial_df['report_date'] <= calc_date
-            fin_up_to = self._financial_df[fin_mask]
 
         factor_rows = []
         calc_date_yyyymmdd = calc_date.replace('-', '')
 
-        # 전 종목의 시가총액 수집 (상대순위 계산용 - 재무데이터 없는 종목 폴백)
-        all_market_caps = {}
-        all_volatilities = {}
-
-        for _, today_row in today_prices.iterrows():
+        for _, today_row in today_df.iterrows():
             code = today_row['stock_code']
 
             try:
-                # 1차 필터링
-                if not self._passes_primary_filter(code, today_row, prices_up_to):
+                # 종목별 프리인덱스 데이터 (O(1) 조회)
+                stock_all = self._prices_by_stock.get(code)
+                if stock_all is None:
+                    continue
+
+                # calc_date 이전 데이터만 (종목별 ~800행, 빠른 필터링)
+                stock_up_to = stock_all[stock_all['date'] <= calc_date]
+                if len(stock_up_to) < self.MIN_LISTING_DAYS:
+                    continue
+
+                # 1차 필터링 (인라인 - 불필요한 함수 호출 제거)
+                close = today_row['close']
+                if close < self.MIN_PRICE or close > self.MAX_PRICE:
+                    continue
+
+                market_cap = today_row.get('market_cap')
+                if market_cap and not pd.isna(market_cap) and market_cap > 0:
+                    if market_cap < self.MIN_MARKET_CAP:
+                        continue
+
+                recent_20 = stock_up_to.tail(20)
+                if len(recent_20) < 20:
+                    continue
+
+                avg_trading = recent_20['trading_value'].mean()
+                if avg_trading < self.MIN_AVG_TRADING_VALUE:
                     continue
 
                 # 해당 종목의 가격 히스토리 (최대 400일)
-                stock_prices = prices_up_to[prices_up_to['stock_code'] == code].tail(400)
+                stock_prices = stock_up_to.tail(400)
 
                 # 팩터 계산
                 momentum_score = self._calc_momentum_score(stock_prices)
-
                 if math.isnan(momentum_score):
                     continue
-
                 momentum_score = clamp(momentum_score)
 
-                # 해당 종목의 최근 재무데이터 + 1년전 재무데이터 (Growth용)
+                # 재무데이터 (프리인덱스 기반 O(1) 조회)
                 latest_fin = None
                 year_ago_fin = None
-                if fin_up_to is not None and not fin_up_to.empty:
-                    stock_fin = fin_up_to[fin_up_to['stock_code'] == code]
-                    if not stock_fin.empty:
-                        latest_fin = stock_fin.iloc[-1]
-                        # 1년 전 재무데이터 (YoY 성장률 계산용)
-                        if len(stock_fin) >= 5:
-                            year_ago_fin = stock_fin.iloc[-5]  # ~4분기 전
-                        elif len(stock_fin) >= 3:
-                            year_ago_fin = stock_fin.iloc[0]  # 가장 오래된 데이터
+                stock_fin = self._fin_by_stock.get(code)
+                if stock_fin is not None and not stock_fin.empty:
+                    fin_up_to = stock_fin[stock_fin['report_date'] <= calc_date]
+                    if not fin_up_to.empty:
+                        latest_fin = fin_up_to.iloc[-1]
+                        if len(fin_up_to) >= 5:
+                            year_ago_fin = fin_up_to.iloc[-5]
+                        elif len(fin_up_to) >= 3:
+                            year_ago_fin = fin_up_to.iloc[0]
 
-                # Value: PER(30%) + PBR(35%) + PSR(35%)
                 value_score = self._calc_value_score(code, today_row, latest_fin)
-
-                # Quality: ROE(30%) + ROA(20%) + 부채(20%) + 유동비율(15%) + 영업이익률(15%)
                 quality_score = self._calc_quality_score(latest_fin, stock_prices)
-
-                # Growth: 매출1Y(30%) + 매출3Y(25%) + 순이익1Y(25%) + EPS1Y(20%)
                 growth_score = self._calc_growth_score(latest_fin, year_ago_fin, stock_prices)
 
-                # 범위 검증
                 value_score = clamp(value_score)
                 quality_score = clamp(quality_score)
                 growth_score = clamp(growth_score)
 
-                # 시가총액 (상대순위 폴백용)
-                market_cap = today_row.get('market_cap')
-                if market_cap and not pd.isna(market_cap) and market_cap > 0:
-                    all_market_caps[code] = float(market_cap)
-
-                # 총합 점수
                 total_score = clamp(
                     value_score * 0.30 +
                     momentum_score * 0.30 +
@@ -520,19 +533,19 @@ class HistoricalFactorCalculator:
 
     def _save_factors(self, calc_date: str, factor_rows: List[Dict], portfolio_size: int):
         """팩터 점수 및 포트폴리오 DB 저장"""
-        with psycopg2.connect(host='172.23.208.1', port=5433, dbname='robotrader_quant', user='postgres', password='postgres') as conn:
+        with psycopg2.connect(**self._db_config) as conn:
             cursor = conn.cursor()
 
-            # quant_factors 저장
+            # quant_factors 저장 (numpy 타입 → Python 네이티브 변환)
             factor_insert = []
             for row in factor_rows:
-                details = (f"Value {row['value_score']:.1f}, Momentum {row['momentum_score']:.1f}, "
-                          f"Quality {row['quality_score']:.1f}, Growth {row['growth_score']:.1f}")
+                details = (f"Value {float(row['value_score']):.1f}, Momentum {float(row['momentum_score']):.1f}, "
+                          f"Quality {float(row['quality_score']):.1f}, Growth {float(row['growth_score']):.1f}")
                 factor_insert.append((
-                    calc_date, row['stock_code'],
-                    row['value_score'], row['momentum_score'],
-                    row['quality_score'], row['growth_score'],
-                    row['total_score'], row['factor_rank'], details
+                    calc_date, str(row['stock_code']),
+                    float(row['value_score']), float(row['momentum_score']),
+                    float(row['quality_score']), float(row['growth_score']),
+                    float(row['total_score']), int(row['factor_rank']), details
                 ))
 
             cursor.executemany('''
@@ -546,11 +559,11 @@ class HistoricalFactorCalculator:
             portfolio_insert = []
             for row in factor_rows[:portfolio_size]:
                 name = self._stock_names.get(row['stock_code'], row['stock_code'])
-                reason = (f"Value {row['value_score']:.1f}, Momentum {row['momentum_score']:.1f}, "
-                         f"Quality {row['quality_score']:.1f}, Growth {row['growth_score']:.1f}")
+                reason = (f"Value {float(row['value_score']):.1f}, Momentum {float(row['momentum_score']):.1f}, "
+                         f"Quality {float(row['quality_score']):.1f}, Growth {float(row['growth_score']):.1f}")
                 portfolio_insert.append((
-                    calc_date, row['stock_code'], name,
-                    row['factor_rank'], row['total_score'], reason
+                    calc_date, str(row['stock_code']), str(name),
+                    int(row['factor_rank']), float(row['total_score']), reason
                 ))
 
             cursor.executemany('''

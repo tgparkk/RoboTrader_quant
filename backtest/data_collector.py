@@ -31,21 +31,85 @@ class HistoricalDataCollector:
         self._init_db()
 
     def _init_db(self):
-        """DB 초기화 (테이블 생성) — PG에서는 Implementer A가 스키마를 관리하므로 여기서는 확인만"""
-        # 백테스트 DB의 테이블은 별도 스키마 스크립트로 생성됨
-        # 여기서는 연결 가능 여부만 확인
+        """백테스트 DB 스키마 초기화"""
         try:
             with pg_connection(self._db_config) as conn:
                 cursor = conn.cursor()
-                # stock_names 테이블은 백테스트 전용이므로 여기서 생성
+
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS stock_names (
                         stock_code VARCHAR(10) PRIMARY KEY,
                         stock_name TEXT NOT NULL,
-                        shares_outstanding INTEGER DEFAULT 0,
+                        shares_outstanding BIGINT DEFAULT 0,
                         listing_date TEXT
                     )
                 ''')
+
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS daily_prices (
+                        stock_code VARCHAR(10) NOT NULL,
+                        date TEXT NOT NULL,
+                        open DOUBLE PRECISION,
+                        high DOUBLE PRECISION,
+                        low DOUBLE PRECISION,
+                        close DOUBLE PRECISION,
+                        volume BIGINT,
+                        trading_value BIGINT,
+                        market_cap DOUBLE PRECISION,
+                        returns_1d DOUBLE PRECISION,
+                        returns_5d DOUBLE PRECISION,
+                        returns_20d DOUBLE PRECISION,
+                        volatility_20d DOUBLE PRECISION,
+                        PRIMARY KEY (stock_code, date)
+                    )
+                ''')
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_bt_dp_code_date
+                    ON daily_prices (stock_code, date)
+                ''')
+
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS financial_statements (
+                        id SERIAL PRIMARY KEY,
+                        stock_code VARCHAR(10) NOT NULL,
+                        report_date TEXT NOT NULL,
+                        fiscal_quarter TEXT,
+                        per DOUBLE PRECISION, pbr DOUBLE PRECISION,
+                        psr DOUBLE PRECISION, dividend_yield DOUBLE PRECISION,
+                        roe DOUBLE PRECISION, debt_ratio DOUBLE PRECISION,
+                        operating_margin DOUBLE PRECISION, net_margin DOUBLE PRECISION,
+                        revenue DOUBLE PRECISION, operating_profit DOUBLE PRECISION,
+                        net_income DOUBLE PRECISION, total_assets DOUBLE PRECISION,
+                        current_assets DOUBLE PRECISION, current_liabilities DOUBLE PRECISION,
+                        total_liabilities DOUBLE PRECISION, total_equity DOUBLE PRECISION,
+                        UNIQUE (stock_code, report_date)
+                    )
+                ''')
+
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS quant_factors (
+                        id SERIAL PRIMARY KEY,
+                        calc_date TEXT NOT NULL,
+                        stock_code VARCHAR(10) NOT NULL,
+                        value_score DOUBLE PRECISION,
+                        momentum_score DOUBLE PRECISION,
+                        quality_score DOUBLE PRECISION,
+                        growth_score DOUBLE PRECISION,
+                        total_score DOUBLE PRECISION,
+                        factor_rank INTEGER,
+                        factor_details TEXT,
+                        UNIQUE (calc_date, stock_code)
+                    )
+                ''')
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_bt_qf_date
+                    ON quant_factors (calc_date)
+                ''')
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_bt_qf_rank
+                    ON quant_factors (calc_date, factor_rank)
+                ''')
+
             logger.info("백테스트 DB 연결 확인 완료")
         except Exception as e:
             logger.error(f"백테스트 DB 연결 실패: {e}")
@@ -58,6 +122,7 @@ class HistoricalDataCollector:
         logger.info(f"종목 유니버스: {len(stock_codes)}개")
 
         self.collect_kospi_index(start_date, end_date)
+        self.collect_kosdaq_index(start_date, end_date)
         self.collect_daily_prices(list(stock_codes), start_date, end_date)
         self.estimate_market_cap(shares_map)
         self.collect_fundamentals(list(stock_codes))
@@ -72,14 +137,39 @@ class HistoricalDataCollector:
 
         logger.info("종목 유니버스 수집 (FinanceDataReader: KOSPI + KOSDAQ)...")
 
-        kospi_df = fdr.StockListing('KOSPI')
-        kosdaq_df = fdr.StockListing('KOSDAQ')
+        # 1차 시도: KOSPI/KOSDAQ MARCAP 리스팅 (발행주식수 포함)
+        kospi_df = None
+        kosdaq_df = None
+        has_shares = False
+        try:
+            kospi_df = fdr.StockListing('KOSPI')
+            kosdaq_df = fdr.StockListing('KOSDAQ')
+            if kospi_df is not None and not kospi_df.empty:
+                has_shares = 'Stocks' in kospi_df.columns
+                logger.info("KOSPI/KOSDAQ MARCAP 리스팅 성공")
+        except Exception as e:
+            logger.warning(f"MARCAP 리스팅 실패 (KRX API 장애): {e}")
+            kospi_df = None
+            kosdaq_df = None
+
+        # 2차 시도: KRX-DESC (발행주식수 없지만 종목코드+시장 구분 가능)
+        if kospi_df is None or kospi_df.empty:
+            logger.info("KRX-DESC fallback 사용...")
+            try:
+                desc_df = fdr.StockListing('KRX-DESC')
+                if desc_df is not None and not desc_df.empty:
+                    kospi_df = desc_df[desc_df['Market'] == 'KOSPI'].copy()
+                    kosdaq_df = desc_df[desc_df['Market'].isin(['KOSDAQ', 'KOSDAQ GLOBAL'])].copy()
+                    has_shares = False
+                    logger.info(f"KRX-DESC fallback 성공: KOSPI {len(kospi_df)}, KOSDAQ {len(kosdaq_df)}")
+            except Exception as e:
+                logger.error(f"KRX-DESC도 실패: {e}")
+                return set(), {}
 
         if kospi_df is None or kospi_df.empty:
-            logger.error("KOSPI 종목 리스트 조회 실패")
+            logger.error("종목 리스트 조회 완전 실패")
             return set(), {}
-        if kosdaq_df is None or kosdaq_df.empty:
-            logger.warning("KOSDAQ 종목 리스트 조회 실패 - KOSPI만 진행")
+        if kosdaq_df is None:
             kosdaq_df = pd.DataFrame()
 
         all_codes = set()
@@ -93,10 +183,11 @@ class HistoricalDataCollector:
             for _, row in df.iterrows():
                 code = str(row['Code']).strip()
                 name = str(row.get('Name', code)).strip()
-                shares = int(row.get('Stocks', 0))
+                shares = int(row.get('Stocks', 0)) if has_shares else 0
+                listing_date = str(row.get('ListingDate', '')) if 'ListingDate' in df.columns else None
                 all_codes.add(code)
                 shares_map[code] = shares
-                name_rows.append((code, name, shares, None))
+                name_rows.append((code, name, shares, listing_date))
                 if market == 'KOSDAQ':
                     self._kosdaq_codes.add(code)
 
@@ -158,8 +249,7 @@ class HistoricalDataCollector:
                             ON CONFLICT (stock_code, date) DO UPDATE SET
                                 open = EXCLUDED.open, high = EXCLUDED.high,
                                 low = EXCLUDED.low, close = EXCLUDED.close,
-                                volume = EXCLUDED.volume, trading_value = EXCLUDED.trading_value,
-                                updated_at = CURRENT_TIMESTAMP
+                                volume = EXCLUDED.volume, trading_value = EXCLUDED.trading_value
                         ''', rows)
                     success += 1
 
@@ -298,8 +388,7 @@ class HistoricalDataCollector:
                                 current_assets = EXCLUDED.current_assets,
                                 current_liabilities = EXCLUDED.current_liabilities,
                                 total_liabilities = EXCLUDED.total_liabilities,
-                                total_equity = EXCLUDED.total_equity,
-                                updated_at = CURRENT_TIMESTAMP
+                                total_equity = EXCLUDED.total_equity
                         ''', rows)
                     success += 1
 
@@ -316,28 +405,29 @@ class HistoricalDataCollector:
 
         logger.info(f"재무데이터 수집 완료: 성공 {success}개, 실패 {fail}개")
 
-    def collect_kospi_index(self, start_date: str, end_date: str):
-        """KOSPI 인덱스 수집 (벤치마크용)"""
-        import FinanceDataReader as fdr
+    def _collect_index_yfinance(self, yf_symbol: str, db_code: str,
+                               start_date: str, end_date: str) -> int:
+        """yfinance로 인덱스 데이터 수집 (fallback)"""
+        import yfinance as yf
 
-        try:
-            extended_start = (datetime.strptime(start_date, '%Y-%m-%d') - timedelta(days=400)).strftime('%Y-%m-%d')
-            df = fdr.DataReader('KS11', extended_start, end_date)
+        df = yf.download(yf_symbol, start=start_date, end=end_date, progress=False)
+        if df is None or df.empty:
+            return 0
 
-            if df is None or df.empty:
-                logger.warning("KOSPI 인덱스 데이터 없음")
-                return
+        rows = []
+        for date_idx, row in df.iterrows():
+            date_str = date_idx.strftime('%Y-%m-%d')
+            # yfinance는 multi-level column을 반환할 수 있음
+            close_val = float(row[('Close', yf_symbol)] if isinstance(row.index, pd.MultiIndex) else row['Close'])
+            open_val = float(row[('Open', yf_symbol)] if isinstance(row.index, pd.MultiIndex) else row['Open'])
+            high_val = float(row[('High', yf_symbol)] if isinstance(row.index, pd.MultiIndex) else row['High'])
+            low_val = float(row[('Low', yf_symbol)] if isinstance(row.index, pd.MultiIndex) else row['Low'])
+            vol_val = int(row[('Volume', yf_symbol)] if isinstance(row.index, pd.MultiIndex) else row['Volume'])
+            if close_val <= 0:
+                continue
+            rows.append((db_code, date_str, open_val, high_val, low_val, close_val, vol_val, 0))
 
-            rows = []
-            for date_idx, row in df.iterrows():
-                date_str = date_idx.strftime('%Y-%m-%d')
-                rows.append((
-                    'KS11', date_str,
-                    float(row.get('Open', 0)), float(row.get('High', 0)),
-                    float(row.get('Low', 0)), float(row.get('Close', 0)),
-                    int(row.get('Volume', 0)), 0
-                ))
-
+        if rows:
             with pg_connection(self._db_config) as conn:
                 cursor = conn.cursor()
                 psycopg2.extras.execute_batch(cursor, '''
@@ -350,10 +440,95 @@ class HistoricalDataCollector:
                         volume = EXCLUDED.volume
                 ''', rows)
 
-            logger.info(f"KOSPI 인덱스 수집 완료: {len(rows)}일")
+        return len(rows)
 
+    def collect_kospi_index(self, start_date: str, end_date: str):
+        """KOSPI 인덱스 수집 (벤치마크용)"""
+        import FinanceDataReader as fdr
+
+        extended_start = (datetime.strptime(start_date, '%Y-%m-%d') - timedelta(days=400)).strftime('%Y-%m-%d')
+
+        # 1차: FDR
+        try:
+            df = fdr.DataReader('KS11', extended_start, end_date)
+            if df is not None and not df.empty:
+                rows = []
+                for date_idx, row in df.iterrows():
+                    date_str = date_idx.strftime('%Y-%m-%d')
+                    rows.append((
+                        'KS11', date_str,
+                        float(row.get('Open', 0)), float(row.get('High', 0)),
+                        float(row.get('Low', 0)), float(row.get('Close', 0)),
+                        int(row.get('Volume', 0)), 0
+                    ))
+
+                with pg_connection(self._db_config) as conn:
+                    cursor = conn.cursor()
+                    psycopg2.extras.execute_batch(cursor, '''
+                        INSERT INTO daily_prices
+                        (stock_code, date, open, high, low, close, volume, trading_value)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (stock_code, date) DO UPDATE SET
+                            open = EXCLUDED.open, high = EXCLUDED.high,
+                            low = EXCLUDED.low, close = EXCLUDED.close,
+                            volume = EXCLUDED.volume
+                    ''', rows)
+
+                logger.info(f"KOSPI 인덱스 수집 완료 (FDR): {len(rows)}일")
+                return
         except Exception as e:
-            logger.error(f"KOSPI 인덱스 수집 실패: {e}")
+            logger.warning(f"KOSPI FDR 수집 실패, yfinance fallback: {e}")
+
+        # 2차: yfinance
+        try:
+            count = self._collect_index_yfinance('^KS11', 'KS11', extended_start, end_date)
+            logger.info(f"KOSPI 인덱스 수집 완료 (yfinance): {count}일")
+        except Exception as e:
+            logger.error(f"KOSPI 인덱스 수집 완전 실패: {e}")
+
+    def collect_kosdaq_index(self, start_date: str, end_date: str):
+        """KOSDAQ 인덱스 수집 (국면 분석용)"""
+        import FinanceDataReader as fdr
+
+        extended_start = (datetime.strptime(start_date, '%Y-%m-%d') - timedelta(days=400)).strftime('%Y-%m-%d')
+
+        # 1차: FDR
+        try:
+            df = fdr.DataReader('KQ11', extended_start, end_date)
+            if df is not None and not df.empty:
+                rows = []
+                for date_idx, row in df.iterrows():
+                    date_str = date_idx.strftime('%Y-%m-%d')
+                    rows.append((
+                        'KQ11', date_str,
+                        float(row.get('Open', 0)), float(row.get('High', 0)),
+                        float(row.get('Low', 0)), float(row.get('Close', 0)),
+                        int(row.get('Volume', 0)), 0
+                    ))
+
+                with pg_connection(self._db_config) as conn:
+                    cursor = conn.cursor()
+                    psycopg2.extras.execute_batch(cursor, '''
+                        INSERT INTO daily_prices
+                        (stock_code, date, open, high, low, close, volume, trading_value)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (stock_code, date) DO UPDATE SET
+                            open = EXCLUDED.open, high = EXCLUDED.high,
+                            low = EXCLUDED.low, close = EXCLUDED.close,
+                            volume = EXCLUDED.volume
+                    ''', rows)
+
+                logger.info(f"KOSDAQ 인덱스 수집 완료 (FDR): {len(rows)}일")
+                return
+        except Exception as e:
+            logger.warning(f"KOSDAQ FDR 수집 실패, yfinance fallback: {e}")
+
+        # 2차: yfinance
+        try:
+            count = self._collect_index_yfinance('^KQ11', 'KQ11', extended_start, end_date)
+            logger.info(f"KOSDAQ 인덱스 수집 완료 (yfinance): {count}일")
+        except Exception as e:
+            logger.error(f"KOSDAQ 인덱스 수집 완전 실패: {e}")
 
     def calculate_returns_and_volatility(self):
         """수익률 및 변동성 계산"""
@@ -410,17 +585,19 @@ class HistoricalDataCollector:
         """수집 결과 요약 출력"""
         with pg_connection(self._db_config) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM daily_prices WHERE stock_code != 'KS11'")
+            cursor.execute("SELECT COUNT(*) FROM daily_prices WHERE stock_code NOT IN ('KS11', 'KQ11')")
             price_count = cursor.fetchone()[0]
-            cursor.execute("SELECT COUNT(DISTINCT stock_code) FROM daily_prices WHERE stock_code != 'KS11'")
+            cursor.execute("SELECT COUNT(DISTINCT stock_code) FROM daily_prices WHERE stock_code NOT IN ('KS11', 'KQ11')")
             stock_count = cursor.fetchone()[0]
-            cursor.execute("SELECT MIN(date), MAX(date) FROM daily_prices WHERE stock_code != 'KS11'")
+            cursor.execute("SELECT MIN(date), MAX(date) FROM daily_prices WHERE stock_code NOT IN ('KS11', 'KQ11')")
             date_range = cursor.fetchone()
             cursor.execute("SELECT COUNT(*) FROM daily_prices WHERE stock_code = 'KS11'")
             kospi_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM daily_prices WHERE stock_code = 'KQ11'")
+            kosdaq_count = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(*) FROM stock_names")
             name_count = cursor.fetchone()[0]
-            cursor.execute("SELECT COUNT(*) FROM daily_prices WHERE market_cap IS NOT NULL AND market_cap > 0 AND stock_code != 'KS11'")
+            cursor.execute("SELECT COUNT(*) FROM daily_prices WHERE market_cap IS NOT NULL AND market_cap > 0 AND stock_code NOT IN ('KS11', 'KQ11')")
             marcap_count = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(*) FROM financial_statements")
             fin_count = cursor.fetchone()[0]
@@ -436,5 +613,6 @@ class HistoricalDataCollector:
             print(f"날짜 범위: {date_range[0]} ~ {date_range[1]}")
         print(f"시가총액 추정: {marcap_count:,}건")
         print(f"KOSPI 인덱스: {kospi_count:,}일")
+        print(f"KOSDAQ 인덱스: {kosdaq_count:,}일")
         print(f"재무데이터: {fin_count:,}건 ({fin_stocks}개 종목)")
         print("=" * 60)

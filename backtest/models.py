@@ -23,6 +23,13 @@ class SellReason(Enum):
     END_OF_BACKTEST = "백테스트종료"
 
 
+class MarketRegime(Enum):
+    """시장 국면"""
+    BULL = "상승"
+    BEAR = "하락"
+    FLAT = "횡보"
+
+
 @dataclass
 class BacktestParams:
     """백테스트 파라미터"""
@@ -122,6 +129,7 @@ class TradeRecord:
     profit_loss: float = 0.0  # 손익 (매도시)
     profit_rate: float = 0.0  # 수익률 (매도시)
     trading_cost: float = 0.0  # 거래 비용
+    regime: Optional[str] = None  # 시장 국면 (후처리 태깅용)
 
     def to_dict(self) -> Dict[str, Any]:
         """딕셔너리로 변환"""
@@ -137,6 +145,7 @@ class TradeRecord:
             'profit_loss': self.profit_loss,
             'profit_rate': self.profit_rate,
             'trading_cost': self.trading_cost,
+            'regime': self.regime,
         }
 
 
@@ -150,6 +159,7 @@ class DailySnapshot:
     position_count: int  # 보유 종목 수
     daily_return: float = 0.0  # 일별 수익률
     cumulative_return: float = 0.0  # 누적 수익률
+    regime: Optional[str] = None  # 시장 국면 (후처리 태깅용)
 
     def to_dict(self) -> Dict[str, Any]:
         """딕셔너리로 변환"""
@@ -161,6 +171,7 @@ class DailySnapshot:
             'position_count': self.position_count,
             'daily_return': self.daily_return,
             'cumulative_return': self.cumulative_return,
+            'regime': self.regime,
         }
 
 

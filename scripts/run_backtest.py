@@ -221,6 +221,82 @@ def cmd_optimize(args):
     return result
 
 
+def cmd_regime(args):
+    """국면별 백테스트 분석"""
+    from backtest import Backtester, BacktestParams
+    from backtest.regime_analyzer import RegimeAnalyzer
+    from backtest.market_regime import INDEX_CODES
+
+    print(f"\n{'=' * 60}")
+    print("국면별 백테스트 분석")
+    print(f"{'=' * 60}")
+    print(f"기간: {args.start} ~ {args.end}")
+    print(f"인덱스: {', '.join(args.index)}")
+    print(f"룩백: {', '.join(str(x) for x in args.lookback)}일")
+    print(f"임계값: ±{args.threshold:.0%}")
+    print(f"{'=' * 60}\n")
+
+    # 1. 백테스트 실행
+    params = BacktestParams(
+        initial_capital=args.capital,
+        portfolio_size=args.portfolio,
+        target_profit_rate=args.profit,
+        stop_loss_rate=args.loss,
+        hard_stop_score=args.hard_stop,
+        soft_stop_score=args.soft_stop,
+        soft_stop_rank=args.soft_stop_rank,
+        safe_score=args.safe_score,
+        safe_rank=args.safe_rank,
+        use_dynamic_targets=not args.no_dynamic,
+    )
+
+    print("백테스트 실행 중...")
+    backtester = Backtester(db_path=args.db, params=params)
+
+    start_time = time.time()
+    bt_result = backtester.backtest(args.start, args.end)
+    bt_elapsed = time.time() - start_time
+    print(f"백테스트 완료 ({bt_elapsed:.1f}초)")
+
+    # 전체 결과 요약
+    bt_result.print_summary()
+
+    # 2. 인덱스 코드 변환
+    index_codes = []
+    for idx_name in args.index:
+        code = INDEX_CODES.get(idx_name.lower())
+        if code:
+            index_codes.append(code)
+        else:
+            print(f"경고: 알 수 없는 인덱스 '{idx_name}', 건너뜀")
+
+    if not index_codes:
+        print("오류: 유효한 인덱스가 없습니다")
+        return
+
+    # 3. 국면 분석
+    print(f"\n국면 분석 시작...")
+    analyzer = RegimeAnalyzer(bt_result)
+
+    analysis_start = time.time()
+    regime_results = analyzer.analyze_all(
+        args.start, args.end,
+        indices=index_codes,
+        lookbacks=args.lookback,
+        threshold=args.threshold,
+    )
+    analysis_elapsed = time.time() - analysis_start
+    print(f"국면 분석 완료 ({analysis_elapsed:.1f}초)")
+
+    # 4. 비교 테이블 출력
+    if regime_results:
+        RegimeAnalyzer.print_comparison_table(regime_results)
+
+    # 5. CSV 내보내기
+    if args.output:
+        RegimeAnalyzer.export_to_csv(regime_results, args.output)
+
+
 def print_kospi_benchmark(db_path: str, start_date: str, end_date: str, result):
     """KOSPI Buy&Hold 벤치마크 비교"""
     import sqlite3
@@ -387,6 +463,38 @@ def parse_args():
     all_parser.add_argument('--output', type=str, default=None,
                             help='결과 저장 디렉토리')
 
+    # regime 커맨드
+    regime_parser = subparsers.add_parser('regime', parents=[common],
+                                          help='국면별 백테스트 분석')
+    regime_parser.add_argument('--index', nargs='+', default=['kospi', 'kosdaq'],
+                               help='분석 인덱스 (기본: kospi kosdaq)')
+    regime_parser.add_argument('--lookback', nargs='+', type=int, default=[20, 60],
+                               help='롤링 룩백 기간 (기본: 20 60)')
+    regime_parser.add_argument('--threshold', type=float, default=0.02,
+                               help='상승/하락 임계값 (기본: 0.02 = 2%%)')
+    regime_parser.add_argument('--capital', type=float, default=50_000_000,
+                               help='초기 자본 (기본: 5천만원)')
+    regime_parser.add_argument('--portfolio', type=int, default=10,
+                               help='포트폴리오 종목 수 (기본: 10)')
+    regime_parser.add_argument('--profit', type=float, default=0.15,
+                               help='익절률 (기본: 0.15)')
+    regime_parser.add_argument('--loss', type=float, default=0.10,
+                               help='손절률 (기본: 0.10)')
+    regime_parser.add_argument('--hard-stop', type=float, default=65.0,
+                               help='긴급 매도 점수 (기본: 65)')
+    regime_parser.add_argument('--soft-stop', type=float, default=67.0,
+                               help='조건부 매도 점수 (기본: 67)')
+    regime_parser.add_argument('--soft-stop-rank', type=int, default=30,
+                               help='조건부 매도 순위 (기본: 30)')
+    regime_parser.add_argument('--safe-score', type=float, default=75.0,
+                               help='안전 유지 점수 (기본: 75)')
+    regime_parser.add_argument('--safe-rank', type=int, default=25,
+                               help='안전 유지 순위 (기본: 25)')
+    regime_parser.add_argument('--no-dynamic', action='store_true',
+                               help='동적 목표율 미사용')
+    regime_parser.add_argument('--output', type=str, default=None,
+                               help='CSV 결과 저장 디렉토리')
+
     # optimize 커맨드
     opt_parser = subparsers.add_parser('optimize', parents=[common],
                                        help='파라미터 최적화')
@@ -406,12 +514,13 @@ def main():
     args = parse_args()
 
     if not args.command:
-        print("사용법: python scripts/run_backtest.py {collect,factors,run,all,optimize}")
-        print("  collect   : 역사적 데이터 수집 (FinanceDataReader + pykrx)")
+        print("사용법: python scripts/run_backtest.py {collect,factors,run,all,optimize,regime}")
+        print("  collect   : 역사적 데이터 수집 (FinanceDataReader + yfinance)")
         print("  factors   : 팩터 점수 계산")
         print("  run       : 백테스트 실행")
         print("  all       : 전체 파이프라인 (collect → factors → run)")
         print("  optimize  : 파라미터 최적화")
+        print("  regime    : 국면별 백테스트 분석 (상승/하락/횡보)")
         print("\n--help 로 상세 옵션 확인")
         return
 
@@ -421,6 +530,7 @@ def main():
         'run': cmd_run,
         'all': cmd_all,
         'optimize': cmd_optimize,
+        'regime': cmd_regime,
     }
 
     cmd_func = commands.get(args.command)
