@@ -81,7 +81,7 @@ class TargetProfitLossCalculator:
         except Exception as e:
             logger.error(f"목표 익절/손절률 계산 오류: {e}")
             # 오류 시 기본값 반환
-            return 0.15, 0.10
+            return 0.17, 0.09
     
     def calculate_from_portfolio_item(self, portfolio_item: dict, 
                                      factors_data: Optional[dict] = None) -> Tuple[float, float]:

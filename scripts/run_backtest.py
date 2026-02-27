@@ -421,10 +421,10 @@ def parse_args():
                             help='초기 자본 (기본: 5천만원)')
     run_parser.add_argument('--portfolio', type=int, default=10,
                             help='포트폴리오 종목 수 (기본: 10)')
-    run_parser.add_argument('--profit', type=float, default=0.15,
-                            help='익절률 (기본: 0.15)')
-    run_parser.add_argument('--loss', type=float, default=0.10,
-                            help='손절률 (기본: 0.10)')
+    run_parser.add_argument('--profit', type=float, default=0.17,
+                            help='익절률 (기본: 0.17)')
+    run_parser.add_argument('--loss', type=float, default=0.09,
+                            help='손절률 (기본: 0.09)')
     run_parser.add_argument('--hard-stop', type=float, default=65.0,
                             help='긴급 매도 점수 (기본: 65)')
     run_parser.add_argument('--soft-stop', type=float, default=67.0,
@@ -449,10 +449,10 @@ def parse_args():
                             help='초기 자본 (기본: 5천만원)')
     all_parser.add_argument('--portfolio', type=int, default=10,
                             help='포트폴리오 종목 수 (기본: 10)')
-    all_parser.add_argument('--profit', type=float, default=0.15,
-                            help='익절률 (기본: 0.15)')
-    all_parser.add_argument('--loss', type=float, default=0.10,
-                            help='손절률 (기본: 0.10)')
+    all_parser.add_argument('--profit', type=float, default=0.17,
+                            help='익절률 (기본: 0.17)')
+    all_parser.add_argument('--loss', type=float, default=0.09,
+                            help='손절률 (기본: 0.09)')
     all_parser.add_argument('--hard-stop', type=float, default=65.0,
                             help='긴급 매도 점수 (기본: 65)')
     all_parser.add_argument('--soft-stop', type=float, default=67.0,
@@ -483,10 +483,10 @@ def parse_args():
                                help='초기 자본 (기본: 5천만원)')
     regime_parser.add_argument('--portfolio', type=int, default=10,
                                help='포트폴리오 종목 수 (기본: 10)')
-    regime_parser.add_argument('--profit', type=float, default=0.15,
-                               help='익절률 (기본: 0.15)')
-    regime_parser.add_argument('--loss', type=float, default=0.10,
-                               help='손절률 (기본: 0.10)')
+    regime_parser.add_argument('--profit', type=float, default=0.17,
+                               help='익절률 (기본: 0.17)')
+    regime_parser.add_argument('--loss', type=float, default=0.09,
+                               help='손절률 (기본: 0.09)')
     regime_parser.add_argument('--hard-stop', type=float, default=65.0,
                                help='긴급 매도 점수 (기본: 65)')
     regime_parser.add_argument('--soft-stop', type=float, default=67.0,

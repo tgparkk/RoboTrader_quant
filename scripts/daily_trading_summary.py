@@ -86,8 +86,8 @@ def print_today_trading_summary():
                 stock_code, stock_name, qty, buy_price, total_amt, target_profit, stop_loss, created_at = row
                 time_str = created_at.split()[1][:5] if created_at and ' ' in created_at else (created_at or '')[:5]
 
-                target_profit = target_profit or 0.15
-                stop_loss = stop_loss or 0.10
+                target_profit = target_profit or 0.17
+                stop_loss = stop_loss or 0.09
 
                 print(f"{time_str:<10} {stock_code:<10} {stock_name:<20} {qty:>8,} {buy_price:>12,.0f} "
                       f"{total_amt:>15,.0f} {target_profit*100:>9.1f}% {stop_loss*100:>9.1f}%")
