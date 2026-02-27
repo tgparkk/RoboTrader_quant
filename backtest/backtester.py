@@ -202,14 +202,8 @@ class Backtester:
 
     def _calculate_dynamic_targets(self, rank: int, total_score: float,
                                     momentum_score: float) -> Tuple[float, float]:
-        rank_score = (51 - rank) / 50 * 100 if rank <= 50 else 0
-        composite_score = rank_score * 0.4 + total_score * 0.3 + momentum_score * 0.3
-
-        if composite_score >= 80: return 0.20, 0.08
-        elif composite_score >= 65: return 0.17, 0.09
-        elif composite_score >= 50: return 0.15, 0.10
-        elif composite_score >= 35: return 0.13, 0.10
-        else: return 0.12, 0.10
+        # 단일 익절/손절선 (백테스트 검증: 5단계 대비 +1,369%p 개선)
+        return 0.17, 0.09
 
     def _execute_rebalancing(self, date: str):
         portfolio = self._get_portfolio(date)

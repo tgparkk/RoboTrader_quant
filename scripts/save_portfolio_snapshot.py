@@ -65,8 +65,8 @@ def save_portfolio_snapshot():
             stock_name = holding['stock_name']
             quantity = int(holding['quantity'])
             buy_price = float(holding['buy_price'])
-            target_profit_rate = holding.get('target_profit_rate', 0.15)
-            stop_loss_rate = holding.get('stop_loss_rate', 0.10)
+            target_profit_rate = holding.get('target_profit_rate', 0.17)
+            stop_loss_rate = holding.get('stop_loss_rate', 0.09)
 
             try:
                 # 현재가 조회 (0.2초 간격으로 API 호출)

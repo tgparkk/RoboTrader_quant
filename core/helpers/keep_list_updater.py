@@ -58,8 +58,8 @@ class KeepListUpdater:
 
             for keep_item in tradable_keep_list:
                 stock_code = keep_item['stock_code']
-                target_profit_rate = keep_item.get('target_profit_rate', 0.15)
-                stop_loss_rate = keep_item.get('stop_loss_rate', 0.10)
+                target_profit_rate = keep_item.get('target_profit_rate', 0.17)
+                stop_loss_rate = keep_item.get('stop_loss_rate', 0.09)
 
                 trading_stock = self.trading_manager.get_trading_stock(stock_code)
                 old_profit = trading_stock.target_profit_rate

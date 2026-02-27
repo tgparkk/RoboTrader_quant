@@ -75,17 +75,8 @@ class TargetProfitLossCalculator:
                 momentum_normalized * self.momentum_weight
             )
             
-            # 5. 구간별 목표 수익률/손절률
-            if composite_score >= 80:
-                return 0.20, 0.08  # 상위권: 20% 익절, 8% 손절
-            elif composite_score >= 65:
-                return 0.17, 0.09  # 중상위: 17% 익절, 9% 손절
-            elif composite_score >= 50:
-                return 0.15, 0.10  # 중위권: 15% 익절, 10% 손절
-            elif composite_score >= 35:
-                return 0.13, 0.10  # 중하위: 13% 익절, 10% 손절
-            else:
-                return 0.12, 0.10  # 하위권: 12% 익절, 10% 손절
+            # 단일 익절/손절선 (백테스트 검증: 5단계 대비 +1,369%p 개선)
+            return 0.17, 0.09  # 17% 익절, 9% 손절
                 
         except Exception as e:
             logger.error(f"목표 익절/손절률 계산 오류: {e}")

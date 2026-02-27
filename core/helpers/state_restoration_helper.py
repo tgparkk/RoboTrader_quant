@@ -129,8 +129,8 @@ class StateRestorationHelper:
                         continue
                     quantity = int(holding['quantity'])
                     buy_price = float(holding['buy_price'])
-                    target_profit_rate = holding.get('target_profit_rate', 0.15) or 0.15
-                    stop_loss_rate = holding.get('stop_loss_rate', 0.10) or 0.10
+                    target_profit_rate = holding.get('target_profit_rate', 0.17) or 0.17
+                    stop_loss_rate = holding.get('stop_loss_rate', 0.09) or 0.09
 
                     # 전날 종가 조회 (공통 메서드 사용)
                     prev_close = self.get_previous_close(stock_code)
@@ -203,8 +203,8 @@ class StateRestorationHelper:
                         'stock_name': row['stock_name'],
                         'quantity': int(row['quantity']),
                         'buy_price': float(row['buy_price']),
-                        'target_profit_rate': row.get('target_profit_rate', 0.15) or 0.15,
-                        'stop_loss_rate': row.get('stop_loss_rate', 0.10) or 0.10,
+                        'target_profit_rate': row.get('target_profit_rate', 0.17) or 0.17,
+                        'stop_loss_rate': row.get('stop_loss_rate', 0.09) or 0.09,
                         'buy_record_id': row.get('buy_record_id')
                     }
 
@@ -228,12 +228,12 @@ class StateRestorationHelper:
                 # DB에 해당 종목 정보가 있으면 익절/손절률 사용
                 if stock_code in db_holdings_dict:
                     db_info = db_holdings_dict[stock_code]
-                    target_profit_rate = db_info.get('target_profit_rate', 0.15)
-                    stop_loss_rate = db_info.get('stop_loss_rate', 0.10)
+                    target_profit_rate = db_info.get('target_profit_rate', 0.17)
+                    stop_loss_rate = db_info.get('stop_loss_rate', 0.09)
                 else:
                     # DB에 없는 종목 (외부 매수 등) - 기본 익절/손절률 사용
-                    target_profit_rate = 0.15
-                    stop_loss_rate = 0.10
+                    target_profit_rate = 0.17
+                    stop_loss_rate = 0.09
                     logger.warning(f"⚠️ [실전매매] {stock_code} DB에 없음 - 기본 익절/손절률 적용")
 
                 # 전날 종가 조회

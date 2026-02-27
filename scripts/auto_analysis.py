@@ -594,8 +594,8 @@ class ReportGenerator:
 
             for buy in result.trading_summary['buys']:
                 time_str = buy['time'].split(' ')[1][:5] if buy['time'] else ''
-                tp = (buy['target_profit_rate'] or 0.15) * 100
-                sl = (buy['stop_loss_rate'] or 0.10) * 100
+                tp = (buy['target_profit_rate'] or 0.17) * 100
+                sl = (buy['stop_loss_rate'] or 0.09) * 100
 
                 lines.append(f"| {time_str} | {buy['stock_code']} | {buy['quantity']} | "
                            f"{buy['price']:,} | {tp:.0f}% | {sl:.0f}% |")

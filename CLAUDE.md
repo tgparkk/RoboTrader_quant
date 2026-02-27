@@ -8,24 +8,14 @@
 
 ### 1. 아침 09:05 리밸런싱 (1회 실행)
 
-**위치**: `core/quant/target_profit_loss_calculator.py:56-119`
+**위치**: `core/quant/target_profit_loss_calculator.py`
 
-종목별 복합 점수를 계산하여 차등 목표 익절/손절률을 설정합니다:
+모든 종목에 단일 익절/손절률을 적용합니다 (백테스트 검증 완료: 5단계 대비 +1,369%p 개선):
 
 ```python
-# 종목별 복합 점수 계산
-composite_score = (rank_score * 0.4) + (factor_score * 0.3) + (momentum_score * 0.3)
-
-# 점수 기반 차등 목표 익절/손절률
-if composite_score >= 70:    # S등급
-    target_profit_rate = 0.20  # 20%
-    stop_loss_rate = 0.08      # 8%
-elif composite_score >= 50:   # A등급
-    target_profit_rate = 0.18  # 18%
-    stop_loss_rate = 0.09      # 9%
-else:                         # B등급
-    target_profit_rate = 0.15  # 15%
-    stop_loss_rate = 0.10      # 10%
+# 단일 익절/손절선 (2026-02-28 적용)
+target_profit_rate = 0.17  # 17%
+stop_loss_rate = 0.09      # 9%
 ```
 
 **저장 위치**: `virtual_trading_records` 테이블의 `target_profit_rate`, `stop_loss_rate` 컬럼

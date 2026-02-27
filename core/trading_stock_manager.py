@@ -483,8 +483,8 @@ class TradingStockManager:
                                         quantity=int(order.quantity),
                                         strategy=trading_stock.selection_reason,
                                         reason="체결",
-                                        target_profit_rate=getattr(trading_stock, 'target_profit_rate', 0.15) or 0.15,
-                                        stop_loss_rate=getattr(trading_stock, 'stop_loss_rate', 0.10) or 0.10
+                                        target_profit_rate=getattr(trading_stock, 'target_profit_rate', 0.17) or 0.17,
+                                        stop_loss_rate=getattr(trading_stock, 'stop_loss_rate', 0.09) or 0.09
                                     )
                                     order._real_buy_saved = True
                                 except Exception as db_err:
@@ -980,8 +980,8 @@ class TradingStockManager:
                                         quantity=int(order.quantity),
                                         strategy=trading_stock.selection_reason,
                                         reason="체결(콜백)",
-                                        target_profit_rate=getattr(trading_stock, 'target_profit_rate', 0.15) or 0.15,
-                                        stop_loss_rate=getattr(trading_stock, 'stop_loss_rate', 0.10) or 0.10
+                                        target_profit_rate=getattr(trading_stock, 'target_profit_rate', 0.17) or 0.17,
+                                        stop_loss_rate=getattr(trading_stock, 'stop_loss_rate', 0.09) or 0.09
                                     )
                                     order._real_buy_saved = True
                                 except Exception as db_err:

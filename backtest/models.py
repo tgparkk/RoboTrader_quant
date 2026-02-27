@@ -37,9 +37,9 @@ class BacktestParams:
     initial_capital: float = 50_000_000  # 초기 자본 (5천만원)
     portfolio_size: int = 10  # 포트폴리오 종목 수 (라이브 설정과 일치)
 
-    # 손익절 파라미터
-    target_profit_rate: float = 0.15  # 익절률 (15%)
-    stop_loss_rate: float = 0.10  # 손절률 (10%)
+    # 손익절 파라미터 (백테스트 검증: 단일 17%/9%가 최적)
+    target_profit_rate: float = 0.17  # 익절률 (17%)
+    stop_loss_rate: float = 0.09  # 손절률 (9%)
 
     # 리밸런싱 기준 (라이브 설정과 일치)
     hard_stop_score: float = 65.0  # 긴급 매도 점수
@@ -88,8 +88,8 @@ class Position:
     quantity: int
     buy_price: float
     buy_date: str
-    target_profit_rate: float = 0.15
-    stop_loss_rate: float = 0.10
+    target_profit_rate: float = 0.17
+    stop_loss_rate: float = 0.09
     total_score: float = 0.0
     factor_rank: int = 999
 

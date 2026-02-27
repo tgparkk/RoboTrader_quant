@@ -369,8 +369,8 @@ class TrendMomentumAnalyzer:
         """
         try:
             # 목표 익절/손절률 (종목별 또는 기본값)
-            target_profit = getattr(trading_stock, 'target_profit_rate', 0.15)
-            stop_loss = getattr(trading_stock, 'stop_loss_rate', 0.10)
+            target_profit = getattr(trading_stock, 'target_profit_rate', 0.17)
+            stop_loss = getattr(trading_stock, 'stop_loss_rate', 0.09)
 
             # 1. 강한 상승 추세 → 익절률 초과해도 보유
             if momentum_score >= 70:
