@@ -48,6 +48,9 @@ class BacktestParams:
     safe_score: float = 75.0  # 안전 유지 점수
     safe_rank: int = 25  # 안전 유지 순위
 
+    # 최소 보유일수 (리밸런싱 매도 보호, 손절은 항상 허용)
+    min_hold_days: int = 0
+
     # 동적 목표율 사용 여부
     use_dynamic_targets: bool = True
 
@@ -66,6 +69,7 @@ class BacktestParams:
             'soft_stop_rank': self.soft_stop_rank,
             'safe_score': self.safe_score,
             'safe_rank': self.safe_rank,
+            'min_hold_days': self.min_hold_days,
             'use_dynamic_targets': self.use_dynamic_targets,
             'trading_cost_rate': self.trading_cost_rate,
         }

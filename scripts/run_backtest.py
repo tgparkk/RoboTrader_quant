@@ -104,6 +104,7 @@ def cmd_run(args):
         soft_stop_rank=args.soft_stop_rank,
         safe_score=args.safe_score,
         safe_rank=args.safe_rank,
+        min_hold_days=getattr(args, 'min_hold_days', 0),
         use_dynamic_targets=not args.no_dynamic,
     )
 
@@ -112,6 +113,8 @@ def cmd_run(args):
     print(f"포트폴리오: {params.portfolio_size}종목")
     print(f"익절률: {params.target_profit_rate:.1%}")
     print(f"손절률: {params.stop_loss_rate:.1%}")
+    if params.min_hold_days > 0:
+        print(f"최소 보유일수: {params.min_hold_days}일 (리밸런싱 매도 보호)")
     print(f"동적 목표율: {'사용' if params.use_dynamic_targets else '미사용'}")
     print(f"거래비용: {params.trading_cost_rate:.2%}")
     print(f"{'=' * 60}\n")
@@ -432,6 +435,8 @@ def parse_args():
                             help='안전 유지 점수 (기본: 75)')
     run_parser.add_argument('--safe-rank', type=int, default=25,
                             help='안전 유지 순위 (기본: 25)')
+    run_parser.add_argument('--min-hold-days', type=int, default=0,
+                            help='최소 보유일수 - 리밸런싱 매도 보호 (기본: 0)')
     run_parser.add_argument('--no-dynamic', action='store_true',
                             help='동적 목표율 미사용')
     run_parser.add_argument('--output', type=str, default=None,
@@ -458,6 +463,8 @@ def parse_args():
                             help='안전 유지 점수 (기본: 75)')
     all_parser.add_argument('--safe-rank', type=int, default=25,
                             help='안전 유지 순위 (기본: 25)')
+    all_parser.add_argument('--min-hold-days', type=int, default=0,
+                            help='최소 보유일수 - 리밸런싱 매도 보호 (기본: 0)')
     all_parser.add_argument('--no-dynamic', action='store_true',
                             help='동적 목표율 미사용')
     all_parser.add_argument('--output', type=str, default=None,
@@ -490,6 +497,8 @@ def parse_args():
                                help='안전 유지 점수 (기본: 75)')
     regime_parser.add_argument('--safe-rank', type=int, default=25,
                                help='안전 유지 순위 (기본: 25)')
+    regime_parser.add_argument('--min-hold-days', type=int, default=0,
+                               help='최소 보유일수 - 리밸런싱 매도 보호 (기본: 0)')
     regime_parser.add_argument('--no-dynamic', action='store_true',
                                help='동적 목표율 미사용')
     regime_parser.add_argument('--output', type=str, default=None,

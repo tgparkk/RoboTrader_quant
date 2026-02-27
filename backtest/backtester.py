@@ -221,6 +221,12 @@ class Backtester:
 
         sell_list = []
         for stock_code, position in list(self.positions.items()):
+            # 최소 보유일수 보호: 리밸런싱 매도 차단 (손절/익절은 _check_stop_profit_loss에서 별도 처리)
+            if self.params.min_hold_days > 0:
+                days_held = self._calc_holding_days(position.buy_date, date)
+                if days_held < self.params.min_hold_days:
+                    continue
+
             factors = self._get_factors(date, stock_code)
             if not factors:
                 if stock_code not in target_codes:
@@ -408,6 +414,15 @@ class Backtester:
                     'low': float(row['low']), 'close': float(row['close'])}
         except (ValueError, KeyError):
             return None
+
+    def _calc_holding_days(self, buy_date: str, current_date: str) -> int:
+        """보유일수 계산 (거래일 기준이 아닌 캘린더 기준)"""
+        try:
+            buy_dt = datetime.strptime(buy_date, "%Y-%m-%d")
+            cur_dt = datetime.strptime(current_date, "%Y-%m-%d")
+            return (cur_dt - buy_dt).days
+        except (ValueError, TypeError):
+            return 0
 
     def _get_kospi_change(self, date):
         if 'KS11' not in self.daily_prices_cache:
