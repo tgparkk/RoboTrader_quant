@@ -152,8 +152,8 @@ def get_today_status(target_date: str = None):
                 name = row[2] or ''
                 qty = row[3]
                 price = row[4]
-                tp = (row[5] or 0.15) * 100
-                sl = (row[6] or 0.10) * 100
+                tp = (row[5] or 0.17) * 100
+                sl = (row[6] or 0.09) * 100
 
                 buy_amount = qty * price
                 total_buy_amount += buy_amount
