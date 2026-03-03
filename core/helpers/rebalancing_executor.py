@@ -392,6 +392,16 @@ class RebalancingExecutor:
 
                 reserved = False
                 try:
+                    # 매수 최소 점수 방어 체크 (상류 필터 누락 대비)
+                    buy_min_score = plan.get('buy_min_score', 0)
+                    item_score = buy_item.get('total_score', 0)
+                    if buy_min_score > 0 and item_score > 0 and item_score < buy_min_score:
+                        logger.warning(
+                            f"⚠️ {stock_code}({stock_name}) 매수 스킵: "
+                            f"점수 미달 방어 체크 ({item_score:.1f} < {buy_min_score:.0f})"
+                        )
+                        continue
+
                     # 🆕 오늘 손절한 종목은 재매수 금지 (익절 후 퀀트 상위 재진입은 허용)
                     if stock_code in today_stop_loss_stocks:
                         logger.warning(f"⚠️ {stock_code}({stock_name}) 매수 스킵: 오늘 손절한 종목 - 재매수 금지")

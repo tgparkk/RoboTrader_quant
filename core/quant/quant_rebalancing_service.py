@@ -50,6 +50,9 @@ class QuantRebalancingService:
         self.safe_score = 75.0       # 안전 점수: >= 75점은 순위 무관 유지 (65→75 강화)
         self.safe_rank = 25          # 안전 순위: <= 25위면 점수 낮아도 유지 (40→25 강화)
 
+        # 매수 최소 점수: hard_stop 이하 종목은 매수 차단 ("팔 종목을 사지 않는다")
+        self.buy_min_score = self.hard_stop_score
+
         # 스마트 Hard Cap: 포트폴리오 평균 점수에 따라 상한 동적 조절
         self.smart_hard_cap_tiers = SMART_HARD_CAP_TIERS
 
@@ -350,11 +353,22 @@ class QuantRebalancingService:
                 )
 
                 buy_count = 0
+                skipped_by_score = 0
                 for portfolio_item in target_portfolio:
                     if buy_count >= max_new_buys:
                         break
                     code = portfolio_item['stock_code']
                     if code in new_codes:
+                        # 매수 최소 점수 필터: "팔 종목을 사지 않는다"
+                        item_score = portfolio_item.get('total_score', 0)
+                        if self.buy_min_score > 0 and item_score < self.buy_min_score:
+                            self.logger.info(
+                                f"⏭️ {code}({portfolio_item['stock_name']}) 매수 스킵: "
+                                f"점수 미달 ({item_score:.1f} < {self.buy_min_score:.0f})"
+                            )
+                            skipped_by_score += 1
+                            continue
+
                         # 목표 익절/손절률 계산
                         factors_data = factors_map.get(code)
                         target_profit, stop_loss = self.profit_loss_calculator.calculate_from_portfolio_item(
@@ -420,9 +434,11 @@ class QuantRebalancingService:
                                 'stop_loss_rate': stop_loss
                             })
             
+            score_skip_msg = f", 점수미달 스킵 {skipped_by_score}개" if skipped_by_score > 0 else ""
             self.logger.info(
                 f"📊 리밸런싱 계획 ({calc_date}): "
                 f"매도 {len(sell_list)}개, 매수 {len(buy_list)}개, 유지 {len(keep_list)}개"
+                f"{score_skip_msg}"
             )
             
             # 리밸런싱 이력 저장 (종목별 팩터 점수 포함)
@@ -517,7 +533,8 @@ class QuantRebalancingService:
                 'sell_list': sell_list,
                 'buy_list': buy_list,
                 'keep_list': keep_list,
-                'calc_date': calc_date
+                'calc_date': calc_date,
+                'buy_min_score': self.buy_min_score,
             }
             
         except Exception as e:

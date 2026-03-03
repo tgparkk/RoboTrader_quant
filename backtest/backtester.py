@@ -260,6 +260,9 @@ class Backtester:
                 continue
             if stock_code in self._today_stop_profit_sold:
                 continue
+            # 매수 최소 점수 필터: 절대 품질 기준 미달 시 매수 스킵
+            if self.params.buy_min_score > 0 and item['total_score'] < self.params.buy_min_score:
+                continue
             price_data = self._get_daily_price(stock_code, date)
             if not price_data or price_data['open'] <= 0:
                 continue
