@@ -590,8 +590,8 @@ class TradingDecisionEngine:
             profit_rate = (current_price - buy_price) / buy_price
 
             # 종목별 목표 익절/손절률 가져오기 (리밸런싱 시 설정됨)
-            target_profit_rate = getattr(trading_stock, 'target_profit_rate', 0.17)
-            stop_loss_rate = getattr(trading_stock, 'stop_loss_rate', 0.09)
+            target_profit_rate = getattr(trading_stock, 'target_profit_rate', 0.15)
+            stop_loss_rate = getattr(trading_stock, 'stop_loss_rate', 0.08)
 
             # 리밸런싱 진행 중이면 손절 중단 (익절만 허용, 10분 타임아웃)
             from utils.korean_time import now_kst

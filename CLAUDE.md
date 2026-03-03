@@ -10,12 +10,12 @@
 
 **위치**: `core/quant/target_profit_loss_calculator.py`
 
-모든 종목에 단일 익절/손절률을 적용합니다 (백테스트 검증 완료: 5단계 대비 +1,369%p 개선):
+모든 종목에 단일 익절/손절률을 적용합니다 (멀티버스 백테스트 검증: 99개 조합 중 샤프 6위):
 
 ```python
-# 단일 익절/손절선 (2026-02-28 적용)
-target_profit_rate = 0.17  # 17%
-stop_loss_rate = 0.09      # 9%
+# 단일 익절/손절선 (2026-03-03 적용, 멀티버스 검증)
+target_profit_rate = 0.15  # 15%
+stop_loss_rate = 0.08      # 8%
 ```
 
 **저장 위치**: `virtual_trading_records` 테이블의 `target_profit_rate`, `stop_loss_rate` 컬럼

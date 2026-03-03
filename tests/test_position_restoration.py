@@ -60,8 +60,8 @@ class TestPositionRestoration:
         # get_trading_stock에서 반환할 trading_stock mock
         trading_stock = Mock()
         trading_stock.set_position = Mock()
-        trading_stock.target_profit_rate = 0.17
-        trading_stock.stop_loss_rate = 0.09
+        trading_stock.target_profit_rate = 0.15
+        trading_stock.stop_loss_rate = 0.08
 
         manager.get_trading_stock = Mock(return_value=trading_stock)
         manager._change_stock_state = Mock()
@@ -118,8 +118,8 @@ class TestPositionRestoration:
                     'stock_name': '삼성전자',
                     'quantity': 10,
                     'buy_price': 70000,
-                    'target_profit_rate': 0.17,
-                    'stop_loss_rate': 0.09,
+                    'target_profit_rate': 0.15,
+                    'stop_loss_rate': 0.08,
                     'buy_record_id': 1
                 },
                 {
@@ -313,8 +313,8 @@ class TestPositionRestoration:
                     'stock_name': '삼성전자',
                     'quantity': 10,
                     'buy_price': 70000,
-                    'target_profit_rate': 0.17,
-                    'stop_loss_rate': 0.09
+                    'target_profit_rate': 0.15,
+                    'stop_loss_rate': 0.08
                 }
             }
 
@@ -369,8 +369,8 @@ class TestPositionRestoration:
                     'stock_name': '삼성전자',
                     'quantity': 15,  # 수량 불일치
                     'buy_price': 70000,
-                    'target_profit_rate': 0.17,
-                    'stop_loss_rate': 0.09
+                    'target_profit_rate': 0.15,
+                    'stop_loss_rate': 0.08
                 }
             }
 
@@ -424,8 +424,8 @@ class TestPositionRestoration:
                     'stock_name': '삼성전자',
                     'quantity': 10,  # 동일
                     'buy_price': 70000,
-                    'target_profit_rate': 0.17,
-                    'stop_loss_rate': 0.09
+                    'target_profit_rate': 0.15,
+                    'stop_loss_rate': 0.08
                 }
             }
 
@@ -467,8 +467,8 @@ class TestPositionRestoration:
                     'stock_name': '삼성전자',
                     'quantity': 10,
                     'buy_price': 70000,
-                    'target_profit_rate': 0.17,
-                    'stop_loss_rate': 0.09,
+                    'target_profit_rate': 0.15,
+                    'stop_loss_rate': 0.08,
                     'buy_record_id': 1
                 }
             ]

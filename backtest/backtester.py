@@ -202,8 +202,8 @@ class Backtester:
 
     def _calculate_dynamic_targets(self, rank: int, total_score: float,
                                     momentum_score: float) -> Tuple[float, float]:
-        # 단일 익절/손절선 (백테스트 검증: 5단계 대비 +1,369%p 개선)
-        return 0.17, 0.09
+        # 단일 익절/손절선 (멀티버스 검증: TP15/SL8 샤프 8.62)
+        return 0.15, 0.08
 
     def _execute_rebalancing(self, date: str):
         portfolio = self._get_portfolio(date)
