@@ -481,7 +481,7 @@ class TradingDecisionEngine:
             
             # DB에서 미체결 포지션 조회 (위 정보가 없는 경우)
             if not buy_record_id and self.db_manager:
-                open_positions = self.db_manager.get_virtual_open_positions()
+                open_positions = self.db_manager.get_virtual_open_positions() if self.is_virtual_mode else self.db_manager.get_real_open_positions()
                 stock_positions = open_positions[open_positions['stock_code'] == stock_code]
                 
                 if not stock_positions.empty:

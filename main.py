@@ -157,7 +157,8 @@ class DayTradingBot:
             db_manager=self.db_manager,
             candidate_selector=self.candidate_selector,
             intraday_manager=self.intraday_manager,
-            telegram_integration=self.telegram
+            telegram_integration=self.telegram,
+            config=self.config
         )
         self.state_restoration_helper = StateRestorationHelper(
             trading_manager=self.trading_manager,
