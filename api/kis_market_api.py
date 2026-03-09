@@ -352,6 +352,76 @@ if __name__ == "__main__":
 # 🎯 시장상황 분석을 위한 API 함수들
 # =============================================================================
 
+def get_expected_index(index_code: str = "0001") -> Optional[Dict[str, Any]]:
+    """
+    예상체결지수 조회 API (TR: FHPST01840000) [국내주식-121]
+    동시호가(08:30~09:00) 중 예상 KOSPI/KOSDAQ 지수를 조회합니다.
+
+    Args:
+        index_code: 업종코드 ("0001": 코스피, "1001": 코스닥)
+
+    Returns:
+        Dict: {'index': 예상지수, 'change_pct': 전일대비율%, 'sign': 부호} or None
+    """
+    url = '/uapi/domestic-stock/v1/quotations/exp-index-trend'
+    tr_id = "FHPST01840000"
+
+    params = {
+        "FID_COND_MRKT_DIV_CODE": "U",       # U: 업종
+        "FID_INPUT_ISCD": index_code,         # 0001: 코스피, 1001: 코스닥
+        "FID_MKOP_CLS_CODE": "1",             # 1: 장시작전, 2: 장마감
+        "FID_INPUT_HOUR_1": "30",             # 30초 간격
+    }
+
+    try:
+        logger.debug(f"📊 예상체결지수 조회: {index_code}")
+        res = kis._url_fetch(url, tr_id, "", params)
+
+        if res and res.isOK():
+            body = res.getBody()
+            # output2에 시계열, output1에 최신값
+            output1 = getattr(body, 'output1', None)
+            output2 = getattr(body, 'output2', None)
+
+            # output2 (시계열 데이터) 에서 최신값 가져오기
+            data = None
+            if output2 and isinstance(output2, list) and len(output2) > 0:
+                data = output2[0]  # 가장 최신
+            elif output1:
+                if isinstance(output1, list) and len(output1) > 0:
+                    data = output1[0]
+                elif isinstance(output1, dict):
+                    data = output1
+
+            if data and isinstance(data, dict):
+                try:
+                    change_pct = float(data.get('prdy_ctrt', 0))
+                    index_val = float(data.get('bstp_nmix_prpr', 0))
+                    sign = data.get('prdy_vrss_sign', '3')
+                    logger.info(
+                        f"📊 예상체결지수 {index_code}: "
+                        f"{index_val:,.2f} ({change_pct:+.2f}%)"
+                    )
+                    return {
+                        'index': index_val,
+                        'change_pct': change_pct,
+                        'sign': sign,
+                    }
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"예상체결지수 파싱 오류: {e}, data={data}")
+                    return None
+
+            logger.warning(f"⚠️ 예상체결지수 데이터 없음 (동시호가 시간 외?)")
+            return None
+        else:
+            logger.error(f"❌ 예상체결지수 조회 실패: {index_code}")
+            return None
+
+    except Exception as e:
+        logger.error(f"❌ 예상체결지수 조회 오류 ({index_code}): {e}")
+        return None
+
+
 def get_index_data(index_code: str = "0001") -> Optional[Dict[str, Any]]:
     """
     국내업종 현재지수 API (TR: FHPUP02100000)

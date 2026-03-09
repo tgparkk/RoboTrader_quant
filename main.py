@@ -131,7 +131,7 @@ class DayTradingBot:
         self.rebalancing_service.rebalancing_period = RebalancingPeriod.DAILY  # 일간 리밸런싱
         self._last_rebalancing_date = None  # 마지막 리밸런싱 실행 날짜
 
-        # 장전 시장 파악 (NXT + Claude AI)
+        # 장전 시장 파악 (예상체결지수 + 미장 + 글로벌뉴스)
         from core.pre_market_analyzer import PreMarketAnalyzer, PreMarketResult
         self.pre_market_analyzer = PreMarketAnalyzer()
         self._pre_market_result: Optional[PreMarketResult] = None
@@ -533,29 +533,28 @@ class DayTradingBot:
                                             f"📊 폴백 레짐: {regime.name} (장전 분석 미실행)"
                                         )
 
-                                    # CRISIS: 보유 전량 시장가 매도 + 매수 중단
+                                    # CRISIS: 매수 차단 + 전량 매도
                                     if regime == MarketRegime.CRISIS:
-                                        self.logger.warning("🚨 CRISIS: 보유 전량 매도 + 매수 중단")
-                                        if self.telegram:
-                                            try:
-                                                await self.telegram.send_message(
-                                                    f"🚨 CRISIS 발동!\n"
-                                                    f"근거: {regime_reason}\n"
-                                                    f"보유 전량 시장가 매도 실행합니다."
-                                                )
-                                            except Exception:
-                                                pass
-
-                                        # 보유 전종목 시장가 매도
-                                        await self._execute_crisis_sell_all()
-
-                                        # 리밸런싱 매도만 실행 (매수 차단)
-                                        plan = self.rebalancing_service.calculate_rebalancing_plan(today_str)
-                                        if plan and plan.get('sell_list'):
-                                            plan['buy_list'] = []
-                                            await self.rebalancing_executor.execute_rebalancing(plan)
+                                        if self._pre_market_result is not None:
+                                            # 08:40에 이미 전량 매도 주문 완료
+                                            self.logger.warning(
+                                                "🚨 CRISIS: 08:40 전량 매도 주문 완료 상태 — 매수 차단"
+                                            )
+                                        else:
+                                            # 폴백: 장전 분석 미실행 → 09:05에 전량 매도
+                                            self.logger.warning("🚨 CRISIS (폴백): 전량 매도 + 매수 차단")
+                                            if self.telegram:
+                                                try:
+                                                    await self.telegram.send_message(
+                                                        f"🚨 CRISIS 발동! (폴백)\n"
+                                                        f"근거: {regime_reason}\n"
+                                                        f"보유 전량 시장가 매도 실행합니다."
+                                                    )
+                                                except Exception:
+                                                    pass
+                                            await self._execute_crisis_sell_all()
                                         self._last_rebalancing_date = today_str
-                                        self.logger.info(f"✅ 리밸런싱 완료 (CRISIS - 전량 매도): {today_str}")
+                                        self.logger.info(f"✅ 리밸런싱 스킵 (CRISIS - 매수 차단): {today_str}")
 
                                     # CAUTION: 매수 축소 (최대 5종목)
                                     elif regime == MarketRegime.CAUTION:
@@ -754,11 +753,13 @@ class DayTradingBot:
                                     f"📊 장전 시장 파악: {regime_name}",
                                     f"근거: {self._pre_market_result.reason}",
                                 ]
-                                if self._pre_market_result.nxt_sentiment is not None:
+                                if self._pre_market_result.expected_kospi_pct is not None:
                                     msg_lines.append(
-                                        f"NXT: 심리 {self._pre_market_result.nxt_sentiment:+.2f}, "
-                                        f"평균 {self._pre_market_result.nxt_avg_change:+.2f}%, "
-                                        f"상승{self._pre_market_result.nxt_up_count}/하락{self._pre_market_result.nxt_down_count}"
+                                        f"예상KOSPI: {self._pre_market_result.expected_kospi_pct:+.2f}%"
+                                    )
+                                if self._pre_market_result.expected_kosdaq_pct is not None:
+                                    msg_lines.append(
+                                        f"예상KOSDAQ: {self._pre_market_result.expected_kosdaq_pct:+.2f}%"
                                     )
                                 for k, v in self._pre_market_result.us_data.items():
                                     msg_lines.append(f"{v['label']}: {v['last']:,.2f} ({v['change_pct']:+.2f}%)")
@@ -776,6 +777,27 @@ class DayTradingBot:
                                     await self.telegram.send_message("\n".join(msg_lines))
                                 except Exception:
                                     pass
+
+                            # CRISIS 즉시 매도: 08:40에 바로 시장가 매도 주문
+                            # (KRX 08:21부터 주문 접수 가능, 09:00 시가에 체결)
+                            from core.market_regime_filter import MarketRegime
+                            if self._pre_market_result.regime == MarketRegime.CRISIS:
+                                self.logger.warning(
+                                    f"🚨 CRISIS 감지 — 08:40 즉시 전량 매도 주문 "
+                                    f"(09:00 시가 체결 예정)"
+                                )
+                                if self.telegram:
+                                    try:
+                                        await self.telegram.send_message(
+                                            f"🚨 CRISIS 발동! 즉시 전량 매도 주문\n"
+                                            f"근거: {self._pre_market_result.reason}\n"
+                                            f"08:40 주문 → 09:00 시가 체결 예정"
+                                        )
+                                    except Exception:
+                                        pass
+                                await self._execute_crisis_sell_all()
+                                # 09:05 리밸런싱에서 매수 차단하도록 결과 유지
+
                         except Exception as e:
                             self.logger.error(f"❌ 장전 시장 파악 오류: {e}")
                             self._pre_market_result = None

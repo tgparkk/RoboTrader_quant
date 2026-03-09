@@ -70,6 +70,12 @@ class BacktestParams:
     vix_crisis: float = 40.0                # VIX > 40 → CRISIS
     caution_max_buy: int = 5                 # CAUTION 시 최대 매수 종목 수
 
+    # CRISIS 전량 매도 (레짐 필터와 독립적으로 사용 가능)
+    crisis_sell_all: bool = False            # CRISIS 시 보유 전량 시가 매도
+    crisis_sell_gap_pct: float = -0.03       # 예상 KOSPI 갭 -3% 이하 → 전량 매도
+    crisis_sell_sp500_pct: float = -0.05     # S&P500 전일 -5% 이하 → 전량 매도
+    crisis_sell_vix: float = 40.0            # VIX ≥ 40 → 전량 매도
+
     def to_dict(self) -> Dict[str, Any]:
         """딕셔너리로 변환"""
         return {

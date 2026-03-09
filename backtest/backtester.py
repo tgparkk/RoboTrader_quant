@@ -73,8 +73,8 @@ class Backtester:
 
         self._preload_data(trading_days)
 
-        # 레짐 필터용 US 데이터 로드
-        if self.params.regime_filter_enabled and not self.us_market_cache:
+        # 레짐 필터 또는 CRISIS 전량매도용 US 데이터 로드
+        if (self.params.regime_filter_enabled or self.params.crisis_sell_all) and not self.us_market_cache:
             self._preload_us_market_data(trading_days[0], trading_days[-1])
 
         prev_total_value = self.params.initial_capital
@@ -84,7 +84,13 @@ class Backtester:
             self._today_regime = self._determine_regime(date)
             self._regime_stats[self._today_regime] = self._regime_stats.get(self._today_regime, 0) + 1
 
-            self._execute_rebalancing(date)
+            # CRISIS 전량 매도: 시가에 모든 포지션 청산
+            crisis_sold = False
+            if self.params.crisis_sell_all and self.positions:
+                crisis_sold = self._check_crisis_sell_all(date)
+
+            if not crisis_sold:
+                self._execute_rebalancing(date)
             self._check_stop_profit_loss(date)
 
             total_value = self._calculate_total_value(date)
@@ -546,6 +552,42 @@ class Backtester:
                 regime_level = max(regime_level, 1)
 
         return ['NORMAL', 'CAUTION', 'CRISIS'][regime_level]
+
+    def _check_crisis_sell_all(self, date: str) -> bool:
+        """CRISIS 조건 충족 시 전량 시가 매도. 매도 실행 시 True 반환."""
+        triggered = False
+        reason_parts = []
+
+        # Stage 1: S&P500 / VIX (전일 데이터, 08:20에 판단 가능)
+        if self.us_market_cache:
+            sp500_chg = self._get_us_prev_day_change(date, 'sp500')
+            if sp500_chg is not None and sp500_chg <= self.params.crisis_sell_sp500_pct:
+                triggered = True
+                reason_parts.append(f"S&P500 {sp500_chg:.1%}")
+
+            vix_level = self._get_us_prev_day_close(date, 'vix')
+            if vix_level is not None and vix_level >= self.params.crisis_sell_vix:
+                triggered = True
+                reason_parts.append(f"VIX {vix_level:.1f}")
+
+        # Stage 2: KOSPI 시가 갭 (예상체결지수 프록시, 08:40에 판단)
+        kospi_gap = self._get_kospi_change(date)
+        if kospi_gap is not None and kospi_gap <= self.params.crisis_sell_gap_pct:
+            triggered = True
+            reason_parts.append(f"KOSPI갭 {kospi_gap:.1%}")
+
+        if not triggered:
+            return False
+
+        reason = f"CRISIS 전량매도 ({' / '.join(reason_parts)})"
+        sell_count = len(self.positions)
+        for stock_code in list(self.positions.keys()):
+            price_data = self._get_daily_price(stock_code, date)
+            if price_data and price_data['open'] > 0:
+                self._execute_sell(stock_code, date, reason, sell_price=price_data['open'])
+        self._crisis_sell_count = getattr(self, '_crisis_sell_count', 0) + 1
+        logger.info(f"[{date}] {reason} — {sell_count}종목 매도")
+        return True
 
     def _close_all_positions(self, date):
         for stock_code in list(self.positions.keys()):
