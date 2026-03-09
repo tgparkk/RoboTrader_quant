@@ -131,6 +131,12 @@ class DayTradingBot:
         self.rebalancing_service.rebalancing_period = RebalancingPeriod.DAILY  # 일간 리밸런싱
         self._last_rebalancing_date = None  # 마지막 리밸런싱 실행 날짜
 
+        # 장전 시장 파악 (NXT + Claude AI)
+        from core.pre_market_analyzer import PreMarketAnalyzer, PreMarketResult
+        self.pre_market_analyzer = PreMarketAnalyzer()
+        self._pre_market_result: Optional[PreMarketResult] = None
+        self._last_pre_market_date = None
+
         # 🆕 헬퍼 초기화
         self.notification_helper = RebalancingNotificationHelper(self.telegram)
         self.order_wait_helper = OrderWaitHelper(self.api_manager)
@@ -508,23 +514,85 @@ class DayTradingBot:
                                 # (plan 계산 중 async 양보 시 모니터링 루프의 손절 실행 방지)
                                 self.decision_engine.set_rebalancing_in_progress(True)
                                 try:
-                                    # 리밸런싱 계획 계산
-                                    plan = self.rebalancing_service.calculate_rebalancing_plan(today_str)
-
-                                    # 리밸런싱 실행 (매도/매수 또는 유지 대상 목표 익절/손절률 갱신)
-                                    if plan:
-                                        if plan.get('sell_list') or plan.get('buy_list'):
-                                            # 매도/매수 실행 (플래그 이미 설정됨)
-                                            await self.rebalancing_executor.execute_rebalancing(plan)
-                                            self._last_rebalancing_date = today_str
-                                            self.logger.info(f"✅ 리밸런싱 완료: {today_str}")
-                                        else:
-                                            # 유지 대상만 있는 경우 (매도/매수 없음)
-                                            self._last_rebalancing_date = today_str
-                                            self.logger.info(f"✅ 리밸런싱 완료: 유지 {len(plan.get('keep_list', []))}개")
+                                    # 시장 레짐 판단: 장전 분석 결과 사용, 없으면 폴백
+                                    from core.market_regime_filter import MarketRegime
+                                    if self._pre_market_result is not None:
+                                        regime = self._pre_market_result.regime
+                                        regime_reason = self._pre_market_result.reason
+                                        self.logger.info(
+                                            f"📊 장전 분석 결과 사용: {regime.name} "
+                                            f"(근거: {self._pre_market_result.reason})"
+                                        )
                                     else:
-                                        self.logger.info(f"ℹ️ 리밸런싱 불필요: 목표 포트와 동일")
+                                        # 장전 분석 미실행 시 폴백 (기존 규칙 기반)
+                                        from core.market_regime_filter import evaluate_market_regime
+                                        fallback = evaluate_market_regime()
+                                        regime = fallback.regime
+                                        regime_reason = fallback.reason
+                                        self.logger.info(
+                                            f"📊 폴백 레짐: {regime.name} (장전 분석 미실행)"
+                                        )
+
+                                    # CRISIS: 보유 전량 시장가 매도 + 매수 중단
+                                    if regime == MarketRegime.CRISIS:
+                                        self.logger.warning("🚨 CRISIS: 보유 전량 매도 + 매수 중단")
+                                        if self.telegram:
+                                            try:
+                                                await self.telegram.send_message(
+                                                    f"🚨 CRISIS 발동!\n"
+                                                    f"근거: {regime_reason}\n"
+                                                    f"보유 전량 시장가 매도 실행합니다."
+                                                )
+                                            except Exception:
+                                                pass
+
+                                        # 보유 전종목 시장가 매도
+                                        await self._execute_crisis_sell_all()
+
+                                        # 리밸런싱 매도만 실행 (매수 차단)
+                                        plan = self.rebalancing_service.calculate_rebalancing_plan(today_str)
+                                        if plan and plan.get('sell_list'):
+                                            plan['buy_list'] = []
+                                            await self.rebalancing_executor.execute_rebalancing(plan)
                                         self._last_rebalancing_date = today_str
+                                        self.logger.info(f"✅ 리밸런싱 완료 (CRISIS - 전량 매도): {today_str}")
+
+                                    # CAUTION: 매수 축소 (최대 5종목)
+                                    elif regime == MarketRegime.CAUTION:
+                                        self.logger.warning("⚠️ CAUTION: 매수 최대 5종목으로 축소")
+                                        plan = self.rebalancing_service.calculate_rebalancing_plan(today_str)
+                                        if plan:
+                                            if plan.get('buy_list'):
+                                                original_count = len(plan['buy_list'])
+                                                plan['buy_list'] = plan['buy_list'][:5]
+                                                if original_count > 5:
+                                                    self.logger.info(
+                                                        f"📉 매수 축소: {original_count}종목 → {len(plan['buy_list'])}종목"
+                                                    )
+                                            if plan.get('sell_list') or plan.get('buy_list'):
+                                                await self.rebalancing_executor.execute_rebalancing(plan)
+                                                self._last_rebalancing_date = today_str
+                                                self.logger.info(f"✅ 리밸런싱 완료 (CAUTION): {today_str}")
+                                            else:
+                                                self._last_rebalancing_date = today_str
+                                                self.logger.info(f"✅ 리밸런싱 완료: 유지 {len(plan.get('keep_list', []))}개")
+                                        else:
+                                            self._last_rebalancing_date = today_str
+
+                                    # NORMAL: 정상 리밸런싱
+                                    else:
+                                        plan = self.rebalancing_service.calculate_rebalancing_plan(today_str)
+                                        if plan:
+                                            if plan.get('sell_list') or plan.get('buy_list'):
+                                                await self.rebalancing_executor.execute_rebalancing(plan)
+                                                self._last_rebalancing_date = today_str
+                                                self.logger.info(f"✅ 리밸런싱 완료: {today_str}")
+                                            else:
+                                                self._last_rebalancing_date = today_str
+                                                self.logger.info(f"✅ 리밸런싱 완료: 유지 {len(plan.get('keep_list', []))}개")
+                                        else:
+                                            self.logger.info(f"ℹ️ 리밸런싱 불필요: 목표 포트와 동일")
+                                            self._last_rebalancing_date = today_str
                                 finally:
                                     self.decision_engine.set_rebalancing_in_progress(False)
                             else:
@@ -541,6 +609,90 @@ class DayTradingBot:
         except Exception as e:
             self.logger.error(f"❌ 리밸런싱 태스크 오류: {e}")
     
+    async def _execute_crisis_sell_all(self):
+        """CRISIS 시 보유 전종목 시장가 매도"""
+        try:
+            from config.db_config import get_pg_connection
+            from api import kis_order_api
+
+            # DB에서 미체결 보유 종목 조회
+            conn = get_pg_connection()
+            try:
+                cur = conn.cursor()
+                table = 'virtual_trading_records' if self.decision_engine.is_virtual_mode else 'real_trading_records'
+                cur.execute(f'''
+                    SELECT b.id, b.stock_code, b.stock_name, b.quantity, b.price
+                    FROM {table} b
+                    WHERE b.action = 'BUY'
+                        AND NOT EXISTS (
+                            SELECT 1 FROM {table} s
+                            WHERE s.buy_record_id = b.id AND s.action = 'SELL'
+                        )
+                    ORDER BY b.timestamp
+                ''')
+                positions = cur.fetchall()
+            finally:
+                conn.close()
+
+            if not positions:
+                self.logger.info("🚨 CRISIS 전량 매도: 보유 종목 없음")
+                return
+
+            self.logger.warning(f"🚨 CRISIS 전량 매도 시작: {len(positions)}종목")
+
+            success_count = 0
+            fail_count = 0
+
+            for buy_id, code, name, qty, buy_price in positions:
+                try:
+                    if self.decision_engine.is_virtual_mode:
+                        # 가상매매: DB에 매도 기록만 저장
+                        self.logger.info(f"🚨 [가상] CRISIS 매도: {code}({name}) {qty}주")
+                        success_count += 1
+                    else:
+                        # 실전매매: 시장가 매도 주문
+                        result = kis_order_api.get_order_cash(
+                            ord_dv="sell",
+                            itm_no=code,
+                            qty=qty,
+                            unpr=0,
+                            ord_dvsn="01"  # 시장가
+                        )
+                        if result is not None and not result.empty:
+                            order_id = result.iloc[0].get('ODNO', '')
+                            if order_id:
+                                self.logger.warning(
+                                    f"🚨 CRISIS 매도 주문: {code}({name}) {qty}주 (주문번호: {order_id})"
+                                )
+                                success_count += 1
+                            else:
+                                self.logger.error(f"❌ CRISIS 매도 실패 (주문번호 없음): {code}")
+                                fail_count += 1
+                        else:
+                            self.logger.error(f"❌ CRISIS 매도 실패 (응답 없음): {code}")
+                            fail_count += 1
+
+                    await asyncio.sleep(0.5)  # 주문 간 대기
+
+                except Exception as e:
+                    self.logger.error(f"❌ CRISIS 매도 오류 {code}: {e}")
+                    fail_count += 1
+
+            self.logger.warning(f"🚨 CRISIS 전량 매도 완료: 성공 {success_count}건, 실패 {fail_count}건")
+
+            if self.telegram:
+                try:
+                    await self.telegram.send_message(
+                        f"🚨 CRISIS 전량 매도 완료\n"
+                        f"성공: {success_count}건 / 실패: {fail_count}건\n"
+                        f"총 {len(positions)}종목 시장가 매도"
+                    )
+                except Exception:
+                    pass
+
+        except Exception as e:
+            self.logger.error(f"❌ CRISIS 전량 매도 오류: {e}")
+
     async def _system_monitoring_task(self):
         """시스템 모니터링 태스크"""
         try:
@@ -583,6 +735,50 @@ class DayTradingBot:
 
                         # 이전 완료 주문 메모리 정리
                         self.order_manager.cleanup_old_completed_orders()
+
+                # 08:40 장전 시장 파악 (NXT + 미장)
+                if current_time.hour == 8 and current_time.minute >= 40:
+                    if self._last_pre_market_date != current_time.date():
+                        self._last_pre_market_date = current_time.date()
+                        self.logger.info(f"🔍 08:40+ 장전 시장 파악 시작 ({current_time.strftime('%H:%M:%S')})")
+                        try:
+                            self._pre_market_result = await asyncio.to_thread(
+                                self.pre_market_analyzer.analyze
+                            )
+                            regime_name = self._pre_market_result.regime.name
+                            self.logger.info(f"📊 장전 레짐: {regime_name} — {self._pre_market_result.reason}")
+
+                            # 텔레그램 알림
+                            if self.telegram:
+                                msg_lines = [
+                                    f"📊 장전 시장 파악: {regime_name}",
+                                    f"근거: {self._pre_market_result.reason}",
+                                ]
+                                if self._pre_market_result.nxt_sentiment is not None:
+                                    msg_lines.append(
+                                        f"NXT: 심리 {self._pre_market_result.nxt_sentiment:+.2f}, "
+                                        f"평균 {self._pre_market_result.nxt_avg_change:+.2f}%, "
+                                        f"상승{self._pre_market_result.nxt_up_count}/하락{self._pre_market_result.nxt_down_count}"
+                                    )
+                                for k, v in self._pre_market_result.us_data.items():
+                                    msg_lines.append(f"{v['label']}: {v['last']:,.2f} ({v['change_pct']:+.2f}%)")
+                                news = self._pre_market_result.news_data
+                                if news.get('available'):
+                                    dir_icon = {'up': '▲', 'down': '▼', 'neutral': '━'}
+                                    msg_lines.append(
+                                        f"글로벌뉴스: {dir_icon.get(news['direction'], '?')} "
+                                        f"{news['strength']} (감성 {news['sentiment']:+.3f}, "
+                                        f"신뢰도 {news['confidence']:.0%}, {news['total_count']}건)"
+                                    )
+                                    for f in news.get('key_factors', [])[:3]:
+                                        msg_lines.append(f"  {f['impact']} {f['factor']}: {f['avg_sentiment']:+.3f}")
+                                try:
+                                    await self.telegram.send_message("\n".join(msg_lines))
+                                except Exception:
+                                    pass
+                        except Exception as e:
+                            self.logger.error(f"❌ 장전 시장 파악 오류: {e}")
+                            self._pre_market_result = None
 
                 # 08:30 전일 데이터 수집 및 08:55 퀀트 스크리닝 실행 (장 시작 전)
                 if current_time.hour == 8:

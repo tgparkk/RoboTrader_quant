@@ -48,8 +48,11 @@ class Backtester:
         self.daily_prices_cache: Dict[str, pd.DataFrame] = {}
         self.portfolio_cache: Dict[str, List[Dict]] = {}
         self.factors_cache: Dict[str, Dict[str, Dict]] = {}
+        self.us_market_cache: Dict[str, pd.DataFrame] = {}
         self._today_stop_profit_sold: set = set()
         self._today_rebalancing_bought: set = set()
+        self._today_regime: str = 'NORMAL'
+        self._regime_stats: Dict[str, int] = {'NORMAL': 0, 'CAUTION': 0, 'CRISIS': 0}
 
     def backtest(self, start_date: str, end_date: str) -> BacktestResult:
         """백테스트 실행"""
@@ -70,10 +73,16 @@ class Backtester:
 
         self._preload_data(trading_days)
 
+        # 레짐 필터용 US 데이터 로드
+        if self.params.regime_filter_enabled and not self.us_market_cache:
+            self._preload_us_market_data(trading_days[0], trading_days[-1])
+
         prev_total_value = self.params.initial_capital
         for i, date in enumerate(trading_days):
             self._today_stop_profit_sold = set()
             self._today_rebalancing_bought = set()
+            self._today_regime = self._determine_regime(date)
+            self._regime_stats[self._today_regime] = self._regime_stats.get(self._today_regime, 0) + 1
 
             self._execute_rebalancing(date)
             self._check_stop_profit_loss(date)
@@ -272,6 +281,12 @@ class Backtester:
 
         if buy_candidates:
             available_slots = self.params.portfolio_size - len(self.positions)
+            # 레짐 필터: CRISIS → 매수 중단, CAUTION → 매수 제한
+            if self._today_regime == 'CRISIS':
+                available_slots = 0
+            elif self._today_regime == 'CAUTION':
+                caution_limit = max(0, self.params.caution_max_buy - len(self.positions))
+                available_slots = min(available_slots, caution_limit)
             if available_slots <= 0:
                 return
             buy_candidates = buy_candidates[:available_slots]
@@ -437,6 +452,100 @@ class Backtester:
         except (ValueError, KeyError):
             pass
         return None
+
+    def _preload_us_market_data(self, start_date: str, end_date: str):
+        """yfinance로 S&P500, VIX 일봉 데이터 수집"""
+        try:
+            import yfinance as yf
+
+            # 여유 기간 (전일 데이터 참조를 위해 30일 앞당김)
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d") - timedelta(days=30)
+            start_str = start_dt.strftime('%Y-%m-%d')
+
+            for ticker, key in [("^GSPC", "sp500"), ("^VIX", "vix")]:
+                data = yf.download(ticker, start=start_str, end=end_date, progress=False)
+                if data.empty:
+                    logger.warning(f"US 시장 데이터 없음: {ticker}")
+                    continue
+                if isinstance(data.columns, pd.MultiIndex):
+                    data.columns = data.columns.get_level_values(0)
+                # 날짜 인덱스를 YYYY-MM-DD 문자열로 변환
+                data.index = data.index.strftime('%Y-%m-%d')
+                self.us_market_cache[key] = data
+                logger.info(f"US 데이터 로드: {key} {len(data)}일")
+
+        except Exception as e:
+            logger.warning(f"US 시장 데이터 로드 실패 (레짐 필터 비활성화): {e}")
+
+    def _get_us_prev_day_change(self, date: str, key: str) -> Optional[float]:
+        """US 시장의 전일 등락률 (한국 기준 전일 = US 전전일 종가 → 전일 종가)"""
+        if key not in self.us_market_cache:
+            return None
+        df = self.us_market_cache[key]
+        dates = df.index.tolist()
+        # 한국 거래일 기준으로 가장 가까운 이전 US 거래일 찾기
+        us_dates_before = [d for d in dates if d < date]
+        if len(us_dates_before) < 2:
+            return None
+        try:
+            latest = us_dates_before[-1]
+            prev = us_dates_before[-2]
+            close_latest = float(df.loc[latest, 'Close'])
+            close_prev = float(df.loc[prev, 'Close'])
+            if close_prev > 0:
+                return (close_latest - close_prev) / close_prev
+        except (KeyError, IndexError):
+            pass
+        return None
+
+    def _get_us_prev_day_close(self, date: str, key: str) -> Optional[float]:
+        """US 시장의 전일 종가 (VIX 수준 등)"""
+        if key not in self.us_market_cache:
+            return None
+        df = self.us_market_cache[key]
+        dates = df.index.tolist()
+        us_dates_before = [d for d in dates if d < date]
+        if not us_dates_before:
+            return None
+        try:
+            latest = us_dates_before[-1]
+            return float(df.loc[latest, 'Close'])
+        except (KeyError, IndexError):
+            return None
+
+    def _determine_regime(self, date: str) -> str:
+        """당일 레짐 판단: NORMAL / CAUTION / CRISIS"""
+        if not self.params.regime_filter_enabled:
+            return 'NORMAL'
+
+        # 숫자로 비교 (NORMAL=0, CAUTION=1, CRISIS=2)
+        regime_level = 0
+
+        # 1. KOSPI 시가 갭 (NXT 프록시)
+        kospi_gap = self._get_kospi_change(date)
+        if kospi_gap is not None:
+            if kospi_gap <= self.params.gap_crisis_pct:
+                regime_level = 2
+            elif kospi_gap <= self.params.gap_caution_pct:
+                regime_level = max(regime_level, 1)
+
+        # 2. S&P500 전일 등락률
+        sp500_chg = self._get_us_prev_day_change(date, 'sp500')
+        if sp500_chg is not None:
+            if sp500_chg <= self.params.sp500_crisis_pct:
+                regime_level = 2
+            elif sp500_chg <= self.params.sp500_caution_pct:
+                regime_level = max(regime_level, 1)
+
+        # 3. VIX 수준
+        vix_level = self._get_us_prev_day_close(date, 'vix')
+        if vix_level is not None:
+            if vix_level >= self.params.vix_crisis:
+                regime_level = 2
+            elif vix_level >= self.params.vix_caution:
+                regime_level = max(regime_level, 1)
+
+        return ['NORMAL', 'CAUTION', 'CRISIS'][regime_level]
 
     def _close_all_positions(self, date):
         for stock_code in list(self.positions.keys()):

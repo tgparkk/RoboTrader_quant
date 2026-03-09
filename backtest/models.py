@@ -60,6 +60,16 @@ class BacktestParams:
     # 거래 비용 (한국 실제: 위탁수수료 ~0.015% + 거래세 0.23%)
     trading_cost_rate: float = 0.0025  # 0.25% (매수+매도 합계)
 
+    # 장전 레짐 필터 (NXT 프록시 + 미장)
+    regime_filter_enabled: bool = False      # 레짐 필터 사용 여부
+    gap_caution_pct: float = -0.02           # KOSPI 시가 갭 -2% 이하 → CAUTION
+    gap_crisis_pct: float = -0.05            # KOSPI 시가 갭 -5% 이하 → CRISIS
+    sp500_caution_pct: float = -0.03         # S&P500 전일 -3% 이하 → CAUTION
+    sp500_crisis_pct: float = -0.05          # S&P500 전일 -5% 이하 → CRISIS
+    vix_caution: float = 30.0               # VIX > 30 → CAUTION
+    vix_crisis: float = 40.0                # VIX > 40 → CRISIS
+    caution_max_buy: int = 5                 # CAUTION 시 최대 매수 종목 수
+
     def to_dict(self) -> Dict[str, Any]:
         """딕셔너리로 변환"""
         return {
@@ -76,6 +86,14 @@ class BacktestParams:
             'buy_min_score': self.buy_min_score,
             'use_dynamic_targets': self.use_dynamic_targets,
             'trading_cost_rate': self.trading_cost_rate,
+            'regime_filter_enabled': self.regime_filter_enabled,
+            'gap_caution_pct': self.gap_caution_pct,
+            'gap_crisis_pct': self.gap_crisis_pct,
+            'sp500_caution_pct': self.sp500_caution_pct,
+            'sp500_crisis_pct': self.sp500_crisis_pct,
+            'vix_caution': self.vix_caution,
+            'vix_crisis': self.vix_crisis,
+            'caution_max_buy': self.caution_max_buy,
         }
 
     @classmethod

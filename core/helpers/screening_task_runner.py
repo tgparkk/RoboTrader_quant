@@ -23,7 +23,8 @@ class ScreeningTaskRunner:
         db_manager,
         candidate_selector,
         intraday_manager,
-        telegram_integration
+        telegram_integration,
+        config=None
     ):
         """
         Args:
@@ -34,6 +35,7 @@ class ScreeningTaskRunner:
             candidate_selector: CandidateSelector 인스턴스
             intraday_manager: IntradayStockManager 인스턴스
             telegram_integration: 텔레그램 통합
+            config: 트레이딩 설정 (paper_trading 등)
         """
         self.quant_screening_service = quant_screening_service
         self.ml_screening_service = ml_screening_service
@@ -42,6 +44,7 @@ class ScreeningTaskRunner:
         self.candidate_selector = candidate_selector
         self.intraday_manager = intraday_manager
         self.telegram = telegram_integration
+        self.config = config
 
     async def run_quant_screening(self):
         """일일 퀀트 스크리닝 실행 (8단계 기준)"""
@@ -140,7 +143,8 @@ class ScreeningTaskRunner:
 
             # 🆕 보유 종목도 일봉 데이터 수집 대상에 추가
             try:
-                holdings = self.db_manager.get_virtual_open_positions()
+                is_real = self.config and not getattr(self.config, 'paper_trading', True)
+                holdings = self.db_manager.get_real_open_positions() if is_real else self.db_manager.get_virtual_open_positions()
                 if not holdings.empty:
                     holding_codes = holdings['stock_code'].unique().tolist()
                     # 중복 제거하며 추가
