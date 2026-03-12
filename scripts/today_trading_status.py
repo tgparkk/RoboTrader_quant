@@ -9,7 +9,6 @@ DB에 저장된 정확한 profit_loss, profit_rate를 사용하여
 import sys
 import os
 import json
-import sqlite3
 
 # Windows 콘솔 인코딩 설정
 if sys.platform == 'win32':
@@ -18,6 +17,7 @@ if sys.platform == 'win32':
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
+from config.db_config import get_pg_connection
 from utils.korean_time import now_kst
 
 
@@ -32,36 +32,33 @@ def _is_paper_trading() -> bool:
         return True  # 기본값: 가상매매
 
 
-def _get_table_and_date_expr(paper_trading: bool):
-    """모드에 따른 테이블명과 날짜 표현식 반환"""
+def _get_table(paper_trading: bool) -> str:
     if paper_trading:
-        return "virtual_trading_records", "datetime(timestamp, 'unixepoch', 'localtime')"
-    else:
-        return "real_trading_records", "timestamp"
+        return "virtual_trading_records"
+    return "real_trading_records"
 
 
 def get_today_status(target_date: str = None):
     """오늘(또는 지정일)의 매매 현황 조회"""
-    db_path = os.path.join(project_root, 'data', 'robotrader.db')
-
     if target_date is None:
         target_date = now_kst().strftime('%Y-%m-%d')
 
     paper_trading = _is_paper_trading()
-    table, dt_expr = _get_table_and_date_expr(paper_trading)
+    table = _get_table(paper_trading)
     mode_label = "가상매매" if paper_trading else "실전매매"
 
     print(f"\n{'=' * 70}")
     print(f"  {target_date} 매매 현황 [{mode_label}]")
     print(f"{'=' * 70}\n")
 
-    with sqlite3.connect(db_path) as conn:
+    conn = get_pg_connection()
+    try:
         cursor = conn.cursor()
 
         # 1. 오늘 매도 내역 (DB에 저장된 정확한 손익 사용)
         cursor.execute(f'''
             SELECT
-                {dt_expr} as trade_time,
+                s.created_at AT TIME ZONE 'Asia/Seoul' as trade_time,
                 s.stock_code,
                 s.stock_name,
                 s.quantity,
@@ -73,8 +70,8 @@ def get_today_status(target_date: str = None):
             FROM {table} s
             LEFT JOIN {table} b ON s.buy_record_id = b.id
             WHERE s.action = 'SELL'
-              AND DATE({dt_expr}) = ?
-            ORDER BY s.timestamp
+              AND DATE(s.created_at AT TIME ZONE 'Asia/Seoul') = %s
+            ORDER BY s.created_at
         ''', (target_date,))
 
         sells = cursor.fetchall()
@@ -86,7 +83,7 @@ def get_today_status(target_date: str = None):
             total_sell_amount = 0
 
             for row in sells:
-                time_str = row[0].split(' ')[1][:5] if row[0] and ' ' in row[0] else ''
+                time_str = row[0].strftime('%H:%M') if row[0] else ''
                 code = row[1]
                 name = row[2] or ''
                 qty = row[3]
@@ -125,7 +122,7 @@ def get_today_status(target_date: str = None):
         # 2. 오늘 매수 내역
         cursor.execute(f'''
             SELECT
-                {dt_expr} as trade_time,
+                created_at AT TIME ZONE 'Asia/Seoul' as trade_time,
                 stock_code,
                 stock_name,
                 quantity,
@@ -135,8 +132,8 @@ def get_today_status(target_date: str = None):
                 reason
             FROM {table}
             WHERE action = 'BUY'
-              AND DATE({dt_expr}) = ?
-            ORDER BY timestamp
+              AND DATE(created_at AT TIME ZONE 'Asia/Seoul') = %s
+            ORDER BY created_at
         ''', (target_date,))
 
         buys = cursor.fetchall()
@@ -147,7 +144,7 @@ def get_today_status(target_date: str = None):
             total_buy_amount = 0
 
             for row in buys:
-                time_str = row[0].split(' ')[1][:5] if row[0] and ' ' in row[0] else ''
+                time_str = row[0].strftime('%H:%M') if row[0] else ''
                 code = row[1]
                 name = row[2] or ''
                 qty = row[3]
@@ -185,6 +182,9 @@ def get_today_status(target_date: str = None):
 
         print(f"[보유 현황] {holding_count or 0}종목 | 투자원금: {holding_value:,.0f}원")
         print()
+
+    finally:
+        conn.close()
 
 
 def main():
