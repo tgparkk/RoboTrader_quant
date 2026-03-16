@@ -217,7 +217,7 @@ def print_heatmap(results: list, tp_values: list, sl_values: list,
                 cell = f"{val:>7.2f}"
 
             # 현행 마커
-            if tp == 0.17 and sl == 0.09:
+            if tp == 0.15 and sl == 0.08:
                 cell = cell[:-1] + "★"
             # 최고값 마커
             elif (tp, sl) == max_key:
@@ -226,7 +226,7 @@ def print_heatmap(results: list, tp_values: list, sl_values: list,
             row += cell
         print(row)
 
-    print(f"\n  ★ = 현행 (TP 17%/SL 9%)")
+    print(f"\n  ★ = 현행 (TP 15%/SL 8%)")
     print(f"  ● = 최고 ({label}: {max_val:.2f} at TP {max_key[0]:.0%}/SL {max_key[1]:.0%})")
 
 

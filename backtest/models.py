@@ -57,8 +57,13 @@ class BacktestParams:
     # 동적 목표율 사용 여부
     use_dynamic_targets: bool = True
 
-    # 거래 비용 (한국 실제: 위탁수수료 ~0.015% + 거래세 0.23%)
-    trading_cost_rate: float = 0.0025  # 0.25% (매수+매도 합계)
+    # 거래 비용 (한국 실제: 매수 0.015%, 매도 0.245%)
+    trading_cost_rate: float = 0.0025  # 0.25% (하위호환용, 실제로는 buy/sell_cost_rate 사용)
+    buy_cost_rate: float = 0.00015    # 매수 위탁수수료 0.015%
+    sell_cost_rate: float = 0.00245   # 매도 위탁수수료 0.015% + 거래세 0.18% + 농특세 0.05%
+
+    # 슬리피지 (시장가 주문 체결 미끄러짐)
+    slippage_rate: float = 0.001      # 0.1%
 
     # 장전 레짐 필터 (NXT 프록시 + 미장)
     regime_filter_enabled: bool = False      # 레짐 필터 사용 여부
@@ -92,6 +97,9 @@ class BacktestParams:
             'buy_min_score': self.buy_min_score,
             'use_dynamic_targets': self.use_dynamic_targets,
             'trading_cost_rate': self.trading_cost_rate,
+            'buy_cost_rate': self.buy_cost_rate,
+            'sell_cost_rate': self.sell_cost_rate,
+            'slippage_rate': self.slippage_rate,
             'regime_filter_enabled': self.regime_filter_enabled,
             'gap_caution_pct': self.gap_caution_pct,
             'gap_crisis_pct': self.gap_crisis_pct,

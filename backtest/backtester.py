@@ -326,22 +326,25 @@ class Backtester:
 
     def _execute_buy(self, stock_code, stock_name, date, buy_price, quantity,
                      target_profit_rate, stop_loss_rate, total_score, factor_rank):
-        amount = buy_price * quantity
-        trading_cost = amount * self.params.trading_cost_rate / 2
+        # P1: 매수 슬리피지 (시장가 매수 시 약간 불리하게 체결)
+        actual_buy_price = buy_price * (1 + self.params.slippage_rate)
+        amount = actual_buy_price * quantity
+        # P4: 매수 비용 비대칭 (0.015%)
+        trading_cost = amount * self.params.buy_cost_rate
         self.capital -= (amount + trading_cost)
         position = Position(
             stock_code=stock_code, stock_name=stock_name,
-            quantity=quantity, buy_price=buy_price, buy_date=date,
+            quantity=quantity, buy_price=actual_buy_price, buy_date=date,
             target_profit_rate=target_profit_rate, stop_loss_rate=stop_loss_rate,
             total_score=total_score, factor_rank=factor_rank)
         self.positions[stock_code] = position
         trade = TradeRecord(
             date=date, stock_code=stock_code, stock_name=stock_name,
-            action=TradeAction.BUY, quantity=quantity, price=buy_price,
+            action=TradeAction.BUY, quantity=quantity, price=actual_buy_price,
             amount=amount, reason=f"리밸런싱 매수 ({factor_rank}위, {total_score:.1f}점)",
             trading_cost=trading_cost)
         self.trades.append(trade)
-        logger.debug(f"[{date}] 매수: {stock_code} {quantity}주 @ {buy_price:,.0f}원")
+        logger.debug(f"[{date}] 매수: {stock_code} {quantity}주 @ {actual_buy_price:,.0f}원 (슬리피지 적용)")
 
     def _execute_sell(self, stock_code, date, reason, sell_price=None):
         if stock_code not in self.positions:
@@ -353,7 +356,8 @@ class Backtester:
                 return
             sell_price = price_data['close']
         amount = sell_price * position.quantity
-        trading_cost = amount * self.params.trading_cost_rate / 2
+        # P4: 매도 비용 비대칭 (0.245%)
+        trading_cost = amount * self.params.sell_cost_rate
         profit_loss = (sell_price - position.buy_price) * position.quantity - trading_cost
         profit_rate = (sell_price - position.buy_price) / position.buy_price if position.buy_price > 0 else 0
         self.capital += (amount - trading_cost)
@@ -367,38 +371,45 @@ class Backtester:
         logger.debug(f"[{date}] 매도: {stock_code} {position.quantity}주 @ {sell_price:,.0f}원 ({profit_rate:.1%})")
 
     def _check_stop_profit_loss(self, date: str):
+        slippage = self.params.slippage_rate
+
         for stock_code, position in list(self.positions.items()):
+            # P3: 매수 당일 TP/SL 전면 차단 (실전에서 당일 ±15%/8% 도달 거의 불가)
+            if stock_code in self._today_rebalancing_bought:
+                continue
+
             price_data = self._get_daily_price(stock_code, date)
             if not price_data:
                 continue
+
             high = price_data['high']
             low = price_data['low']
-            open_price = price_data['open']
+            close = price_data['close']
             buy_price = position.buy_price
+
             profit_target_price = buy_price * (1 + position.target_profit_rate)
             stop_loss_price = buy_price * (1 - position.stop_loss_rate)
+
             hit_profit = high >= profit_target_price
             hit_loss = low <= stop_loss_price
 
-            is_rebalancing_day_buy = stock_code in self._today_rebalancing_bought
-            if is_rebalancing_day_buy:
-                hit_loss = False
+            # P1: 보수적 체결가 (목표가와 종가의 중간 + 슬리피지)
+            # 실전에서는 1분마다 현재가 체크 → 정확한 목표가가 아닌 근처에서 체결
+            realistic_tp_price = (profit_target_price + close) / 2 * (1 - slippage)
+            realistic_sl_price = (stop_loss_price + close) / 2 * (1 - slippage)
 
+            # P2: 동시 히트 → 항상 손절 우선 (보수적 가정)
             if hit_profit and hit_loss:
-                if open_price >= buy_price:
-                    profit_rate = position.calculate_profit_rate(profit_target_price)
-                    self._execute_sell(stock_code, date, f"목표 익절 도달 ({profit_rate:.1%})", sell_price=profit_target_price)
-                else:
-                    profit_rate = position.calculate_profit_rate(stop_loss_price)
-                    self._execute_sell(stock_code, date, f"손절 실행 ({profit_rate:.1%})", sell_price=stop_loss_price)
-                    self._today_stop_profit_sold.add(stock_code)
+                profit_rate = position.calculate_profit_rate(realistic_sl_price)
+                self._execute_sell(stock_code, date, f"손절 실행 ({profit_rate:.1%})", sell_price=realistic_sl_price)
+                self._today_stop_profit_sold.add(stock_code)
             elif hit_profit:
-                profit_rate = position.calculate_profit_rate(profit_target_price)
-                self._execute_sell(stock_code, date, f"목표 익절 도달 ({profit_rate:.1%})", sell_price=profit_target_price)
+                profit_rate = position.calculate_profit_rate(realistic_tp_price)
+                self._execute_sell(stock_code, date, f"목표 익절 도달 ({profit_rate:.1%})", sell_price=realistic_tp_price)
                 self._today_stop_profit_sold.add(stock_code)
             elif hit_loss:
-                profit_rate = position.calculate_profit_rate(stop_loss_price)
-                self._execute_sell(stock_code, date, f"손절 실행 ({profit_rate:.1%})", sell_price=stop_loss_price)
+                profit_rate = position.calculate_profit_rate(realistic_sl_price)
+                self._execute_sell(stock_code, date, f"손절 실행 ({profit_rate:.1%})", sell_price=realistic_sl_price)
                 self._today_stop_profit_sold.add(stock_code)
 
     def _validate_buy_price(self, stock_code, buy_price, date, kospi_change):
@@ -584,7 +595,9 @@ class Backtester:
         for stock_code in list(self.positions.keys()):
             price_data = self._get_daily_price(stock_code, date)
             if price_data and price_data['open'] > 0:
-                self._execute_sell(stock_code, date, reason, sell_price=price_data['open'])
+                # P1: CRISIS 매도에도 슬리피지 적용
+                crisis_sell_price = price_data['open'] * (1 - self.params.slippage_rate)
+                self._execute_sell(stock_code, date, reason, sell_price=crisis_sell_price)
         self._crisis_sell_count = getattr(self, '_crisis_sell_count', 0) + 1
         logger.info(f"[{date}] {reason} — {sell_count}종목 매도")
         return True
