@@ -28,7 +28,8 @@
       "Bash(tasklist:*)",
       "Bash(powershell -Command:*)",
       "Bash(cd:*)",
-      "Bash(iconv:*)"
+      "Bash(iconv:*)",
+      "Bash(python -c \":*)"
     ],
     "deny": [],
     "ask": []
