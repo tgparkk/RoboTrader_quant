@@ -32,7 +32,7 @@ class AnalysisDataCollector:
     def __init__(self, db_path: str = None):
         """
         Args:
-            db_path: 데이터베이스 경로 (기본값: C:\GIT\RoboTrader\data\robotrader.db)
+            db_path: 하위호환용 (무시됨, PostgreSQL 사용)
         """
         self.logger = setup_logger(__name__)
 

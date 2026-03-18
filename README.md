@@ -130,7 +130,7 @@ KOSPI + KOSDAQ 약 2,500개 종목
 - **API Rate Limit 보호**: 전역 Rate Limiting (초당 16회)
 - **서킷 브레이커**: 연속 10회 API 실패 시 60초 자동 중단
 - **09:00-09:05 손절 중단**: 리밸런싱 직전 갭하락 손절 방지
-- **DB WAL 모드**: 동시 읽기/쓰기 안전성
+- **PostgreSQL**: ThreadedConnectionPool 기반 안정적 DB 연결
 - **Graceful Shutdown**: 미체결 주문 대기 후 종료
 
 ---
@@ -412,7 +412,7 @@ RoboTrader_quant/
 │  └─ kis_financial_api.py           # 재무 데이터
 │
 ├─ db/                               # 데이터베이스
-│  ├─ database_manager.py            # DB 인터페이스 (WAL 모드)
+│  ├─ database_manager.py            # DB 인터페이스 (PostgreSQL)
 │  └─ quant_db_manager.py            # 퀀트 전용 DB
 │
 ├─ config/                           # 설정
@@ -427,8 +427,7 @@ RoboTrader_quant/
 ├─ scripts/                          # 스크립트
 │  ├─ update_stock_list.py           # KOSPI+KOSDAQ 종목 리스트 갱신
 │  ├─ daily_trading_summary.py       # 일일 리포트
-│  ├─ today_trading_status.py        # 매매 현황 조회
-│  └─ check_data_quality.py          # 데이터 검증
+│  └─ today_trading_status.py        # 매매 현황 조회
 │
 ├─ backtest/                         # 백테스트
 │  ├─ data_collector.py              # FDR+yfinance 데이터 수집
@@ -437,7 +436,7 @@ RoboTrader_quant/
 │  └─ models.py                      # 백테스트 설정
 │
 ├─ stock_list.json                   # 종목 리스트 (KOSPI+KOSDAQ ~2,500개)
-└─ data/robotrader.db                # 메인 DB (SQLite, WAL 모드)
+└─ config/db_config.py               # DB 설정 (PostgreSQL, port 5433)
 ```
 
 ---
@@ -494,7 +493,6 @@ python scripts/update_stock_list.py            # 실제 갱신
 ```bash
 python after_market_report.py             # 일일 매매 리포트
 python scripts/today_trading_status.py    # 매매 현황 조회
-python scripts/check_data_quality.py      # 데이터 품질 점검
 python scripts/update_stock_list.py       # 종목 리스트 갱신
 python scripts/run_backtest.py all        # 5년 백테스트 실행
 ```

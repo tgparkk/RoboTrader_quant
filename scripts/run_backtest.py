@@ -37,8 +37,8 @@ from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-# 기본 경로
-DEFAULT_DB_PATH = str(project_root / 'data' / 'backtest.db')
+# 기본 설정
+DEFAULT_DB_PATH = 'postgresql'  # PostgreSQL (robotrader_backtest)
 DEFAULT_START = '2020-05-01'
 DEFAULT_END = '2025-05-31'
 
@@ -302,16 +302,16 @@ def cmd_regime(args):
 
 def print_kospi_benchmark(db_path: str, start_date: str, end_date: str, result):
     """KOSPI Buy&Hold 벤치마크 비교"""
-    import sqlite3
+    from config.db_config import get_backtest_pg_connection
 
     try:
-        conn = sqlite3.connect(db_path)
+        conn = get_backtest_pg_connection()
         cursor = conn.cursor()
 
         # KOSPI 시작/종료 가격 조회
         cursor.execute('''
             SELECT date, close FROM daily_prices
-            WHERE stock_code = 'KS11' AND date >= ? AND date <= ?
+            WHERE stock_code = 'KS11' AND date >= %s AND date <= %s
             ORDER BY date ASC
         ''', (start_date, end_date))
         rows = cursor.fetchall()

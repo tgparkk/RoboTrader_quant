@@ -30,8 +30,6 @@ def get_target_date():
 
 def analyze_trading(target_date):
     """매매 내역 분석"""
-    db_path = project_root / "data" / "robotrader.db"
-    
     print("=" * 100)
     print(f"📊 {target_date} 매매 분석")
     print("=" * 100)
