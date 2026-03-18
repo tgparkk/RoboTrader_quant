@@ -217,8 +217,8 @@ class Backtester:
 
     def _calculate_dynamic_targets(self, rank: int, total_score: float,
                                     momentum_score: float) -> Tuple[float, float]:
-        # 단일 익절/손절선 (멀티버스 검증: TP15/SL8 샤프 8.62)
-        return 0.15, 0.08
+        # 단일 익절/손절선 (워크포워드 검증: TP16/SL8 종합 2위, 안정성 0.89)
+        return self.params.target_profit_rate, self.params.stop_loss_rate
 
     def _execute_rebalancing(self, date: str):
         portfolio = self._get_portfolio(date)

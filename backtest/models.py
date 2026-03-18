@@ -38,8 +38,8 @@ class BacktestParams:
     initial_capital: float = 50_000_000  # 초기 자본 (5천만원)
     portfolio_size: int = 10  # 포트폴리오 종목 수 (라이브 설정과 일치)
 
-    # 손익절 파라미터 (멀티버스 검증: 단일 15%/8%가 최적)
-    target_profit_rate: float = 0.15  # 익절률 (15%)
+    # 손익절 파라미터 (워크포워드 검증: TP16/SL8이 종합 2위, 안정성 0.89)
+    target_profit_rate: float = 0.16  # 익절률 (16%)
     stop_loss_rate: float = 0.08  # 손절률 (8%)
 
     # 리밸런싱 기준 (라이브 설정과 일치)

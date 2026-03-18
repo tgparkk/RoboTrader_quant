@@ -11,14 +11,31 @@
 
 **위치**: `core/quant/target_profit_loss_calculator.py`
 
-모든 종목에 단일 익절/손절률을 적용합니다 (멀티버스 백테스트 검증):
+모든 종목에 단일 익절/손절률을 적용합니다 (워크포워드 7구간×99조합 검증):
 
 ```python
-target_profit_rate = 0.15  # 15%
+target_profit_rate = 0.16  # 16%
 stop_loss_rate = 0.08      # 8%
 ```
 
 **저장 위치**: `real_trading_records` (실전) / `virtual_trading_records` (가상) 테이블
+
+### 1-1. 장전 시장 분석 (08:40 실행)
+
+**위치**: `core/pre_market_analyzer.py`
+
+3개 데이터 소스로 시장 레짐을 판단합니다:
+- **KRX 예상체결지수**: KOSPI 등락률 예상
+- **미장 데이터**: S&P500, VIX (yfinance)
+- **NewsQuant**: 글로벌 뉴스 감성 (`GET /api/market/global-sentiment?hours=24`)
+
+| 레짐 | KOSPI 조건 | S&P500 | VIX | 뉴스 | 액션 |
+|------|-----------|--------|-----|------|------|
+| **CRISIS** | ≤ -3.0% | ≤ -5% | ≥ 40 | down+strong+신뢰≥60% | 전량 매도 + 매수 중단 |
+| **CAUTION** | ≤ -1.5% | ≤ -3% | ≥ 30 | down+신뢰≥40% | 매수 5종목 제한 |
+| **NORMAL** | 그 외 | — | — | — | 정상 운영 |
+
+폴백: NewsQuant 연결 실패 시 NXT+미장만으로 판단
 
 ### 2. 장중 모니터링 (1분마다 주기적 체크)
 
@@ -51,6 +68,7 @@ DB에서 미체결 포지션을 로드하여 메모리에 복원합니다:
 - `core/trading_decision_engine.py`: 매매 판단 엔진
 - `core/quant/target_profit_loss_calculator.py`: 익절/손절률 계산기
 - `core/quant/quant_rebalancing_service.py`: 리밸런싱 서비스
+- `core/pre_market_analyzer.py`: 장전 시장 분석 (CRISIS/CAUTION/NORMAL)
 - `core/trading_stock_manager.py`: 종목 상태 관리
 - `db/database_manager.py`: DB 인터페이스 (PostgreSQL)
 - `config/constants.py`: 시스템 상수 정의
@@ -77,6 +95,13 @@ QUANT_CANDIDATE_LIMIT = 50             # 장중 퀀트 후보 종목 최대 수
 REBALANCING_ORDER_INTERVAL = 0.1       # 리밸런싱 주문 간 대기 시간 (초)
 SELL_ORDER_WAIT_TIMEOUT = 300          # 매도 주문 체결 대기 시간 (초, 5분)
 ORDER_CHECK_INTERVAL = 5               # 주문 체결 확인 주기 (초)
+
+# Smart Hard Cap: 포트폴리오 평균 점수에 따라 보유 상한 동적 조절
+SMART_HARD_CAP_TIERS = [
+    (75.0, 5),  # 평균 >= 75점 → target + 5 = 15
+    (72.0, 3),  # 평균 >= 72점 → target + 3 = 13
+    (0.0,  2),  # 그 외        → target + 2 = 12
+]
 ```
 
 ### 리밸런싱 기준 (quant_rebalancing_service.py)

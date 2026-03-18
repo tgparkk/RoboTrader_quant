@@ -345,7 +345,7 @@ def run_walkforward(start_date, end_date, tp_values, sl_values,
     print(f"{'-' * 90}")
     print(f"총 {total_combos}개 조합, {len(windows)}구간 워크포워드 (소요: {total_elapsed:.0f}초)")
     if current_rank:
-        print(f"현행 TP15%/SL8% → 종합 {current_rank}위/{total_combos}")
+        print(f"현행 TP16%/SL8% → 종합 {current_rank}위/{total_combos}")
     print(f"{'=' * 90}")
 
     # 8. 구간별 상세 (TOP 5만)

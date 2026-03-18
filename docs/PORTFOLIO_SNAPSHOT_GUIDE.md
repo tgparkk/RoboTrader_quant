@@ -26,20 +26,20 @@
 
 | 컬럼명 | 타입 | 설명 |
 |--------|------|------|
-| id | INTEGER | Primary Key |
-| snapshot_time | DATETIME | 스냅샷 시각 |
+| id | SERIAL | Primary Key |
+| snapshot_time | TIMESTAMP | 스냅샷 시각 |
 | stock_code | VARCHAR(10) | 종목코드 |
 | stock_name | VARCHAR(100) | 종목명 |
 | quantity | INTEGER | 보유 수량 |
-| buy_price | REAL | 평균 매수가 |
-| current_price | REAL | 현재가 |
-| buy_value | REAL | 매수금액 |
-| current_value | REAL | 평가금액 |
-| unrealized_pl | REAL | 평가손익 (원) |
-| unrealized_pl_rate | REAL | 수익률 (소수) |
-| target_profit_rate | REAL | 목표 익절률 |
-| stop_loss_rate | REAL | 손절률 |
-| created_at | DATETIME | 생성 시각 |
+| buy_price | DOUBLE PRECISION | 평균 매수가 |
+| current_price | DOUBLE PRECISION | 현재가 |
+| buy_value | DOUBLE PRECISION | 매수금액 |
+| current_value | DOUBLE PRECISION | 평가금액 |
+| unrealized_pl | DOUBLE PRECISION | 평가손익 (원) |
+| unrealized_pl_rate | DOUBLE PRECISION | 수익률 (소수) |
+| target_profit_rate | DOUBLE PRECISION | 목표 익절률 |
+| stop_loss_rate | DOUBLE PRECISION | 손절률 |
+| created_at | TIMESTAMP | 생성 시각 |
 
 **인덱스:**
 - `idx_snapshot_time`: snapshot_time
@@ -64,38 +64,17 @@ python scripts/save_portfolio_snapshot.py
 📊 평가손익: +859,730원 (+3.15%)
 ```
 
-### 2. 최근 스냅샷 조회
+### 2. 스냅샷 조회
 
-```bash
-python scripts/view_portfolio_snapshot.py
-```
+DB에서 직접 조회합니다 (PostgreSQL):
 
-**출력 예시:**
-```
-================================================================================
-📸 포트폴리오 스냅샷
-================================================================================
-스냅샷 시각: 2025-12-30 10:30:00
-조회 시각: 2025-12-30 16:45:23
-================================================================================
-
-📦 보유 종목 (43개)
---------------------------------------------------------------------------------
-종목코드    종목명                  수량     매수가        현재가        매수금액        평가금액        평가손익        수익률
---------------------------------------------------------------------------------
-005380     현대차                     4    290,500      298,000     1,162,000     1,192,000      🟢+30,000      +2.6%
-029460     케이씨                    55     25,500       26,300     1,402,500     1,446,500      🟢+44,000      +3.1%
-...
---------------------------------------------------------------------------------
-합계                                                              27,290,590    28,150,320      🟢+859,730      +3.2%
-
-📊 수익 종목: 28개 | 손실 종목: 13개 | 보합: 2개
-```
-
-### 3. 특정 시각의 스냅샷 조회
-
-```bash
-python scripts/view_portfolio_snapshot.py "2025-12-30 09:30:00"
+```sql
+-- 최근 스냅샷 조회
+SELECT snapshot_time, stock_code, stock_name, quantity,
+       buy_price, current_price, unrealized_pl, unrealized_pl_rate
+FROM portfolio_snapshots
+WHERE snapshot_time = (SELECT MAX(snapshot_time) FROM portfolio_snapshots)
+ORDER BY unrealized_pl_rate DESC;
 ```
 
 ---
@@ -174,7 +153,7 @@ ORDER BY snapshot_time;
 
 ### 스냅샷 주기 변경
 
-**main.py 551번 라인:**
+**main.py 자동 저장 로직:**
 ```python
 # 30분 → 10분으로 변경
 if (current_time - last_portfolio_snapshot).total_seconds() >= 10 * 60:  # 10분
@@ -227,7 +206,7 @@ python scripts/save_portfolio_snapshot.py
 ```sql
 -- 30일 이전 데이터 삭제
 DELETE FROM portfolio_snapshots
-WHERE snapshot_time < datetime('now', '-30 days');
+WHERE snapshot_time < NOW() - INTERVAL '30 days';
 ```
 
 ---
@@ -235,9 +214,8 @@ WHERE snapshot_time < datetime('now', '-30 days');
 ## 🔗 관련 파일
 
 - `scripts/save_portfolio_snapshot.py`: 스냅샷 저장
-- `scripts/view_portfolio_snapshot.py`: 스냅샷 조회
-- `main.py` (line 551-559): 자동 저장 로직
-- `data/robotrader.db`: SQLite 데이터베이스
+- `main.py`: 자동 저장 로직 (30분 간격)
+- DB: PostgreSQL `robotrader_quant` (port 5433)
 
 ---
 
@@ -250,7 +228,7 @@ SELECT
     SUM(unrealized_pl) as total_pl,
     SUM(unrealized_pl_rate * buy_value) / SUM(buy_value) * 100 as weighted_pl_rate
 FROM portfolio_snapshots
-WHERE DATE(snapshot_time) = DATE('now')
+WHERE DATE(snapshot_time) = CURRENT_DATE
 GROUP BY snapshot_time
 ORDER BY total_pl DESC
 LIMIT 1;
@@ -264,7 +242,7 @@ SELECT
     MIN(unrealized_pl_rate) * 100 as min_pl_rate,
     MAX(unrealized_pl_rate) * 100 as max_pl_rate
 FROM portfolio_snapshots
-WHERE DATE(snapshot_time) = DATE('now')
+WHERE DATE(snapshot_time) = CURRENT_DATE
 GROUP BY stock_code, stock_name
 ORDER BY avg_pl_rate DESC;
 ```
