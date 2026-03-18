@@ -20,6 +20,7 @@ class SellReason(Enum):
     REBALANCING = "리밸런싱"
     HARD_STOP = "긴급매도"
     SOFT_STOP = "조건부매도"
+    MAX_HOLD = "최대보유초과"
     END_OF_BACKTEST = "백테스트종료"
 
 
@@ -50,6 +51,9 @@ class BacktestParams:
 
     # 최소 보유일수 (리밸런싱 매도 보호, 손절은 항상 허용)
     min_hold_days: int = 0
+
+    # 최대 보유일수 (0 = 무제한, N > 0이면 N일 초과 시 종가 강제 매도)
+    max_hold_days: int = 0
 
     # 매수 최소 점수 (0이면 필터 미적용 = 상대순위만 사용)
     buy_min_score: float = 0.0
@@ -94,6 +98,7 @@ class BacktestParams:
             'safe_score': self.safe_score,
             'safe_rank': self.safe_rank,
             'min_hold_days': self.min_hold_days,
+            'max_hold_days': self.max_hold_days,
             'buy_min_score': self.buy_min_score,
             'use_dynamic_targets': self.use_dynamic_targets,
             'trading_cost_rate': self.trading_cost_rate,

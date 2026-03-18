@@ -411,6 +411,15 @@ class Backtester:
                 profit_rate = position.calculate_profit_rate(realistic_sl_price)
                 self._execute_sell(stock_code, date, f"손절 실행 ({profit_rate:.1%})", sell_price=realistic_sl_price)
                 self._today_stop_profit_sold.add(stock_code)
+            elif self.params.max_hold_days > 0:
+                # 최대 보유일 초과 → 종가 강제 매도
+                days_held = self._calc_holding_days(position.buy_date, date)
+                if days_held >= self.params.max_hold_days:
+                    profit_rate = position.calculate_profit_rate(close)
+                    self._execute_sell(stock_code, date,
+                                       f"최대보유초과 ({days_held}일, {profit_rate:.1%})",
+                                       sell_price=close)
+                    self._today_stop_profit_sold.add(stock_code)
 
     def _validate_buy_price(self, stock_code, buy_price, date, kospi_change):
         prev_data = self._get_previous_day_price(stock_code, date)
