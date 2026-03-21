@@ -378,7 +378,8 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
             if res.status_code == 200:
                 ar = APIResp(res)
                 if ar.isOK():
-                    _api_stats['success_calls'] += 1
+                    with _stats_lock:
+                        _api_stats['success_calls'] += 1
                     _circuit_breaker_consecutive_fails = 0  # 성공 시 리셋
                     if _DEBUG:
                         logger.debug(f"API 응답 성공: {tr_id}")
@@ -387,8 +388,9 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
                     # API 응답은 200이지만 비즈니스 오류
                     if ar.getErrorCode() == 'EGW00201':  # 속도 제한 오류
                         # 속도 제한 오류 통계 수집
-                        _api_stats['rate_limit_errors'] += 1
-                        _api_stats['last_rate_limit_time'] = now_kst()
+                        with _stats_lock:
+                            _api_stats['rate_limit_errors'] += 1
+                            _api_stats['last_rate_limit_time'] = now_kst()
                         
                         if attempt < _max_retries:
                             # 동적 재시도 지연: 연속 오류 시 지연 시간 증가
@@ -397,13 +399,15 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
                                 base_delay = _retry_delay_base * 1.5
                             
                             wait_time = base_delay * (2 ** attempt)  # 지수 백오프
-                            _api_stats['total_wait_time'] += wait_time
-                            logger.warning(f"속도 제한 오류 발생 (누적 {_api_stats['rate_limit_errors']}회). {wait_time:.1f}초 후 재시도 ({attempt + 1}/{_max_retries + 1})")
+                            with _stats_lock:
+                                _api_stats['total_wait_time'] += wait_time
+                            logger.warning(f"속도 제한 오류 발생. {wait_time:.1f}초 후 재시도 ({attempt + 1}/{_max_retries + 1})")
                             time.sleep(wait_time)
                             continue
                         else:
                             logger.error(f"API 오류: {res.status_code} - {ar.getErrorMessage()}")
-                            _api_stats['other_errors'] += 1
+                            with _stats_lock:
+                                _api_stats['other_errors'] += 1
                             return ar
                     # 🆕 토큰 만료 오류 처리
                     elif ar.getErrorCode() == 'EGW00123':  # 토큰 만료 오류
@@ -471,24 +475,29 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
                                 return None
                         elif _is_rate_limit_error(res.text):
                             # 속도 제한 오류 통계 수집
-                            _api_stats['rate_limit_errors'] += 1
-                            _api_stats['last_rate_limit_time'] = now_kst()
-                            
+                            with _stats_lock:
+                                _api_stats['rate_limit_errors'] += 1
+                                _api_stats['last_rate_limit_time'] = now_kst()
+
                             if attempt < _max_retries:
                                 # 동적 재시도 지연: 연속 오류 시 지연 시간 증가
                                 base_delay = _retry_delay_base
-                                if _api_stats['rate_limit_errors'] > 10:
+                                with _stats_lock:
+                                    rate_limit_count = _api_stats['rate_limit_errors']
+                                if rate_limit_count > 10:
                                     # 속도 제한 오류가 10회 이상 발생하면 더 긴 대기
                                     base_delay = _retry_delay_base * 1.5
-                                
+
                                 wait_time = base_delay * (2 ** attempt)  # 지수 백오프
-                                _api_stats['total_wait_time'] += wait_time
-                                logger.warning(f"HTTP 500 속도 제한 오류 (누적 {_api_stats['rate_limit_errors']}회). {wait_time:.1f}초 후 재시도 ({attempt + 1}/{_max_retries + 1})")
+                                with _stats_lock:
+                                    _api_stats['total_wait_time'] += wait_time
+                                logger.warning(f"HTTP 500 속도 제한 오류. {wait_time:.1f}초 후 재시도 ({attempt + 1}/{_max_retries + 1})")
                                 time.sleep(wait_time)
                                 continue
                             else:
                                 logger.error(f"API 오류: {res.status_code} - {res.text}")
-                                _api_stats['other_errors'] += 1
+                                with _stats_lock:
+                                    _api_stats['other_errors'] += 1
                                 return None
                         else:
                             logger.error(f"API 오류: {res.status_code} - {res.text}")
@@ -501,7 +510,8 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
                     return None
 
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-            _api_stats['other_errors'] += 1
+            with _stats_lock:
+                _api_stats['other_errors'] += 1
             # 주문 API(POST)는 네트워크 오류 시 재시도 금지 (중복 주문 위험)
             # 서버에서 이미 처리되었지만 응답만 못 받은 경우 재시도 시 중복 체결
             if postFlag:
@@ -519,7 +529,8 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
                 logger.error(f"네트워크 오류 (재시도 소진): {type(e).__name__} - {e}")
                 return None
         except Exception as e:
-            _api_stats['other_errors'] += 1
+            with _stats_lock:
+                _api_stats['other_errors'] += 1
             if attempt < _max_retries:
                 wait_time = _retry_delay_base * (2 ** attempt)
                 logger.warning(f"API 호출 예외 발생. {wait_time:.1f}초 후 재시도 ({attempt + 1}/{_max_retries + 1}): {e}")

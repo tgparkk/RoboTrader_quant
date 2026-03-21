@@ -716,6 +716,6 @@ class TradingDecisionEngine:
             
         except Exception as e:
             self.logger.error(f"❌ 보유 종목 확인 오류 ({stock_code}): {e}")
-            # 오류 발생시 안전하게 False 반환 (매수 허용)
-            return False
+            # 오류 발생시 안전하게 True 반환 (매수 차단 — fail-safe)
+            return True
     

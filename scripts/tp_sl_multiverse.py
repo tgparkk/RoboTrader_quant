@@ -78,7 +78,9 @@ def run_multiverse(start_date: str, end_date: str,
             safe_rank=base_params.safe_rank,
             min_hold_days=base_params.min_hold_days,
             use_dynamic_targets=base_params.use_dynamic_targets,
-            trading_cost_rate=base_params.trading_cost_rate,
+            buy_cost_rate=base_params.buy_cost_rate,
+            sell_cost_rate=base_params.sell_cost_rate,
+            slippage_rate=base_params.slippage_rate,
         )
 
         # 백테스터 생성 + 캐시 주입 (데이터 재로드 없이)

@@ -77,7 +77,9 @@ def run_multiverse(start_date: str, end_date: str,
             min_hold_days=base_params.min_hold_days,
             buy_min_score=score,
             use_dynamic_targets=base_params.use_dynamic_targets,
-            trading_cost_rate=base_params.trading_cost_rate,
+            buy_cost_rate=base_params.buy_cost_rate,
+            sell_cost_rate=base_params.sell_cost_rate,
+            slippage_rate=base_params.slippage_rate,
         )
 
         bt = Backtester(params=params)

@@ -1339,7 +1339,11 @@ class DayTradingBot:
             # 6. API 매니저 종료
             self.api_manager.shutdown()
 
-            # 7. PID 파일 삭제
+            # 7. DB 연결 풀 종료
+            if hasattr(self, 'db_manager'):
+                self.db_manager.close()
+
+            # 8. PID 파일 삭제
             if self.pid_file.exists():
                 self.pid_file.unlink()
                 self.logger.info("PID 파일 삭제 완료")

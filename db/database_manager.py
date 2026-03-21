@@ -76,6 +76,15 @@ class DatabaseManager:
         # 테이블 생성 (멱등)
         self._create_tables()
 
+    def close(self):
+        """연결 풀 종료 (시스템 shutdown 시 호출)"""
+        try:
+            if hasattr(self, '_pool') and self._pool:
+                self._pool.closeall()
+                self.logger.info("DB 연결 풀 종료 완료")
+        except Exception as e:
+            self.logger.error(f"DB 연결 풀 종료 오류: {e}")
+
     def _get_connection(self):
         """연결 풀에서 PostgreSQL 연결 획득"""
         return self._pool.getconn()

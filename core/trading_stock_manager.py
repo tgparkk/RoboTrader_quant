@@ -565,13 +565,15 @@ class TradingStockManager:
                                     buy_id = db.get_last_open_real_buy(trading_stock.stock_code)
 
                                     if buy_id and cached_buy_price:
-                                        profit_rate = ((float(order.price) - cached_buy_price) / cached_buy_price) * 100
+                                        sell_price = float(getattr(order, 'filled_price', 0) or order.price)
+                                        profit_rate = ((sell_price - cached_buy_price) / cached_buy_price) * 100
 
                                     sell_reason = order.reason or "체결"
+                                    actual_sell_price = float(getattr(order, 'filled_price', 0) or order.price)
                                     db.save_real_sell(
                                         stock_code=trading_stock.stock_code,
                                         stock_name=trading_stock.stock_name,
-                                        price=float(order.price),
+                                        price=actual_sell_price,
                                         quantity=int(order.quantity),
                                         strategy=trading_stock.selection_reason,
                                         reason=sell_reason,
@@ -581,9 +583,10 @@ class TradingStockManager:
                                 except Exception as db_err:
                                     self.logger.warning(f"⚠️ 실거래 매도 기록 저장 실패: {db_err}")
 
-                        # fund_manager 투자금 회수
+                        # fund_manager 투자금 회수 (시장가 주문은 price=0이므로 filled_price 우선)
                         if self.decision_engine and self.decision_engine.fund_manager:
-                            sell_amount = float(order.price) * int(order.quantity)
+                            actual_price = float(getattr(order, 'filled_price', 0) or order.price)
+                            sell_amount = actual_price * int(order.quantity)
                             self.decision_engine.fund_manager.release_investment(sell_amount)
 
                         self.logger.info(f"✅ {trading_stock.stock_code} 매도 완료 (수익률: {profit_rate:.2f}%)")
@@ -1044,13 +1047,15 @@ class TradingStockManager:
                                     buy_id = db.get_last_open_real_buy(trading_stock.stock_code)
 
                                     if buy_id and cached_buy_price:
-                                        profit_rate = ((float(order.price) - cached_buy_price) / cached_buy_price) * 100
+                                        sell_price = float(getattr(order, 'filled_price', 0) or order.price)
+                                        profit_rate = ((sell_price - cached_buy_price) / cached_buy_price) * 100
 
                                     sell_reason = order.reason or "체결(콜백)"
+                                    actual_sell_price = float(getattr(order, 'filled_price', 0) or order.price)
                                     db.save_real_sell(
                                         stock_code=trading_stock.stock_code,
                                         stock_name=trading_stock.stock_name,
-                                        price=float(order.price),
+                                        price=actual_sell_price,
                                         quantity=int(order.quantity),
                                         strategy=trading_stock.selection_reason,
                                         reason=sell_reason,
@@ -1060,9 +1065,10 @@ class TradingStockManager:
                                 except Exception as db_err:
                                     self.logger.warning(f"⚠️ 실거래 매도 기록 저장 실패: {db_err}")
 
-                        # fund_manager 투자금 회수
+                        # fund_manager 투자금 회수 (시장가 주문은 price=0이므로 filled_price 우선)
                         if self.decision_engine and self.decision_engine.fund_manager:
-                            sell_amount = float(order.price) * int(order.quantity)
+                            actual_price = float(getattr(order, 'filled_price', 0) or order.price)
+                            sell_amount = actual_price * int(order.quantity)
                             self.decision_engine.fund_manager.release_investment(sell_amount)
 
                         self.logger.info(f"✅ 매도 체결 처리 완료 (콜백): {trading_stock.stock_code} (수익률: {profit_rate:.2f}%)")
@@ -1074,7 +1080,8 @@ class TradingStockManager:
                         self.logger.warning(f"⚠️ 예상치 못한 상태에서 매도 체결: {trading_stock.state.value}")
                         # 예상치 못한 상태에서도 투자금 회수 시도 (자금 잠김 방지)
                         if self.decision_engine and self.decision_engine.fund_manager:
-                            sell_amount = float(order.price) * int(order.quantity)
+                            actual_price = float(getattr(order, 'filled_price', 0) or order.price)
+                            sell_amount = actual_price * int(order.quantity)
                             self.decision_engine.fund_manager.release_investment(sell_amount)
                             self.logger.info(f"💰 예상치 못한 상태 매도 체결 — 투자금 회수: {sell_amount:,.0f}원")
 

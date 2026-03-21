@@ -2,6 +2,7 @@
 주문 관리 및 미체결 처리 모듈
 """
 import asyncio
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor
@@ -26,7 +27,8 @@ class OrderManager:
         self.pending_orders: Dict[str, Order] = {}  # order_id: Order
         self.order_timeouts: Dict[str, datetime] = {}  # order_id: timeout_time
         self.completed_orders: List[Order] = []  # 완료된 주문 기록
-        
+        self._lock = threading.RLock()  # 공유 상태 동기화 (pending/completed/timeouts)
+
         self.is_monitoring = False
         self.executor = ThreadPoolExecutor(max_workers=2)
     
@@ -108,7 +110,8 @@ class OrderManager:
                     remaining_quantity=0,
                     order_3min_candle_time=self._get_current_3min_candle_time()
                 )
-                self.completed_orders.append(order)
+                with self._lock:
+                    self.completed_orders.append(order)
                 self.logger.info(f"🧪(가상) 매수 체결: {fake_order_id} - {stock_code} {quantity}주 @{price:,.0f}원")
                 
                 # 🆕 DB에 가상매매 기록 저장
@@ -198,8 +201,9 @@ class OrderManager:
 
                 # 미체결 관리에 추가
                 timeout_time = now_kst() + timedelta(seconds=timeout_seconds)
-                self.pending_orders[result.order_id] = order
-                self.order_timeouts[result.order_id] = timeout_time
+                with self._lock:
+                    self.pending_orders[result.order_id] = order
+                    self.order_timeouts[result.order_id] = timeout_time
 
                 self.logger.info(f"✅ 매수 주문 성공: {result.order_id} - {stock_code}({stock_name}) {quantity}주 @{price:,.0f}원")
                 self.logger.info(f"⏰ 타임아웃 설정: {timeout_seconds}초 후 ({timeout_time.strftime('%H:%M:%S')}에 취소)")
@@ -247,7 +251,8 @@ class OrderManager:
                     remaining_quantity=0,
                     reason=reason or ""
                 )
-                self.completed_orders.append(order)
+                with self._lock:
+                    self.completed_orders.append(order)
                 self.logger.info(f"🧪(가상) 매도 체결: {fake_order_id} - {stock_code} {quantity}주 @{price:,.0f}원 ({'시장가' if market else '지정가'})")
                 
                 # 🆕 DB에 가상매매 기록 저장 (매도)
@@ -336,8 +341,9 @@ class OrderManager:
                 )
 
                 # 미체결 관리에 추가
-                self.pending_orders[result.order_id] = order
-                self.order_timeouts[result.order_id] = now_kst() + timedelta(seconds=timeout_seconds)
+                with self._lock:
+                    self.pending_orders[result.order_id] = order
+                    self.order_timeouts[result.order_id] = now_kst() + timedelta(seconds=timeout_seconds)
 
                 self.logger.info(f"✅ 매도 주문 성공: {result.order_id} - {stock_code}({stock_name}) {quantity}주 @{price:,.0f}원 ({'시장가' if market else '지정가'})")
 
@@ -422,7 +428,8 @@ class OrderManager:
     async def _monitor_pending_orders(self):
         """미체결 주문 모니터링"""
         current_time = now_kst()
-        orders_to_process = list(self.pending_orders.keys())
+        with self._lock:
+            orders_to_process = list(self.pending_orders.keys())
         
         if orders_to_process:
             self.logger.debug(f"🔍 미체결 주문 모니터링: {len(orders_to_process)}건 처리 중 ({current_time.strftime('%H:%M:%S')})")
@@ -470,12 +477,15 @@ class OrderManager:
     async def _check_false_positive_filled_orders(self, current_time):
         """오탐지된 체결 주문 복구 (최근 10분 이내 완료된 주문만 확인)"""
         try:
-            if not self.completed_orders:
-                return
-            
+            with self._lock:
+                if not self.completed_orders:
+                    return
+                # 스냅샷: Lock 안에서 복사 후 Lock 밖에서 순회
+                completed_snapshot = self.completed_orders[-10:]
+
             # 최근 10분 이내 완료된 주문들만 확인 (가상매매 VT- 주문 제외)
             recent_completed = [
-                order for order in self.completed_orders[-10:]  # 최근 10건만
+                order for order in completed_snapshot
                 if (current_time - order.timestamp).total_seconds() <= 600  # 10분 이내
                 and order.status == OrderStatus.FILLED  # 체결로 처리된 것만
                 and order.order_type == OrderType.BUY  # 매수 주문만 (매도는 즉시 확인됨)
@@ -521,18 +531,16 @@ class OrderManager:
     async def _restore_false_positive_order(self, order, current_time):
         """오탐지된 주문을 pending_orders로 복구"""
         try:
-            # completed_orders에서 제거
-            if order in self.completed_orders:
-                self.completed_orders.remove(order)
-            
-            # pending_orders로 복구
-            order.status = OrderStatus.PENDING
-            self.pending_orders[order.order_id] = order
-            
-            # 타임아웃 재설정 (남은 시간 계산)
-            elapsed_seconds = (current_time - order.timestamp).total_seconds()
-            remaining_timeout = max(30, 180 - elapsed_seconds)  # 최소 30초는 남겨둠
-            self.order_timeouts[order.order_id] = current_time + timedelta(seconds=remaining_timeout)
+            # completed_orders에서 제거 → pending_orders로 복구 (원자적)
+            with self._lock:
+                if order in self.completed_orders:
+                    self.completed_orders.remove(order)
+                order.status = OrderStatus.PENDING
+                self.pending_orders[order.order_id] = order
+                # 타임아웃 재설정 (남은 시간 계산)
+                elapsed_seconds = (current_time - order.timestamp).total_seconds()
+                remaining_timeout = max(30, 180 - elapsed_seconds)  # 최소 30초는 남겨둠
+                self.order_timeouts[order.order_id] = current_time + timedelta(seconds=remaining_timeout)
             
             self.logger.warning(f"🔄 오탐지 주문 복구: {order.order_id} ({order.stock_code}) "
                               f"- 남은 타임아웃: {remaining_timeout:.0f}초")
@@ -1309,62 +1317,65 @@ class OrderManager:
 
     def _move_to_completed(self, order_id: str):
         """완료된 주문으로 이동 (오탐지 방지 로깅 추가)"""
-        if order_id in self.pending_orders:
-            order = self.pending_orders.pop(order_id)
-            self.completed_orders.append(order)
-            
-            # 🆕 오탐지 추적을 위한 상세 로깅
-            elapsed_time = (now_kst() - order.timestamp).total_seconds()
-            self.logger.info(f"📋 주문 완료 처리: {order_id} ({order.stock_code}) "
-                           f"- 상태: {order.status.value}, 경과시간: {elapsed_time:.0f}초")
-            
-            # 타임아웃 정보도 제거
-            if order_id in self.order_timeouts:
-                del self.order_timeouts[order_id]
-                self.logger.debug(f"⏰ 타임아웃 정보 제거: {order_id}")
+        with self._lock:
+            if order_id in self.pending_orders:
+                order = self.pending_orders.pop(order_id)
+                self.completed_orders.append(order)
+
+                # 타임아웃 정보도 제거
+                if order_id in self.order_timeouts:
+                    del self.order_timeouts[order_id]
             else:
-                self.logger.warning(f"⚠️ 타임아웃 정보 없음: {order_id}")
-        else:
-            self.logger.error(f"❌ 완료 처리할 주문이 없음: {order_id}")
+                self.logger.error(f"❌ 완료 처리할 주문이 없음: {order_id}")
+                return
+
+        # 로깅은 Lock 밖에서 (I/O 차단 방지)
+        elapsed_time = (now_kst() - order.timestamp).total_seconds()
+        self.logger.info(f"📋 주문 완료 처리: {order_id} ({order.stock_code}) "
+                       f"- 상태: {order.status.value}, 경과시간: {elapsed_time:.0f}초")
     
     def get_pending_orders(self) -> List[Order]:
         """미체결 주문 목록 반환"""
-        return list(self.pending_orders.values())
-    
+        with self._lock:
+            return list(self.pending_orders.values())
+
     def get_completed_orders(self) -> List[Order]:
         """완료된 주문 목록 반환"""
-        return self.completed_orders.copy()
+        with self._lock:
+            return self.completed_orders.copy()
 
     def cleanup_old_completed_orders(self):
         """당일 이전 완료 주문 정리 (메모리 누적 방지)"""
         today = now_kst().date()
-        before = len(self.completed_orders)
-        self.completed_orders = [
-            o for o in self.completed_orders
-            if o.timestamp.date() == today
-        ]
-        removed = before - len(self.completed_orders)
+        with self._lock:
+            before = len(self.completed_orders)
+            self.completed_orders = [
+                o for o in self.completed_orders
+                if o.timestamp.date() == today
+            ]
+            removed = before - len(self.completed_orders)
         if removed > 0:
             self.logger.info(f"🗑️ 이전 완료 주문 {removed}건 정리 (잔여 {len(self.completed_orders)}건)")
     
     def get_order_summary(self) -> dict:
         """주문 요약 정보"""
-        return {
-            'pending_count': len(self.pending_orders),
-            'completed_count': len(self.completed_orders),
-            'pending_orders': [
-                {
-                    'order_id': order.order_id,
-                    'stock_code': order.stock_code,
-                    'type': order.order_type.value,
-                    'price': order.price,
-                    'quantity': order.quantity,
-                    'status': order.status.value,
-                    'filled': order.filled_quantity
-                }
-                for order in self.pending_orders.values()
-            ]
-        }
+        with self._lock:
+            return {
+                'pending_count': len(self.pending_orders),
+                'completed_count': len(self.completed_orders),
+                'pending_orders': [
+                    {
+                        'order_id': order.order_id,
+                        'stock_code': order.stock_code,
+                        'type': order.order_type.value,
+                        'price': order.price,
+                        'quantity': order.quantity,
+                        'status': order.status.value,
+                        'filled': order.filled_quantity
+                    }
+                    for order in self.pending_orders.values()
+                ]
+            }
     
     def stop_monitoring(self):
         """모니터링 중단"""
