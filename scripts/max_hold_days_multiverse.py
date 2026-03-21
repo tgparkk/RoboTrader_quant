@@ -190,7 +190,7 @@ def main():
 
     base_params = BacktestParams(
         portfolio_size=args.portfolio,
-        target_profit_rate=0.15,
+        target_profit_rate=0.16,
         stop_loss_rate=0.08,
         hard_stop_score=65.0,
         soft_stop_score=67.0,

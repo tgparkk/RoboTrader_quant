@@ -37,11 +37,11 @@ stop_loss_rate = 0.08      # 8%
 
 폴백: NewsQuant 연결 실패 시 NXT+미장만으로 판단
 
-### 2. 장중 모니터링 (1분마다 주기적 체크)
+### 2. 장중 모니터링 (3초마다 주기적 체크)
 
-**위치**: `core/trading_decision_engine.py`
+**위치**: `core/trading_stock_manager.py` → `core/trading_decision_engine.py`
 
-현재가 API를 호출하여 손익절 조건을 체크합니다:
+`TradingStockManager`가 3초 간격으로 보유 종목을 순회하며 `TradingDecisionEngine`의 손익절 조건을 체크합니다:
 - 익절: `profit_rate >= target_profit_rate` → 매도
 - 손절: `profit_rate <= -stop_loss_rate` → 매도
 - 09:00-09:05: 손절 중단, 익절만 허용 (리밸런싱 대기)
@@ -76,7 +76,8 @@ DB에서 미체결 포지션을 로드하여 메모리에 복원합니다:
 
 ### 상태 전이
 ```
-SELECTED → POSITIONED → SELL_CANDIDATE
+SELECTED → BUY_PENDING → POSITIONED → SELL_CANDIDATE → SELL_PENDING → COMPLETED
+                                                                    → FAILED
 ```
 
 ### 데이터베이스 테이블
@@ -95,6 +96,7 @@ QUANT_CANDIDATE_LIMIT = 50             # 장중 퀀트 후보 종목 최대 수
 REBALANCING_ORDER_INTERVAL = 0.1       # 리밸런싱 주문 간 대기 시간 (초)
 SELL_ORDER_WAIT_TIMEOUT = 300          # 매도 주문 체결 대기 시간 (초, 5분)
 ORDER_CHECK_INTERVAL = 5               # 주문 체결 확인 주기 (초)
+REBALANCING_SELL_COOLDOWN_DAYS = 3     # 리밸런싱 매도 후 재매수 차단 일수 (요요 방지)
 
 # Smart Hard Cap: 포트폴리오 평균 점수에 따라 보유 상한 동적 조절
 SMART_HARD_CAP_TIERS = [
@@ -126,12 +128,17 @@ buy_min_score = 65.0     # 매수 최소 점수 (= hard_stop_score)
 5. **중복 매도 차단** — UNIQUE 인덱스 + IntegrityError 처리
 6. **전역 API Rate Limiting** — 60ms 간격, 서킷 브레이커 (연속 10회 실패 시 60초 차단)
 7. **Memory Management** — 당일 데이터만 유지
+8. **리밸런싱 매도 쿨다운** — 매도 후 3일간 재매수 차단 (요요 방지)
 
-## 장 마감 후 자동 실행
+## 자동 스케줄
 
-- 15:30 → 일일 데이터 수집
+### 장 시작 전
+- 08:30 → 전일 일봉 + 재무데이터 수집
+- 08:40 → 장전 시장 분석 (CRISIS/CAUTION/NORMAL 판정)
+- 08:55 → 퀀트 스크리닝 (오늘용 포트폴리오 생성)
+
+### 장 마감 후
 - 15:35 → 일일 매매 리포트 생성 (`scripts/daily_trading_summary.py`)
-- 15:40 → 퀀트 스크리닝
 
 수동 실행: `python after_market_report.py`
 
@@ -153,7 +160,7 @@ python main.py
 ## 핵심 원칙
 
 1. **09:05 리밸런싱**: 점수 기반 매도/매수 결정 → DB 저장
-2. **장중 1분마다**: 현재가 API 조회 → 목표가 도달 체크 → 매도 실행
+2. **장중 3초마다**: 현재가 API 조회 → 목표가 도달 체크 → 매도 실행
 3. **재시작 시**: DB에서 전체 포지션 정보 복원 → 모니터링 재개
 
 ## 코드 검토 시 주의사항

@@ -129,7 +129,7 @@ def run_multiverse(start_date: str, end_date: str,
         })
 
         # 진행 상황 (한 줄)
-        marker = " ★ 현행" if tp == 0.17 and sl == 0.09 else ""
+        marker = " ★ 현행" if tp == 0.16 and sl == 0.08 else ""
         print(f"  [{i:3d}/{total_combos}] TP {tp:5.1%} SL {sl:5.1%} → "
               f"수익 {result.total_return:>8.0%}  샤프 {result.sharpe_ratio:>5.2f}  "
               f"MDD {result.max_drawdown:>5.1%}  승률 {result.win_rate:>5.1%}  "
@@ -165,7 +165,7 @@ def run_multiverse(start_date: str, end_date: str,
     print(f"{'-' * 70}")
     print(f"총 {total_combos}개 조합 완료 (소요: {total_elapsed:.1f}초)")
     if current_rank:
-        print(f"현행 TP 17%/SL 9% → {current_rank}위/{total_combos}")
+        print(f"현행 TP 16%/SL 8% → {current_rank}위/{total_combos}")
     print(f"{'=' * 70}")
 
     # 히트맵 출력
@@ -217,7 +217,7 @@ def print_heatmap(results: list, tp_values: list, sl_values: list,
                 cell = f"{val:>7.2f}"
 
             # 현행 마커
-            if tp == 0.15 and sl == 0.08:
+            if tp == 0.16 and sl == 0.08:
                 cell = cell[:-1] + "★"
             # 최고값 마커
             elif (tp, sl) == max_key:
@@ -226,7 +226,7 @@ def print_heatmap(results: list, tp_values: list, sl_values: list,
             row += cell
         print(row)
 
-    print(f"\n  ★ = 현행 (TP 15%/SL 8%)")
+    print(f"\n  ★ = 현행 (TP 16%/SL 8%)")
     print(f"  ● = 최고 ({label}: {max_val:.2f} at TP {max_key[0]:.0%}/SL {max_key[1]:.0%})")
 
 
