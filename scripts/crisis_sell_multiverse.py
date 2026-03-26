@@ -104,9 +104,10 @@ def run_crisis_sell_multiverse(start_date: str, end_date: str,
             if params.crisis_sell_all and bt.positions:
                 crisis_sold = bt._check_crisis_sell_all(date)
 
+            # TP/SL을 리밸런싱보다 먼저 체크 (실전과 동일)
+            bt._check_stop_profit_loss(date)
             if not crisis_sold:
                 bt._execute_rebalancing(date)
-            bt._check_stop_profit_loss(date)
 
             total_value = bt._calculate_total_value(date)
             daily_return = (total_value - prev_total_value) / prev_total_value if prev_total_value > 0 else 0

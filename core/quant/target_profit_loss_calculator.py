@@ -75,13 +75,13 @@ class TargetProfitLossCalculator:
                 momentum_normalized * self.momentum_weight
             )
             
-            # 단일 익절/손절선 (워크포워드 검증: TP16/SL8이 종합 2위, 안정성 0.89)
-            return 0.16, 0.08  # 16% 익절, 8% 손절
+            # 단일 익절/손절선 (백테스트 실행순서 수정 후 재검증: TP12/SL6이 샤프 1위)
+            return 0.12, 0.06  # 12% 익절, 6% 손절
 
         except Exception as e:
             logger.error(f"목표 익절/손절률 계산 오류: {e}")
             # 오류 시 기본값 반환
-            return 0.16, 0.08
+            return 0.12, 0.06
     
     def calculate_from_portfolio_item(self, portfolio_item: dict, 
                                      factors_data: Optional[dict] = None) -> Tuple[float, float]:

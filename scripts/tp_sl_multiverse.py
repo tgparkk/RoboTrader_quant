@@ -95,8 +95,9 @@ def run_multiverse(start_date: str, end_date: str,
         for date in trading_days:
             bt._today_stop_profit_sold = set()
             bt._today_rebalancing_bought = set()
-            bt._execute_rebalancing(date)
+            # TP/SL을 리밸런싱보다 먼저 체크 (실전과 동일)
             bt._check_stop_profit_loss(date)
+            bt._execute_rebalancing(date)
 
             total_value = bt._calculate_total_value(date)
             daily_return = (total_value - prev_total_value) / prev_total_value if prev_total_value > 0 else 0

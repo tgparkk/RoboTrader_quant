@@ -60,8 +60,8 @@ class TestPositionRestoration:
         # get_trading_stock에서 반환할 trading_stock mock
         trading_stock = Mock()
         trading_stock.set_position = Mock()
-        trading_stock.target_profit_rate = 0.16
-        trading_stock.stop_loss_rate = 0.08
+        trading_stock.target_profit_rate = 0.12
+        trading_stock.stop_loss_rate = 0.06
 
         manager.get_trading_stock = Mock(return_value=trading_stock)
         manager._change_stock_state = Mock()

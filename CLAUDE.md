@@ -11,11 +11,11 @@
 
 **위치**: `core/quant/target_profit_loss_calculator.py`
 
-모든 종목에 단일 익절/손절률을 적용합니다 (워크포워드 7구간×99조합 검증):
+모든 종목에 단일 익절/손절률을 적용합니다 (백테스트 실행순서 수정 후 재검증):
 
 ```python
-target_profit_rate = 0.16  # 16%
-stop_loss_rate = 0.08      # 8%
+target_profit_rate = 0.12  # 12%
+stop_loss_rate = 0.06      # 6%
 ```
 
 **저장 위치**: `real_trading_records` (실전) / `virtual_trading_records` (가상) 테이블
