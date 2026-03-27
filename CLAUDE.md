@@ -2,7 +2,7 @@
 
 ## 시스템 개요
 
-한국투자증권 API를 사용한 자동매매 시스템으로, 퀀트 팩터 기반 종목 선정과 점수 기반 리밸런싱을 수행합니다.
+한국투자증권 API를 사용한 자동매매 시스템으로, 2단계 스코어링(퀀트 필터 + 타이밍 순위) 기반 종목 선정과 점수 기반 리밸런싱을 수행합니다.
 **현재 실전매매 운영 중** (2026-02-12~, `paper_trading=false`)
 
 ## 핵심 동작 흐름
@@ -53,6 +53,22 @@ stop_loss_rate = 0.06      # 6%
 DB에서 미체결 포지션을 로드하여 메모리에 복원합니다:
 - 실전: `get_real_open_positions()` / 가상: `get_virtual_open_positions()`
 - 복원 항목: 수량, 매수가, 목표 익절률, 손절률, 상태
+
+## 2단계 스코어링 시스템
+
+### Stage 1: 퀀트 팩터 필터 (종목 선별)
+- `total_score = Value(30%) + Momentum(30%) + Quality(20%) + Growth(20%)`
+- 65점 이상인 종목만 매수 후보로 통과
+- 매도 임계값(hard_stop, soft_stop, safe_score)에도 사용
+
+### Stage 2: 타이밍 점수 (매수 순위 결정)
+- `timing_score = MA60거리(40%) + 20일수익률(30%) + 변동성(20%) + MA20거리(10%)`
+- 60일선 근처의 저변동성 종목에 높은 점수 (평균회귀 기반)
+- 전일 종가 기준으로 계산 (look-ahead bias 없음)
+
+### 최종 매수 순위
+- `hybrid_score = total_score × 50% + timing_score × 50%`
+- 포트폴리오 상위 10종목은 hybrid_score 순으로 선정
 
 ## 데이터 저장 전략
 
@@ -135,7 +151,7 @@ buy_min_score = 65.0     # 매수 최소 점수 (= hard_stop_score)
 ### 장 시작 전
 - 08:30 → 전일 일봉 + 재무데이터 수집
 - 08:40 → 장전 시장 분석 (CRISIS/CAUTION/NORMAL 판정)
-- 08:55 → 퀀트 스크리닝 (오늘용 포트폴리오 생성)
+- 08:55 → 퀀트 스크리닝 + 타이밍 점수 계산 (hybrid_score로 오늘용 포트폴리오 생성)
 
 ### 장 마감 후
 - 15:35 → 일일 매매 리포트 생성 (`scripts/daily_trading_summary.py`)
