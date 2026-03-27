@@ -30,3 +30,7 @@ BUY_DECISION_AFTER_CANDLE_CLOSE = 10  # 3분봉 완성 후 매수 판단까지 �
 
 # 재시도 관련
 QUANT_SCREENING_MAX_RETRIES = 3  # 퀀트 스크리닝 최대 재시도 횟수
+
+# 승률 개선 필터: 5일 수익률 하드게이트
+# 직전 5거래일 수익률이 이 값 미만이면 매수 차단 (None이면 비활성)
+BUY_RET5D_MIN = -3.0  # -3% 이하 급락 종목 매수 차단

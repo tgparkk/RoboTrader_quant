@@ -85,6 +85,9 @@ class BacktestParams:
     crisis_sell_sp500_pct: float = -0.05     # S&P500 전일 -5% 이하 → 전량 매도
     crisis_sell_vix: float = 40.0            # VIX ≥ 40 → 전량 매도
 
+    # 5일 수익률 하드게이트 (None이면 비활성)
+    buy_ret5d_min: float = None
+
     def to_dict(self) -> Dict[str, Any]:
         """딕셔너리로 변환"""
         return {
@@ -113,6 +116,7 @@ class BacktestParams:
             'vix_caution': self.vix_caution,
             'vix_crisis': self.vix_crisis,
             'caution_max_buy': self.caution_max_buy,
+            'buy_ret5d_min': self.buy_ret5d_min,
         }
 
     @classmethod

@@ -369,6 +369,28 @@ class QuantRebalancingService:
                             skipped_by_score += 1
                             continue
 
+                        # 5일 수익률 하드게이트: 급락 종목 매수 차단
+                        from config.constants import BUY_RET5D_MIN
+                        if BUY_RET5D_MIN is not None:
+                            try:
+                                rows = self.db_manager.execute_query(
+                                    "SELECT close FROM daily_prices WHERE stock_code = %s ORDER BY date DESC LIMIT 6",
+                                    (code,)
+                                )
+                                if rows and len(rows) >= 6:
+                                    close_now = float(rows[0][0])
+                                    close_5d = float(rows[5][0])
+                                    if close_5d > 0:
+                                        ret_5d = (close_now / close_5d - 1) * 100
+                                        if ret_5d < BUY_RET5D_MIN:
+                                            self.logger.info(
+                                                f"⏭️ {code}({portfolio_item['stock_name']}) 매수 스킵: "
+                                                f"5일 수익률 {ret_5d:.1f}% < {BUY_RET5D_MIN}%"
+                                            )
+                                            continue
+                            except Exception as e:
+                                self.logger.debug(f"5일 수익률 조회 실패 ({code}): {e}")
+
                         # 목표 익절/손절률 계산
                         factors_data = factors_map.get(code)
                         target_profit, stop_loss = self.profit_loss_calculator.calculate_from_portfolio_item(

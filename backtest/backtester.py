@@ -279,6 +279,18 @@ class Backtester:
             # 매수 최소 점수 필터: 절대 품질 기준 미달 시 매수 스킵
             if self.params.buy_min_score > 0 and item['total_score'] < self.params.buy_min_score:
                 continue
+            # 5일 수익률 하드게이트
+            if self.params.buy_ret5d_min is not None:
+                price_hist = self.daily_prices_cache.get(stock_code)
+                if price_hist is not None and date in price_hist.index:
+                    idx = price_hist.index.get_loc(date)
+                    if idx >= 5:
+                        close_now = float(price_hist.iloc[idx]['close'])
+                        close_5d = float(price_hist.iloc[idx - 5]['close'])
+                        if close_5d > 0:
+                            ret_5d = (close_now / close_5d - 1) * 100
+                            if ret_5d < self.params.buy_ret5d_min:
+                                continue
             price_data = self._get_daily_price(stock_code, date)
             if not price_data or price_data['open'] <= 0:
                 continue
