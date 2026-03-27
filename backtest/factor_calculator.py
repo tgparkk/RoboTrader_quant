@@ -29,6 +29,56 @@ def clamp(value: float, minimum: float = 0.0, maximum: float = 100.0) -> float:
     return max(minimum, min(maximum, value))
 
 
+def calc_timing_score(closes) -> float:
+    """
+    타이밍 점수 계산 (평균회귀 기반, quant_screening_service.py와 동일)
+
+    60일선 근처의 저변동성 종목에 높은 점수를 부여합니다.
+    """
+    if closes is None or len(closes) < 61:
+        return 50.0
+
+    vals = np.array(closes, dtype=float) if not isinstance(closes, np.ndarray) else closes.astype(float)
+    latest = vals[-1]
+
+    ma60 = np.mean(vals[-60:])
+    ma60_dist = (latest - ma60) / ma60 * 100 if ma60 > 0 else 0
+    if ma60_dist <= -10:
+        ma60_score = 100.0
+    elif ma60_dist <= 0:
+        ma60_score = 70.0 + (-ma60_dist) / 10.0 * 30.0
+    elif ma60_dist <= 10:
+        ma60_score = 40.0 + (10.0 - ma60_dist) / 10.0 * 30.0
+    elif ma60_dist <= 20:
+        ma60_score = 10.0 + (20.0 - ma60_dist) / 10.0 * 30.0
+    else:
+        ma60_score = 10.0
+
+    if len(vals) >= 21:
+        ref_20d = vals[-21]
+        ret_20d = (latest - ref_20d) / ref_20d * 100.0 if ref_20d > 0 else 0.0
+    else:
+        ret_20d = 0.0
+    ret_score = clamp(60.0 - ret_20d * 2.0, 0.0, 100.0)
+
+    if len(vals) >= 21:
+        daily_returns = np.diff(vals[-21:]) / vals[-21:-1]
+        vol = np.std(daily_returns) * (252 ** 0.5) * 100.0
+    else:
+        vol = 40.0
+    vol_score = clamp(100.0 - vol * 1.25, 0.0, 100.0)
+
+    if len(vals) >= 20:
+        ma20 = np.mean(vals[-20:])
+        ma20_dist = (latest - ma20) / ma20 * 100.0 if ma20 > 0 else 0.0
+    else:
+        ma20_dist = 0.0
+    ma20_score = clamp(60.0 - ma20_dist * 3.0, 0.0, 100.0)
+
+    timing = ma60_score * 0.40 + ret_score * 0.30 + vol_score * 0.20 + ma20_score * 0.10
+    return clamp(timing, 0.0, 100.0)
+
+
 def calculate_rsi(prices: pd.Series, period: int = 14) -> float:
     """RSI 계산 (quant_screening_service.py와 동일)"""
     if len(prices) < period + 1:
@@ -227,6 +277,12 @@ class HistoricalFactorCalculator:
                     growth_score * 0.20
                 )
 
+                # 타이밍 점수 계산 (전일 종가 기준)
+                timing_score = calc_timing_score(stock_prices['close'].values)
+
+                # 하이브리드 점수 = 퀀트(50%) + 타이밍(50%)
+                hybrid_score = total_score * 0.50 + timing_score * 0.50
+
                 factor_rows.append({
                     'stock_code': code,
                     'value_score': value_score,
@@ -234,6 +290,8 @@ class HistoricalFactorCalculator:
                     'quality_score': quality_score,
                     'growth_score': growth_score,
                     'total_score': total_score,
+                    'timing_score': timing_score,
+                    'hybrid_score': hybrid_score,
                 })
 
             except Exception:
@@ -242,13 +300,16 @@ class HistoricalFactorCalculator:
         if not factor_rows:
             return
 
-        # 순위 매기기
+        # 팩터 순위: 퀀트 total_score 기준 (리밸런싱 임계값 판단용)
         factor_rows.sort(key=lambda x: (x['total_score'], x['momentum_score']), reverse=True)
         for rank, row in enumerate(factor_rows, 1):
             row['factor_rank'] = rank
 
+        # 포트폴리오 선정: hybrid_score 기준 (매수 순위 결정)
+        portfolio_rows = sorted(factor_rows, key=lambda x: (x['hybrid_score'], x['momentum_score']), reverse=True)
+
         # DB 저장
-        self._save_factors(calc_date_yyyymmdd, factor_rows, portfolio_size)
+        self._save_factors(calc_date_yyyymmdd, factor_rows, portfolio_size, portfolio_rows)
 
     def _calc_value_score(self, code: str, today_row, fin_data) -> float:
         """
@@ -531,7 +592,8 @@ class HistoricalFactorCalculator:
         except Exception:
             return 0.0
 
-    def _save_factors(self, calc_date: str, factor_rows: List[Dict], portfolio_size: int):
+    def _save_factors(self, calc_date: str, factor_rows: List[Dict], portfolio_size: int,
+                      portfolio_rows: List[Dict] = None):
         """팩터 점수 및 포트폴리오 DB 저장"""
         with psycopg2.connect(**self._db_config) as conn:
             cursor = conn.cursor()
@@ -540,7 +602,8 @@ class HistoricalFactorCalculator:
             factor_insert = []
             for row in factor_rows:
                 details = (f"Value {float(row['value_score']):.1f}, Momentum {float(row['momentum_score']):.1f}, "
-                          f"Quality {float(row['quality_score']):.1f}, Growth {float(row['growth_score']):.1f}")
+                          f"Quality {float(row['quality_score']):.1f}, Growth {float(row['growth_score']):.1f}, "
+                          f"Timing {float(row.get('timing_score', 50)):.1f}")
                 factor_insert.append((
                     calc_date, str(row['stock_code']),
                     float(row['value_score']), float(row['momentum_score']),
@@ -555,15 +618,17 @@ class HistoricalFactorCalculator:
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ''', factor_insert)
 
-            # quant_portfolio 저장 (상위 N개)
+            # quant_portfolio 저장 (hybrid_score 기준 상위 N개)
+            source_rows = (portfolio_rows or factor_rows)[:portfolio_size]
             portfolio_insert = []
-            for row in factor_rows[:portfolio_size]:
+            for rank, row in enumerate(source_rows, 1):
                 name = self._stock_names.get(row['stock_code'], row['stock_code'])
                 reason = (f"Value {float(row['value_score']):.1f}, Momentum {float(row['momentum_score']):.1f}, "
-                         f"Quality {float(row['quality_score']):.1f}, Growth {float(row['growth_score']):.1f}")
+                         f"Quality {float(row['quality_score']):.1f}, Growth {float(row['growth_score']):.1f}, "
+                         f"Timing {float(row.get('timing_score', 50)):.1f}")
                 portfolio_insert.append((
                     calc_date, str(row['stock_code']), str(name),
-                    int(row['factor_rank']), float(row['total_score']), reason
+                    rank, float(row.get('hybrid_score', row['total_score'])), reason
                 ))
 
             cursor.executemany('''

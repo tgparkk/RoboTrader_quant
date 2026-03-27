@@ -37,6 +37,61 @@ def calculate_rsi(prices: pd.Series, period: int = 14) -> float:
         return 50.0
 
 
+def calc_timing_score(closes) -> float:
+    """
+    타이밍 점수 계산 (평균회귀 기반)
+
+    60일선 근처의 저변동성 종목에 높은 점수를 부여합니다.
+    전일 종가까지의 데이터만 사용 (look-ahead bias 없음).
+    """
+    if closes is None or len(closes) < 61:
+        return 50.0
+
+    vals = closes.values.astype(float) if hasattr(closes, 'values') else np.array(closes, dtype=float)
+    latest = vals[-1]
+
+    # 1. MA60 거리 점수 (40%) — 60일선에 가까울수록 높은 점수
+    ma60 = np.mean(vals[-60:])
+    ma60_dist = (latest - ma60) / ma60 * 100 if ma60 > 0 else 0
+    if ma60_dist <= -10:
+        ma60_score = 100.0
+    elif ma60_dist <= 0:
+        ma60_score = 70.0 + (-ma60_dist) / 10.0 * 30.0
+    elif ma60_dist <= 10:
+        ma60_score = 40.0 + (10.0 - ma60_dist) / 10.0 * 30.0
+    elif ma60_dist <= 20:
+        ma60_score = 10.0 + (20.0 - ma60_dist) / 10.0 * 30.0
+    else:
+        ma60_score = 10.0
+
+    # 2. 20일 수익률 점수 (30%) — 최근 덜 오른 종목이 높은 점수
+    if len(vals) >= 21:
+        ref_20d = vals[-21]
+        ret_20d = (latest - ref_20d) / ref_20d * 100.0 if ref_20d > 0 else 0.0
+    else:
+        ret_20d = 0.0
+    ret_score = clamp(60.0 - ret_20d * 2.0, 0.0, 100.0)
+
+    # 3. 변동성 점수 (20%) — 저변동성이 높은 점수
+    if len(vals) >= 21:
+        daily_returns = np.diff(vals[-21:]) / vals[-21:-1]
+        vol = np.std(daily_returns) * (252 ** 0.5) * 100.0
+    else:
+        vol = 40.0
+    vol_score = clamp(100.0 - vol * 1.25, 0.0, 100.0)
+
+    # 4. MA20 거리 점수 (10%) — 20일선에 가까울수록 높은 점수
+    if len(vals) >= 20:
+        ma20 = np.mean(vals[-20:])
+        ma20_dist = (latest - ma20) / ma20 * 100.0 if ma20 > 0 else 0.0
+    else:
+        ma20_dist = 0.0
+    ma20_score = clamp(60.0 - ma20_dist * 3.0, 0.0, 100.0)
+
+    timing = ma60_score * 0.40 + ret_score * 0.30 + vol_score * 0.20 + ma20_score * 0.10
+    return clamp(timing, 0.0, 100.0)
+
+
 class QuantScreeningService:
     def __init__(self, api_manager, db_manager, candidate_selector, max_universe: int = 500):
         self.api_manager = api_manager
@@ -225,6 +280,19 @@ class QuantScreeningService:
                     filter_stats['score_failed'] += 1
                     continue
 
+                # 타이밍 점수 계산 (전일 종가 기준, look-ahead bias 없음)
+                timing_score = 50.0
+                if price_data is not None and not price_data.empty:
+                    try:
+                        df_sorted = price_data.sort_values('stck_bsop_date')
+                        closes_series = df_sorted['stck_clpr'].astype(float).reset_index(drop=True)
+                        timing_score = calc_timing_score(closes_series)
+                    except Exception:
+                        timing_score = 50.0
+
+                # 하이브리드 점수 = 퀀트(50%) + 타이밍(50%)
+                hybrid_score = scores['total_score'] * 0.50 + timing_score * 0.50
+
                 factor_rows.append({
                     'stock_code': stock_code,
                     'value_score': scores['value_score'],
@@ -232,15 +300,22 @@ class QuantScreeningService:
                     'quality_score': scores['quality_score'],
                     'growth_score': scores['growth_score'],
                     'total_score': scores['total_score'],
+                    'timing_score': timing_score,
                     'factor_details': scores['details']
                 })
+
+                reason = (f"Value {scores['value_score']:.1f}, Momentum {scores['momentum_score']:.1f}, "
+                         f"Quality {scores['quality_score']:.1f}, Growth {scores['growth_score']:.1f}, "
+                         f"Timing {timing_score:.1f} → Hybrid {hybrid_score:.1f}")
 
                 rows.append({
                     'stock_code': stock_code,
                     'stock_name': stock_name,
                     'total_score': scores['total_score'],
-                    'momentum_score': scores['momentum_score'],  # 동점 시 정렬용
-                    'reason': scores['details'].get('reason', '퀀트 스크리닝')
+                    'hybrid_score': hybrid_score,
+                    'timing_score': timing_score,
+                    'momentum_score': scores['momentum_score'],
+                    'reason': reason
                 })
 
             except Exception as e:
@@ -262,9 +337,10 @@ class QuantScreeningService:
             self.logger.warning("⚠️ 스크리닝 결과가 없습니다. (필터 통과 종목 없음)")
             return False
 
-        # 종합 스코어링 (7단계 기준)
-        # 정렬: total_score 내림차순, 동점 시 momentum_score 내림차순
-        rows.sort(key=lambda x: (x['total_score'], x.get('momentum_score', 0)), reverse=True)
+        # 종합 스코어링
+        # 포트폴리오 선정: hybrid_score(퀀트50%+타이밍50%) 내림차순
+        rows.sort(key=lambda x: (x['hybrid_score'], x.get('momentum_score', 0)), reverse=True)
+        # 팩터 순위: 퀀트 total_score 기준 (리밸런싱 임계값 판단용)
         factor_rows.sort(key=lambda x: (x['total_score'], x['momentum_score']), reverse=True)
 
         for rank, row in enumerate(factor_rows, start=1):
