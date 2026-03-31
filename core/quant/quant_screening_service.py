@@ -246,7 +246,15 @@ class QuantScreeningService:
             stock_name = stock.get('name', f"Stock_{stock_code}")
             if not stock_code:
                 continue
-            
+
+            # 장 시간 중이면 주기적으로 양보 → TP/SL 모니터링이 API 사용 가능
+            if idx % 10 == 0:
+                from utils.korean_time import now_kst
+                t = now_kst()
+                if 9 <= t.hour < 16:
+                    import time
+                    time.sleep(3)
+
             filter_stats['total'] += 1
 
             try:
