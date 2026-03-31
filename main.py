@@ -802,30 +802,20 @@ class DayTradingBot:
                             self.logger.error(f"❌ 장전 시장 파악 오류: {e}")
                             self._pre_market_result = None
 
-                # 08:30 전일 데이터 수집 및 08:55 퀀트 스크리닝 실행 (장 시작 전)
+                # 08:30 전일 데이터 수집 (장 시작 전)
                 if current_time.hour == 8:
-                    # 08:30 전일 일봉 + 재무데이터 수집
                     if current_time.minute >= 30:
                         if (self._last_daily_data_collection_date != current_time.date() and
                             self._daily_data_collection_task is None):
                             self.logger.info(f"📊 08:30+ 전일 데이터 수집 스케줄 트리거 ({current_time.strftime('%H:%M:%S')})")
                             self._daily_data_collection_task = asyncio.create_task(self._run_daily_data_collection())
 
-                    # 08:55 퀀트 스크리닝 실행 (오늘용 포트폴리오 생성)
-                    if current_time.minute >= 55:
-                        if self._last_quant_screening_date != current_time.date() and self._quant_screening_task is None:
-                            self.logger.info(f"🔍 08:55+ 퀀트 스크리닝 스케줄 트리거 ({current_time.strftime('%H:%M:%S')})")
-                            self._quant_screening_task = asyncio.create_task(self._run_quant_screening())
-
-                        # 08:55 ML 스크리닝 실행 (ML 데이터 수집 완료 후)
-                        # ⚠️ 현재 비활성화 (미래 사용 예정)
-                        # if (self._last_daily_data_collection_date == current_time.date() and
-                        #     self._daily_data_collection_completed and
-                        #     self._last_ml_screening_date != current_time.date() and
-                        #     self._ml_screening_task is None):
-                        #     self.logger.info(f"🔍 08:55+ ML 스크리닝 스케줄 트리거 ({current_time.strftime('%H:%M:%S')})")
-                        #     self._ml_screening_task = asyncio.create_task(self._run_ml_screening())
-                        pass
+                # 16:05 퀀트 스크리닝 (장 마감 후 — 내일용 포트폴리오 생성)
+                # 전일 종가 기준이므로 장중 실행 불필요. 장중 API 경합 방지.
+                if current_time.hour == 16 and current_time.minute >= 5:
+                    if self._last_quant_screening_date != current_time.date() and self._quant_screening_task is None:
+                        self.logger.info(f"🔍 16:05+ 퀀트 스크리닝 스케줄 트리거 ({current_time.strftime('%H:%M:%S')})")
+                        self._quant_screening_task = asyncio.create_task(self._run_quant_screening())
 
                 # 15:35 장 마감 후 일일 매매 리포트 생성
                 if (current_time.hour == 15 and current_time.minute >= 35):

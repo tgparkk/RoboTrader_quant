@@ -151,10 +151,11 @@ buy_min_score = 65.0     # 매수 최소 점수 (= hard_stop_score)
 ### 장 시작 전
 - 08:30 → 전일 일봉 + 재무데이터 수집
 - 08:40 → 장전 시장 분석 (CRISIS/CAUTION/NORMAL 판정)
-- 08:55 → 퀀트 스크리닝 + 타이밍 점수 계산 (hybrid_score로 오늘용 포트폴리오 생성)
 
 ### 장 마감 후
 - 15:35 → 일일 매매 리포트 생성 (`scripts/daily_trading_summary.py`)
+- 16:05 → 퀀트 스크리닝 + 타이밍 점수 계산 (hybrid_score로 내일용 포트폴리오 생성)
+  - 장중 API 경합 방지를 위해 장 마감 후 실행 (전일 종가 기준이므로 장중 실행 불필요)
 
 수동 실행: `python after_market_report.py`
 
