@@ -2,37 +2,26 @@
 
 > CLAUDE.md에서 분리된 상세 문서 (2026-01-25 ~ 02-03 구현)
 
-## 1. 리밸런싱 직전 손절 중단 (09:00-09:05)
+## 1. 09:00 즉시 손절/익절 허용
 
-**위치**: `core/trading_decision_engine.py`
+**위치**: `core/trading_decision_engine.py`, `core/trading_stock_manager.py`
 
-리밸런싱 직전 5분간은 익절만 허용하고 손절은 중단합니다.
+장 시작(09:00)과 동시에 TP/SL 모두 즉시 작동합니다. 09:05 리밸런싱과 독립적으로 동작.
 
 ```python
 def _check_simple_stop_profit_conditions(self, trading_stock, current_price):
-    current_time = now_kst()
-
-    # 09:00~09:05 사이에는 손절 체크 안 함 (익절만)
-    is_before_rebalancing = (
-        current_time.hour == 9 and current_time.minute < 5
-    )
-
-    buy_price = trading_stock.position.buy_price
-    profit_rate = (current_price - buy_price) / buy_price
-
-    # 익절 조건 확인 (항상 활성)
+    # 익절 조건 확인
     if profit_rate >= target_profit_rate:
         return True, f"목표 익절 도달 (...)"
 
-    # 손절 조건 확인 (리밸런싱 전에는 스킵)
-    if not is_before_rebalancing:
-        if profit_rate <= -stop_loss_rate:
-            return True, f"손절 실행 (...)"
+    # 손절 조건 확인 (09:00부터 즉시 허용)
+    if profit_rate <= -stop_loss_rate:
+        return True, f"손절 실행 (...)"
 
     return False, None
 ```
 
-**배경**: 2026-01-23 갭하락으로 3개 종목 손절 후 5분 뒤 리밸런싱에서 재매수 → 35만원 손실 발생
+**변경 이력**: 2026-01-23 갭하락 사건 후 09:00-09:05 손절 중단 도입 → 2026-03-31 백테스트 검증 결과 hold 유예가 역효과(샤프 -3.25)임을 확인하여 제거. 당일 손절 종목 재매수 차단(안전장치 #2)이 갭하락 재매수를 방지
 
 ---
 

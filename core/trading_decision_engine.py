@@ -593,42 +593,13 @@ class TradingDecisionEngine:
             target_profit_rate = getattr(trading_stock, 'target_profit_rate', 0.15)
             stop_loss_rate = getattr(trading_stock, 'stop_loss_rate', 0.08)
 
-            # 리밸런싱 진행 중이면 손절 중단 (익절만 허용, 10분 타임아웃)
-            from utils.korean_time import now_kst
-            current_time = now_kst()
-            is_before_rebalancing = (
-                current_time.hour == 9 and current_time.minute < 5
-            )
-
-            # 리밸런싱 플래그 체크 (10분 타임아웃 안전장치)
-            if self.rebalancing_in_progress:
-                if self._rebalancing_started_at:
-                    elapsed_minutes = (current_time - self._rebalancing_started_at).total_seconds() / 60
-                    if elapsed_minutes > 10:
-                        self.logger.critical(
-                            f"🚨 rebalancing_in_progress가 {elapsed_minutes:.0f}분 동안 True 유지 → 강제 해제"
-                        )
-                        self.rebalancing_in_progress = False
-                        self._rebalancing_started_at = None
-                    else:
-                        is_before_rebalancing = True
-                else:
-                    # 타임스탬프 없이 플래그만 켜진 경우 → 안전 리셋
-                    self.rebalancing_in_progress = False
-
             # 익절 조건 확인
             if profit_rate >= target_profit_rate:
                 return True, f"목표 익절 도달 ({profit_rate*100:.1f}% >= {target_profit_rate*100:.1f}%)"
 
-            # 손절 조건 확인 (리밸런싱 중에는 스킵)
-            if not is_before_rebalancing:
-                if profit_rate <= -stop_loss_rate:
-                    return True, f"손절 실행 ({profit_rate*100:.1f}% <= -{stop_loss_rate*100:.1f}%)"
-            else:
-                # 리밸런싱 전/중 손절 중단 모드
-                if profit_rate <= -stop_loss_rate:
-                    self.logger.debug(f"⏸️ {trading_stock.stock_code} 리밸런싱 중 손절 중단 "
-                                     f"(손절선 도달: {profit_rate*100:.1f}% <= -{stop_loss_rate*100:.1f}%, 익절만 허용)")
+            # 손절 조건 확인 (09:00부터 즉시 허용)
+            if profit_rate <= -stop_loss_rate:
+                return True, f"손절 실행 ({profit_rate*100:.1f}% <= -{stop_loss_rate*100:.1f}%)"
 
             return False, ""
 

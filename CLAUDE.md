@@ -44,7 +44,7 @@ stop_loss_rate = 0.06      # 6%
 `TradingStockManager`가 3초 간격으로 보유 종목을 순회하며 `TradingDecisionEngine`의 손익절 조건을 체크합니다:
 - 익절: `profit_rate >= target_profit_rate` → 매도
 - 손절: `profit_rate <= -stop_loss_rate` → 매도
-- 09:00-09:05: 손절 중단, 익절만 허용 (리밸런싱 대기)
+- 09:00부터 손절/익절 모두 즉시 허용 (09:05 리밸런싱과 독립 동작)
 
 ### 3. 프로그램 재시작 시 복원 (장중)
 
@@ -137,7 +137,7 @@ buy_min_score = 65.0     # 매수 최소 점수 (= hard_stop_score)
 
 다음 안전장치가 구현되어 있습니다. 상세 내용은 [docs/safety_mechanisms.md](docs/safety_mechanisms.md) 참조.
 
-1. **09:00-09:05 손절 중단** — 리밸런싱 전 갭하락 손절 방지
+1. **09:00 즉시 손절 허용** — 장 시작과 동시에 TP/SL 모두 작동
 2. **당일 손절 종목 재매수 차단** — DB 조회로 같은 날 재매수 금지
 3. **2단계 매수 가격 검증** — 급락(-5%)/과열(+10%) 필터 + 시장 대비 상대강도
 4. **Thread-Safe 매수** — Lock 기반 중복 매수 방지
