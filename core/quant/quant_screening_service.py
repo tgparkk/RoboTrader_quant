@@ -107,6 +107,32 @@ class QuantScreeningService:
         self.max_price = 500_000  # 최대 주가 500,000원
         self.min_listing_days = 250  # 상장 1년 이상 (거래일 기준)
 
+    def _get_price_data_from_db(self, stock_code: str, days: int = 400) -> Optional[pd.DataFrame]:
+        """DB에서 일봉 데이터 조회 (API 미사용, 스크리닝 속도 개선)"""
+        try:
+            from config.pg_helper import pg_connection
+            with pg_connection() as conn:
+                query = '''
+                    SELECT date as stck_bsop_date,
+                           open as stck_oprc, high as stck_hgpr,
+                           low as stck_lwpr, close as stck_clpr,
+                           volume as acml_vol
+                    FROM daily_prices
+                    WHERE stock_code = %s
+                    ORDER BY date DESC
+                    LIMIT %s
+                '''
+                df = pd.read_sql_query(query, conn, params=(stock_code, days))
+                if df.empty:
+                    return None
+                # API 포맷 호환: date를 YYYYMMDD 문자열로 변환
+                df['stck_bsop_date'] = df['stck_bsop_date'].astype(str).str.replace('-', '')
+                return df
+        except Exception as e:
+            self.logger.debug(f"DB 일봉 조회 실패 {stock_code}: {e}")
+            # 폴백: API 사용
+            return self.api_manager.get_ohlcv_data(stock_code, "D", days)
+
     def _apply_primary_filter(self, stock_code: str, stock_name: str) -> tuple:
         """
         1차 필터링 로직 (2단계 기준)
@@ -272,8 +298,8 @@ class QuantScreeningService:
                 balance_entries = get_balance_sheet(stock_code, div_cls="0")
                 balance = balance_entries[0] if balance_entries else None
 
-                # 모멘텀 계산용: 12개월(250거래일) 필요 → 캘린더 400일
-                price_data = self.api_manager.get_ohlcv_data(stock_code, "D", 400)
+                # 모멘텀 계산용: 12개월(250거래일) 필요 → DB에서 조회 (API 미사용)
+                price_data = self._get_price_data_from_db(stock_code, 400)
 
                 scores = self._calculate_scores(ratio, income, balance, price_data, stock_code)
                 if not scores:

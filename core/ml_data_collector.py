@@ -113,7 +113,28 @@ class MLDataCollector:
                 self.logger.info(f"📊 [{stock_code}] 전 영업일까지 수집 (end_date: {end_date})")
 
             if start_date is None:
-                start_date = (now_kst() - timedelta(days=1100)).strftime("%Y%m%d")
+                # DB에서 마지막 저장 날짜 확인 → 이후만 수집 (증분 수집)
+                try:
+                    with pg_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            'SELECT MAX(date) FROM daily_prices WHERE stock_code = %s',
+                            (stock_code,)
+                        )
+                        last_date = cursor.fetchone()[0]
+                        if last_date:
+                            # 마지막 날짜 다음날부터 수집
+                            from datetime import datetime as dt
+                            next_day = last_date + timedelta(days=1)
+                            start_date = next_day.strftime("%Y%m%d")
+                            if start_date > end_date:
+                                self.logger.debug(f"📊 [{stock_code}] 이미 최신 데이터 보유 (마지막: {last_date})")
+                                return True
+                            self.logger.info(f"📊 [{stock_code}] 증분 수집: {start_date} ~ {end_date} (마지막 DB: {last_date})")
+                        else:
+                            start_date = (now_kst() - timedelta(days=1100)).strftime("%Y%m%d")
+                except Exception:
+                    start_date = (now_kst() - timedelta(days=1100)).strftime("%Y%m%d")
 
             self.logger.info(f"📊 [{stock_code}] 일별 가격 데이터 수집 시작: {start_date} ~ {end_date}")
             
