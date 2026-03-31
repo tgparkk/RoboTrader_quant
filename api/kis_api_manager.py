@@ -163,17 +163,17 @@ class KISAPIManager:
                 
                 # 결과가 None인 경우 재시도
                 if attempt < self.max_retries - 1:
-                    time.sleep(self.retry_delay * (attempt + 1))
+                    time.sleep(min(self.retry_delay * (attempt + 1), 2.0))
                     continue
-                
+
                 return None
-                
+
             except Exception as e:
                 self.error_count += 1
                 self.logger.error(f"API 호출 실패 (시도 {attempt + 1}/{self.max_retries}): {e}")
-                
+
                 if attempt < self.max_retries - 1:
-                    time.sleep(self.retry_delay * (attempt + 1))
+                    time.sleep(min(self.retry_delay * (attempt + 1), 2.0))
                     continue
                 
                 raise e
@@ -321,8 +321,8 @@ class KISAPIManager:
             if price:
                 prices[stock_code] = price
             
-            # API 호출 간격 조절
-            time.sleep(0.1)
+            # API 호출 간격 (kis_auth 글로벌 Rate Limit 60ms와 동일)
+            time.sleep(0.06)
         
         return prices
     

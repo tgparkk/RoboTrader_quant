@@ -393,12 +393,12 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
                             _api_stats['last_rate_limit_time'] = now_kst()
                         
                         if attempt < _max_retries:
-                            # 동적 재시도 지연: 연속 오류 시 지연 시간 증가
+                            # 동적 재시도 지연: 최대 3초 캡 (장중 TP/SL 블로킹 방지)
                             base_delay = _retry_delay_base
                             if _api_stats['rate_limit_errors'] > 10:
                                 base_delay = _retry_delay_base * 1.5
-                            
-                            wait_time = base_delay * (2 ** attempt)  # 지수 백오프
+
+                            wait_time = min(base_delay * (2 ** attempt), 3.0)  # 지수 백오프, 최대 3초
                             with _stats_lock:
                                 _api_stats['total_wait_time'] += wait_time
                             logger.warning(f"속도 제한 오류 발생. {wait_time:.1f}초 후 재시도 ({attempt + 1}/{_max_retries + 1})")
@@ -488,7 +488,7 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
                                     # 속도 제한 오류가 10회 이상 발생하면 더 긴 대기
                                     base_delay = _retry_delay_base * 1.5
 
-                                wait_time = base_delay * (2 ** attempt)  # 지수 백오프
+                                wait_time = min(base_delay * (2 ** attempt), 3.0)  # 지수 백오프, 최대 3초
                                 with _stats_lock:
                                     _api_stats['total_wait_time'] += wait_time
                                 logger.warning(f"HTTP 500 속도 제한 오류. {wait_time:.1f}초 후 재시도 ({attempt + 1}/{_max_retries + 1})")
@@ -521,7 +521,7 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
                 )
                 return None
             if attempt < _max_retries:
-                wait_time = _retry_delay_base * (2 ** attempt)
+                wait_time = min(_retry_delay_base * (2 ** attempt), 3.0)
                 logger.warning(f"네트워크 오류 ({type(e).__name__}). {wait_time:.1f}초 후 재시도 ({attempt + 1}/{_max_retries + 1}): {e}")
                 time.sleep(wait_time)
                 continue
@@ -532,7 +532,7 @@ def _url_fetch(api_url: str, ptr_id: str, tr_cont: str, params: Dict,
             with _stats_lock:
                 _api_stats['other_errors'] += 1
             if attempt < _max_retries:
-                wait_time = _retry_delay_base * (2 ** attempt)
+                wait_time = min(_retry_delay_base * (2 ** attempt), 3.0)
                 logger.warning(f"API 호출 예외 발생. {wait_time:.1f}초 후 재시도 ({attempt + 1}/{_max_retries + 1}): {e}")
                 time.sleep(wait_time)
                 continue
