@@ -108,7 +108,7 @@ class QuantScreeningService:
         self.min_listing_days = 250  # 상장 1년 이상 (거래일 기준)
 
     def _get_price_data_from_db(self, stock_code: str, days: int = 400) -> Optional[pd.DataFrame]:
-        """DB에서 일봉 데이터 조회 (API 미사용, 스크리닝 속도 개선)"""
+        """DB에서 일봉 데이터 조회, 부족하면 API 폴백"""
         try:
             from config.pg_helper import pg_connection
             with pg_connection() as conn:
@@ -124,17 +124,15 @@ class QuantScreeningService:
                     LIMIT %s
                 ''', (stock_code, days))
                 rows = cursor.fetchall()
-                if not rows:
-                    return None
-                col_names = [desc[0] for desc in cursor.description]
-                df = pd.DataFrame(rows, columns=col_names)
-                # API 포맷 호환: date를 YYYYMMDD 문자열로 변환
-                df['stck_bsop_date'] = df['stck_bsop_date'].astype(str).str.replace('-', '')
-                return df
+                if rows and len(rows) >= 60:
+                    col_names = [desc[0] for desc in cursor.description]
+                    df = pd.DataFrame(rows, columns=col_names)
+                    df['stck_bsop_date'] = df['stck_bsop_date'].astype(str).str.replace('-', '')
+                    return df
         except Exception as e:
             self.logger.debug(f"DB 일봉 조회 실패 {stock_code}: {e}")
-            # 폴백: API 사용
-            return self.api_manager.get_ohlcv_data(stock_code, "D", days)
+        # DB에 데이터 없거나 60일 미만 → API 폴백
+        return self.api_manager.get_ohlcv_data(stock_code, "D", days)
 
     def _apply_primary_filter(self, stock_code: str, stock_name: str) -> tuple:
         """
