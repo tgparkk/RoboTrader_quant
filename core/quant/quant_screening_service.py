@@ -112,7 +112,8 @@ class QuantScreeningService:
         try:
             from config.pg_helper import pg_connection
             with pg_connection() as conn:
-                query = '''
+                cursor = conn.cursor()
+                cursor.execute('''
                     SELECT date as stck_bsop_date,
                            open as stck_oprc, high as stck_hgpr,
                            low as stck_lwpr, close as stck_clpr,
@@ -121,10 +122,12 @@ class QuantScreeningService:
                     WHERE stock_code = %s
                     ORDER BY date DESC
                     LIMIT %s
-                '''
-                df = pd.read_sql_query(query, conn, params=(stock_code, days))
-                if df.empty:
+                ''', (stock_code, days))
+                rows = cursor.fetchall()
+                if not rows:
                     return None
+                col_names = [desc[0] for desc in cursor.description]
+                df = pd.DataFrame(rows, columns=col_names)
                 # API 포맷 호환: date를 YYYYMMDD 문자열로 변환
                 df['stck_bsop_date'] = df['stck_bsop_date'].astype(str).str.replace('-', '')
                 return df

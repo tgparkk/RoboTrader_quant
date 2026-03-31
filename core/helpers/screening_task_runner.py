@@ -161,6 +161,14 @@ class ScreeningTaskRunner:
 
             logger.info(f"📊 데이터 수집 대상: {len(stock_codes)}개 종목")
 
+            # 08:58 이후에는 수집 중단 (09:00 장 시작 전에 반드시 완료)
+            from datetime import datetime as _datetime
+            now = _datetime.now()
+            deadline = now.replace(hour=8, minute=58, second=0, microsecond=0)
+            if now >= deadline:
+                logger.warning("⚠️ 이미 08:58 이후 — 데이터 수집 마감 시각 초과, 수집 건너뜀")
+                return False
+
             # 데이터 수집 실행 (비동기로 실행)
             loop = asyncio.get_event_loop()
 
@@ -170,7 +178,8 @@ class ScreeningTaskRunner:
                 self.ml_data_collector.collect_all_candidates,
                 stock_codes,
                 True,  # collect_price
-                False  # collect_financial (별도 실행)
+                False, # collect_financial (별도 실행)
+                deadline,
             )
 
             # 재무 데이터 수집
@@ -179,7 +188,8 @@ class ScreeningTaskRunner:
                 self.ml_data_collector.collect_all_candidates,
                 stock_codes,
                 False,  # collect_price
-                True   # collect_financial
+                True,   # collect_financial
+                deadline,
             )
 
             # 결과 요약

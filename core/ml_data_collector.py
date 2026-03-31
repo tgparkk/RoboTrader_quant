@@ -633,14 +633,29 @@ class MLDataCollector:
             traceback.print_exc()
             return False
     
-    def collect_all_candidates(self, stock_codes: List[str], collect_price: bool = True, 
-                              collect_financial: bool = True) -> Dict[str, bool]:
-        """여러 종목의 데이터 일괄 수집"""
+    def collect_all_candidates(self, stock_codes: List[str], collect_price: bool = True,
+                              collect_financial: bool = True,
+                              deadline: "datetime | None" = None) -> Dict[str, bool]:
+        """여러 종목의 데이터 일괄 수집
+
+        Args:
+            deadline: 이 시각 이후에는 수집을 중단합니다 (None이면 무제한).
+                      예) datetime(2026, 3, 31, 8, 58) → 08:58 이후 루프 중단
+        """
         import time
+        from datetime import datetime as _datetime
         results = {}
         total_stocks = len(stock_codes)
 
         for idx, stock_code in enumerate(stock_codes, 1):
+            # deadline 초과 시 나머지 종목 건너뜀
+            if deadline is not None and _datetime.now() >= deadline:
+                self.logger.warning(
+                    f"⏰ 수집 마감 시각({deadline.strftime('%H:%M')}) 도달 — "
+                    f"남은 {total_stocks - idx + 1}개 종목 수집 중단"
+                )
+                break
+
             try:
                 success_price = True
                 success_financial = True
