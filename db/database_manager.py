@@ -86,7 +86,7 @@ class DatabaseManager:
             password=self.db_password,
         )
         self._trade_conn.autocommit = False
-        self._trade_lock = threading.Lock()
+        self._trade_lock = threading.RLock()
         self.logger.info("매매 전용 DB 연결 초기화 완료")
 
     def close(self):

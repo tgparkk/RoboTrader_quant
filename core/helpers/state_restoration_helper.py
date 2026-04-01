@@ -405,9 +405,16 @@ class StateRestorationHelper:
                 logger.error(f"❌ {stock_code}({stock_name}) 체결내역 조회 실패 — 자동 복구 불가")
                 return False
 
+            # KIS API 응답 컬럼 검증
+            required_cols = {'pdno', 'sll_buy_dvsn_cd', 'avg_prvs', 'tot_ccld_qty'}
+            if not required_cols.issubset(ccld_df.columns):
+                logger.error(
+                    f"❌ {stock_code}({stock_name}) KIS 체결내역 응답 컬럼 불일치 — "
+                    f"필요: {required_cols}, 실제: {set(ccld_df.columns)}"
+                )
+                return False
+
             # 해당 종목의 매도 체결 찾기
-            # KIS API output1 컬럼: pdno(종목번호), sll_buy_dvsn_cd(01=매도,02=매수),
-            # avg_prvs(평균체결가), tot_ccld_qty(총체결수량), ccld_qty(체결수량)
             sell_records = ccld_df[
                 (ccld_df['pdno'] == stock_code) &
                 (ccld_df['sll_buy_dvsn_cd'] == '01')  # 매도
