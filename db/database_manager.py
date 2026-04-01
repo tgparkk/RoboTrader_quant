@@ -836,6 +836,42 @@ class DatabaseManager:
         finally:
             self._put_connection(conn)
     
+    def get_latest_quant_portfolio(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """가장 최근 포트폴리오 조회 (날짜 무관)
+
+        16:05 스크리닝이 전일에 생성한 포트폴리오를 08:30에 조회할 때 사용.
+        """
+        conn = self._get_connection()
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT stock_code, stock_name, rank, total_score, reason, calc_date
+                    FROM quant_portfolio
+                    WHERE calc_date = (
+                        SELECT MAX(calc_date) FROM quant_portfolio
+                    )
+                    ORDER BY rank ASC
+                    LIMIT %s
+                ''', (limit,))
+                rows = cursor.fetchall()
+                return [
+                    {
+                        'stock_code': row[0],
+                        'stock_name': row[1],
+                        'rank': row[2],
+                        'total_score': float(row[3]) if row[3] else 0.0,
+                        'reason': row[4],
+                        'calc_date': row[5],
+                    }
+                    for row in rows
+                ]
+        except Exception as e:
+            self.logger.error(f"최근 포트폴리오 조회 실패: {e}")
+            return []
+        finally:
+            self._put_connection(conn)
+
     def get_quant_factors(self, calc_date: str, stock_code: str = None) -> List[Dict[str, Any]]:
         """일자별 팩터 점수 조회"""
         conn = self._get_connection()

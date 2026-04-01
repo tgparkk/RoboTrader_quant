@@ -121,25 +121,16 @@ class ScreeningTaskRunner:
         try:
             logger.info("📊 08:30 전일 데이터 수집 시작")
 
-            # 퀀트 포트폴리오 상위 종목들 가져오기 (오늘 또는 최근)
-            today = now_kst().strftime('%Y%m%d')
-            portfolio = self.db_manager.get_quant_portfolio(today, limit=PORTFOLIO_SIZE)
+            # 최근 포트폴리오 조회 (16:05 스크리닝 결과 — 어제 날짜일 수 있음)
+            portfolio = self.db_manager.get_latest_quant_portfolio(limit=PORTFOLIO_SIZE)
 
-            candidates = None
-            if not portfolio:
-                # 포트폴리오가 없으면 후보 종목들 사용
-                candidates = await self.candidate_selector.get_quant_candidates(limit=PORTFOLIO_SIZE)
-                stock_codes = [c.code for c in candidates[:PORTFOLIO_SIZE]] if candidates else []
-
-                # 후보 종목이 선정되었으면 데이터베이스에 저장
-                if candidates:
-                    try:
-                        self.db_manager.save_candidate_stocks(candidates)
-                        logger.info(f"✅ 후보 종목 {len(candidates)}개 데이터베이스 저장 완료")
-                    except Exception as db_err:
-                        logger.error(f"❌ 후보 종목 DB 저장 오류: {db_err}")
-            else:
+            if portfolio:
+                calc_date = portfolio[0].get('calc_date', '?')
                 stock_codes = [row['stock_code'] for row in portfolio]
+                logger.info(f"📊 최근 포트폴리오 사용: {calc_date} ({len(stock_codes)}개 종목)")
+            else:
+                logger.warning("⚠️ 포트폴리오 없음 — 보유 종목만 수집합니다")
+                stock_codes = []
 
             # 🆕 보유 종목도 일봉 데이터 수집 대상에 추가
             try:
