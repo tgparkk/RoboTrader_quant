@@ -326,25 +326,145 @@ class StateRestorationHelper:
                         'message': f"⚠️ {stock_code}({db_info['stock_name']}): DB에만 존재 ({db_info['quantity']}주) - 외부 매도 또는 미체결"
                     })
 
-            # 3. 불일치 로깅 및 알림
+            # 3. 불일치 처리 (복구 시도 + 로깅)
             if mismatches:
                 logger.warning(f"🚨 [실전매매] 계좌-DB 불일치 감지: {len(mismatches)}건")
+
+                unresolved = []
                 for m in mismatches:
                     logger.warning(m['message'])
 
-                # 텔레그램 알림
-                if self.telegram:
-                    alert_msg = f"🚨 계좌-DB 불일치 감지: {len(mismatches)}건\n\n"
-                    for m in mismatches[:5]:  # 최대 5건만 표시
+                    # DB_ONLY: 자동 복구 시도
+                    if m['type'] == 'DB_ONLY':
+                        recovered = await self._reconcile_db_only_mismatch(m)
+                        if not recovered:
+                            unresolved.append(m)
+                    else:
+                        unresolved.append(m)
+
+                # 미해결 건만 텔레그램 알림
+                if unresolved and self.telegram:
+                    alert_msg = f"🚨 계좌-DB 불일치 미해결: {len(unresolved)}건\n\n"
+                    for m in unresolved[:5]:
                         alert_msg += f"• {m['message']}\n"
-                    if len(mismatches) > 5:
-                        alert_msg += f"... 외 {len(mismatches)-5}건"
+                    if len(unresolved) > 5:
+                        alert_msg += f"... 외 {len(unresolved)-5}건"
+                    alert_msg += "\n⚠️ 수동 확인 필요"
                     await self.telegram.notify_system_status(alert_msg)
+                elif not unresolved:
+                    logger.info("✅ [실전매매] 계좌-DB 불일치 전건 자동 복구 완료")
             else:
                 logger.info("✅ [실전매매] 계좌-DB 보유 종목 일치 확인")
 
         except Exception as e:
             logger.error(f"❌ 불일치 감지 오류: {e}")
+
+    async def _reconcile_db_only_mismatch(self, mismatch: dict) -> bool:
+        """DB에만 존재하는 포지션을 KIS 체결내역으로 자동 복구
+
+        Returns:
+            True: 복구 성공, False: 복구 실패 (수동 확인 필요)
+        """
+        stock_code = mismatch['stock_code']
+        stock_name = mismatch['stock_name']
+        db_qty = mismatch['db_qty']
+
+        try:
+            from api.kis_order_api import get_inquire_daily_ccld_lst
+            import asyncio
+
+            today_str = now_kst().strftime('%Y%m%d')
+            loop = asyncio.get_running_loop()
+
+            # 당일 체결내역 조회
+            ccld_df = await loop.run_in_executor(
+                None,
+                lambda: get_inquire_daily_ccld_lst(
+                    dv="01",
+                    inqr_strt_dt=today_str,
+                    inqr_end_dt=today_str,
+                    ccld_dvsn="01"  # 체결만
+                )
+            )
+
+            if ccld_df is None or ccld_df.empty:
+                # 전일 조회 시도 (어제 체결된 경우)
+                from datetime import timedelta
+                yesterday_str = (now_kst() - timedelta(days=1)).strftime('%Y%m%d')
+                ccld_df = await loop.run_in_executor(
+                    None,
+                    lambda: get_inquire_daily_ccld_lst(
+                        dv="01",
+                        inqr_strt_dt=yesterday_str,
+                        inqr_end_dt=yesterday_str,
+                        ccld_dvsn="01"
+                    )
+                )
+
+            if ccld_df is None or ccld_df.empty:
+                logger.error(f"❌ {stock_code}({stock_name}) 체결내역 조회 실패 — 자동 복구 불가")
+                return False
+
+            # 해당 종목의 매도 체결 찾기
+            # KIS API output1 컬럼: pdno(종목번호), sll_buy_dvsn_cd(01=매도,02=매수),
+            # avg_prvs(평균체결가), tot_ccld_qty(총체결수량), ccld_qty(체결수량)
+            sell_records = ccld_df[
+                (ccld_df['pdno'] == stock_code) &
+                (ccld_df['sll_buy_dvsn_cd'] == '01')  # 매도
+            ]
+
+            if sell_records.empty:
+                logger.error(f"❌ {stock_code}({stock_name}) 매도 체결 기록 없음 — 자동 복구 불가")
+                return False
+
+            # 가장 최근 매도 체결 사용
+            latest_sell = sell_records.iloc[-1]
+            fill_price = float(str(latest_sell.get('avg_prvs', '0')).replace(',', '') or '0')
+            fill_qty = int(str(latest_sell.get('tot_ccld_qty', '0')).replace(',', '') or '0')
+
+            # DB 수량과 체결 수량 불일치 검증
+            if fill_qty != db_qty:
+                logger.warning(
+                    f"⚠️ {stock_code}({stock_name}) 수량 불일치: "
+                    f"DB={db_qty}주, 체결={fill_qty}주 — 자동 복구 불가 (수동 확인 필요)"
+                )
+                return False
+
+            if fill_price <= 0 or fill_qty <= 0:
+                logger.error(
+                    f"❌ {stock_code}({stock_name}) 체결 데이터 이상 "
+                    f"(price={fill_price}, qty={fill_qty}) — 자동 복구 불가"
+                )
+                return False
+
+            # DB에서 미매칭 매수 기록 찾기
+            buy_record_id = self.db_manager.get_last_open_real_buy(stock_code)
+
+            # SELL 기록 자동 생성
+            success = self.db_manager.save_real_sell(
+                stock_code=stock_code,
+                stock_name=stock_name,
+                price=fill_price,
+                quantity=fill_qty,
+                strategy="리밸런싱",
+                reason=f"[자동복구] 체결내역 기반 매도 기록 복원 ({fill_qty}주 @{fill_price:,.0f}원)",
+                buy_record_id=buy_record_id,
+                timestamp=now_kst(),
+            )
+
+            if success:
+                logger.info(
+                    f"✅ {stock_code}({stock_name}) 매도 기록 자동 복구 완료: "
+                    f"{fill_qty}주 @{fill_price:,.0f}원 (buy_record_id={buy_record_id})"
+                )
+                return True
+            else:
+                logger.error(f"❌ {stock_code}({stock_name}) 매도 기록 저장 실패")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ {stock_code}({stock_name}) 자동 복구 예외: {e}")
+            return False
 
     async def check_condition_search(self):
         """장중 퀀트 후보 스크리닝 결과 반영"""
