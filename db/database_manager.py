@@ -6,6 +6,7 @@ import psycopg2
 import psycopg2.extras
 import psycopg2.pool
 import json
+import threading
 import subprocess
 import pandas as pd
 from datetime import datetime, timedelta
@@ -76,8 +77,26 @@ class DatabaseManager:
         # 테이블 생성 (멱등)
         self._create_tables()
 
+        # 매매 전용 DB 연결 (풀과 독립 — 벌크 작업 풀 고갈 시에도 매매 기록 보장)
+        self._trade_conn = psycopg2.connect(
+            host=self.db_host,
+            port=self.db_port,
+            dbname=self.db_name,
+            user=self.db_user,
+            password=self.db_password,
+        )
+        self._trade_conn.autocommit = False
+        self._trade_lock = threading.Lock()
+        self.logger.info("매매 전용 DB 연결 초기화 완료")
+
     def close(self):
         """연결 풀 종료 (시스템 shutdown 시 호출)"""
+        try:
+            if hasattr(self, '_trade_conn') and self._trade_conn and not self._trade_conn.closed:
+                self._trade_conn.close()
+                self.logger.info("매매 전용 DB 연결 종료 완료")
+        except Exception as e:
+            self.logger.error(f"매매 전용 DB 연결 종료 오류: {e}")
         try:
             if hasattr(self, '_pool') and self._pool:
                 self._pool.closeall()
@@ -97,6 +116,42 @@ class DatabaseManager:
     def get_connection(self):
         """외부 코드가 직접 연결을 얻을 수 있도록 공개 메서드 제공"""
         return self._get_connection()
+
+    def _get_trade_connection(self):
+        """매매 전용 DB 연결 획득 (풀과 독립, thread-safe)"""
+        self._trade_lock.acquire()
+        try:
+            # 연결 상태 확인 (closed + broken 모두 체크)
+            need_reconnect = self._trade_conn.closed
+            if not need_reconnect:
+                try:
+                    self._trade_conn.cursor().execute("SELECT 1")
+                    self._trade_conn.rollback()  # SELECT 1 트랜잭션 정리
+                except (psycopg2.OperationalError, psycopg2.InterfaceError):
+                    need_reconnect = True
+
+            if need_reconnect:
+                self.logger.warning("⚠️ 매매 전용 DB 연결 끊김 — 재연결")
+                try:
+                    self._trade_conn.close()
+                except Exception:
+                    pass
+                self._trade_conn = psycopg2.connect(
+                    host=self.db_host,
+                    port=self.db_port,
+                    dbname=self.db_name,
+                    user=self.db_user,
+                    password=self.db_password,
+                )
+                self._trade_conn.autocommit = False
+            return self._trade_conn
+        except Exception:
+            self._trade_lock.release()
+            raise
+
+    def _put_trade_connection(self):
+        """매매 전용 연결 Lock 해제 (연결은 유지)"""
+        self._trade_lock.release()
 
     def _get_today_range_strings(self) -> tuple:
         """KST 기준 오늘의 시작과 내일 시작 시간 문자열(YYYY-MM-DD HH:MM:SS)을 반환."""
@@ -1079,12 +1134,12 @@ class DatabaseManager:
             if stop_loss_rate is not None:
                 stop_loss_rate = float(stop_loss_rate)
 
-            conn = self._get_connection()
+            conn = self._get_trade_connection()
             try:
                 with conn:
                     cursor = conn.cursor()
                     cursor.execute('''
-                        INSERT INTO real_trading_records 
+                        INSERT INTO real_trading_records
                         (stock_code, stock_name, action, quantity, price, timestamp, strategy, reason,
                          target_profit_rate, stop_loss_rate, created_at)
                         VALUES (%s, %s, 'BUY', %s, %s, %s, %s, %s, %s, %s, %s)
@@ -1104,7 +1159,7 @@ class DatabaseManager:
                 self.logger.info(f"✅ 실거래 매수 기록 저장: {stock_code} {quantity}주 @{price:,.0f}{profit_info}")
                 return rec_id
             finally:
-                self._put_connection(conn)
+                self._put_trade_connection()
         except Exception as e:
             self.logger.error(f"실거래 매수 기록 저장 실패: {e}")
             return None
@@ -1120,7 +1175,7 @@ class DatabaseManager:
                 timestamp = now_kst()
             buy_price = None
 
-            conn = self._get_connection()
+            conn = self._get_trade_connection()
             try:
                 with conn:
                     cursor = conn.cursor()
@@ -1198,14 +1253,14 @@ class DatabaseManager:
                 )
                 return True
             finally:
-                self._put_connection(conn)
+                self._put_trade_connection()
         except Exception as e:
             self.logger.error(f"실거래 매도 기록 저장 실패: {e}")
             return False
 
     def get_last_open_real_buy(self, stock_code: str) -> Optional[int]:
         """해당 종목의 미매칭 매수(가장 최근) ID 조회"""
-        conn = self._get_connection()
+        conn = self._get_trade_connection()
         try:
             with conn:
                 cursor = conn.cursor()
@@ -1226,7 +1281,7 @@ class DatabaseManager:
             self.logger.error(f"실거래 미매칭 매수 조회 실패: {e}")
             return None
         finally:
-            self._put_connection(conn)
+            self._put_trade_connection()
     
     def get_last_open_virtual_buy(self, stock_code: str, quantity: int = None) -> Optional[int]:
         """가상 매매: 해당 종목의 미매칭 매수(가장 최근) ID 조회"""
