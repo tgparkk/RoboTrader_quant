@@ -13,7 +13,7 @@ from pathlib import Path
 
 from utils.logger import setup_logger
 from utils.korean_time import now_kst, get_previous_trading_day
-from api.kis_market_api import get_inquire_daily_itemchartprice, get_stock_market_cap
+from api.kis_market_api import get_inquire_daily_itemchartprice, get_inquire_daily_itemchartprice_extended, get_stock_market_cap
 from api.kis_financial_api import get_financial_ratio, get_income_statement, get_balance_sheet
 from config.pg_helper import pg_connection
 
@@ -138,10 +138,11 @@ class MLDataCollector:
 
             self.logger.info(f"📊 [{stock_code}] 일별 가격 데이터 수집 시작: {start_date} ~ {end_date}")
             
-            daily_data = get_inquire_daily_itemchartprice(
-                output_dv="2", div_code="J", itm_no=stock_code,
+            daily_data = get_inquire_daily_itemchartprice_extended(
+                div_code="J", itm_no=stock_code,
                 period_code="D", adj_prc="0",
-                inqr_strt_dt=start_date, inqr_end_dt=end_date
+                inqr_strt_dt=start_date, inqr_end_dt=end_date,
+                max_count=500
             )
             
             if daily_data is None or daily_data.empty:
