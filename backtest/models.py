@@ -85,6 +85,9 @@ class BacktestParams:
     crisis_sell_sp500_pct: float = -0.05     # S&P500 전일 -5% 이하 → 전량 매도
     crisis_sell_vix: float = 40.0            # VIX ≥ 40 → 전량 매도
 
+    # 리밸런싱 매도 후 재매수 차단 일수 (0 = 차단 없음, 실전 기본값 3일)
+    rebalancing_sell_cooldown_days: int = 0
+
     # 5일 수익률 하드게이트 (None이면 비활성)
     buy_ret5d_min: float = None
 

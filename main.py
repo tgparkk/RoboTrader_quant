@@ -810,23 +810,12 @@ class DayTradingBot:
                             self.logger.info(f"📊 08:30+ 전일 데이터 수집 스케줄 트리거 ({current_time.strftime('%H:%M:%S')})")
                             self._daily_data_collection_task = asyncio.create_task(self._run_daily_data_collection())
 
-                # 16:05 퀀트 스크리닝 (장 마감 후 — 내일용 포트폴리오 생성)
-                # 전일 종가 기준이므로 장중 실행 불필요. 장중 API 경합 방지.
-                if current_time.hour == 16 and current_time.minute >= 5:
-                    if self._last_quant_screening_date != current_time.date() and self._quant_screening_task is None:
-                        self.logger.info(f"🔍 16:05+ 퀀트 스크리닝 스케줄 트리거 ({current_time.strftime('%H:%M:%S')})")
-                        self._quant_screening_task = asyncio.create_task(self._run_quant_screening())
-
-                # 15:35 장 마감 후 일일 매매 리포트 생성
-                if (current_time.hour == 15 and current_time.minute >= 35):
-                    if self._last_daily_report_date != current_time.date():
-                        self.logger.info(f"📊 15:35+ 장 마감 후 일일 매매 리포트 생성 ({current_time.strftime('%H:%M:%S')})")
-                        try:
-                            print_today_trading_summary()
-                            self._last_daily_report_date = current_time.date()
-                            self.logger.info("✅ 일일 매매 리포트 생성 완료")
-                        except Exception as report_err:
-                            self.logger.error(f"❌ 일일 매매 리포트 생성 오류: {report_err}")
+                # 15:35 장 마감 후: 전체 일봉 수집 → 퀀트 스크리닝 → 일일 매매 리포트 (순차 실행)
+                if current_time.hour == 15 and current_time.minute >= 35:
+                    if (self._last_daily_report_date != current_time.date() and
+                            self._quant_screening_task is None):
+                        self.logger.info(f"📊 15:35+ 장 마감 후 플로우 트리거 ({current_time.strftime('%H:%M:%S')})")
+                        self._quant_screening_task = asyncio.create_task(self._run_after_market_flow())
 
                 #             self.logger.info("✅ 장 마감 후 차트 생성 완료 (1회 실행 완료)")
 
@@ -1025,6 +1014,38 @@ class DayTradingBot:
         except Exception as e:
             self.logger.error(f"❌ 시스템 상태 로깅 오류: {e}")
     
+    async def _run_after_market_flow(self):
+        """15:35 장 마감 후 순차 실행: 전체 일봉 수집 → 퀀트 스크리닝 → 일일 리포트"""
+        try:
+            # 1단계: 전체 종목 일봉 수집
+            self.logger.info("📊 15:35+ 장 마감 후 일봉 수집 시작")
+            collection_ok = await self.screening_task_runner.run_after_market_data_collection()
+            if not collection_ok:
+                self.logger.warning("⚠️ 장 마감 후 일봉 수집 실패 — 스크리닝은 계속 진행")
+
+            # 2단계: 퀀트 스크리닝
+            self.logger.info("🔍 일봉 수집 완료 → 스크리닝 시작")
+            screening_ok = await self.screening_task_runner.run_quant_screening()
+            self._last_quant_screening_date = now_kst().date()
+            if screening_ok:
+                self.logger.info("✅ 퀀트 스크리닝 성공")
+            else:
+                self.logger.warning("⚠️ 퀀트 스크리닝 실패")
+
+            # 3단계: 일일 매매 리포트
+            self.logger.info("📋 스크리닝 완료 → 리포트 생성")
+            try:
+                print_today_trading_summary()
+                self._last_daily_report_date = now_kst().date()
+                self.logger.info("✅ 일일 매매 리포트 생성 완료")
+            except Exception as report_err:
+                self.logger.error(f"❌ 일일 매매 리포트 생성 오류: {report_err}")
+
+        except Exception as e:
+            self.logger.error(f"❌ 장 마감 후 플로우 오류: {e}")
+        finally:
+            self._quant_screening_task = None
+
     async def _run_quant_screening(self):
         """일일 퀀트 스크리닝 실행 (8단계 기준)"""
         try:

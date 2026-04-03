@@ -1056,6 +1056,13 @@ class TradingStockManager:
                         # 매도 완료 후 즉시 재거래 준비 (COMPLETED 상태 유지)
                         if self.enable_re_trading:
                             self.logger.info(f"🔄 {trading_stock.stock_code} 즉시 재거래 준비 완료 (COMPLETED 상태 유지)")
+
+                        # 리밸런싱 매도 완료 시 intraday 모니터링 해제
+                        # TP/SL 매도(재매수 가능)는 해제하지 않음; 리밸런싱 매도는 쿨다운으로 재진입 차단되므로 안전
+                        sell_reason_str = getattr(order, 'reason', '') or ''
+                        if sell_reason_str.startswith('[리밸런싱]'):
+                            self.intraday_manager.remove_stock(trading_stock.stock_code)
+                            self.logger.info(f"🗑️ {trading_stock.stock_code} intraday 모니터링 해제 (리밸런싱 매도 완료)")
                     else:
                         self.logger.warning(f"⚠️ 예상치 못한 상태에서 매도 체결: {trading_stock.state.value}")
                         # 예상치 못한 상태에서도 투자금 회수 시도 (자금 잠김 방지)

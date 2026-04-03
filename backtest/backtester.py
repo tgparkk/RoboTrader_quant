@@ -53,6 +53,8 @@ class Backtester:
         self._today_rebalancing_bought: set = set()
         self._today_regime: str = 'NORMAL'
         self._regime_stats: Dict[str, int] = {'NORMAL': 0, 'CAUTION': 0, 'CRISIS': 0}
+        # 쿨다운 추적: {stock_code: sell_date} — 리밸런싱 매도된 종목과 매도일
+        self._rebalancing_sold_dates: Dict[str, str] = {}
 
     def backtest(self, start_date: str, end_date: str) -> BacktestResult:
         """백테스트 실행"""
@@ -265,6 +267,9 @@ class Backtester:
 
         for stock_code, reason in sell_list:
             self._execute_sell(stock_code, date, reason)
+            # 쿨다운 추적: 리밸런싱 매도된 종목은 재매수 차단 날짜 기록
+            if self.params.rebalancing_sell_cooldown_days > 0:
+                self._rebalancing_sold_dates[stock_code] = date
 
         current_codes = set(self.positions.keys())
         buy_candidates = []
@@ -276,6 +281,13 @@ class Backtester:
                 continue
             if stock_code in self._today_stop_profit_sold:
                 continue
+            # 쿨다운 필터: 리밸런싱 매도 후 N일 이내 재매수 차단
+            if self.params.rebalancing_sell_cooldown_days > 0:
+                sell_date = self._rebalancing_sold_dates.get(stock_code)
+                if sell_date is not None:
+                    days_since_sell = self._calc_holding_days(sell_date, date)
+                    if days_since_sell <= self.params.rebalancing_sell_cooldown_days:
+                        continue
             # 매수 최소 점수 필터: 절대 품질 기준 미달 시 매수 스킵
             if self.params.buy_min_score > 0 and item['total_score'] < self.params.buy_min_score:
                 continue

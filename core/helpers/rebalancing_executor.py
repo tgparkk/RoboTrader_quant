@@ -268,9 +268,14 @@ class RebalancingExecutor:
                     stock_name = sell_result.get('stock_name', stock_code)
                     order_id = sell_result.get('order_id')
 
-                    # 실제 체결 여부 확인 (completed_orders에서 FILLED 상태 조회)
+                    # 실제 체결 여부 확인:
+                    # 1) order_wait_helper가 remaining_qty==0 확인 후 기록한 filled_quantity (빠름)
+                    # 2) order_manager completed_orders FILLED 상태 (최대 7초 지연 가능)
+                    # 두 경로 중 하나라도 체결 확인되면 처리 진행
                     order_filled = False
-                    if order_id:
+                    if sell_result.get('filled_quantity'):
+                        order_filled = True
+                    elif order_id:
                         for completed in self.order_manager.get_completed_orders():
                             if completed.order_id == order_id and completed.status == OrderStatus.FILLED:
                                 order_filled = True
@@ -279,15 +284,35 @@ class RebalancingExecutor:
                     if order_filled:
                         # fund_manager 매도 대금 회수 (clear_current_order 전에 실행해야 함)
                         if self.fund_manager:
-                            for completed in self.order_manager.get_completed_orders():
-                                if completed.order_id == order_id and completed.status == OrderStatus.FILLED:
-                                    sell_amount = float(completed.price) * int(completed.quantity)
+                            # completed_orders 우선 조회 (체결가 정확), 없으면 sell_result 수량으로 fallback
+                            fund_released = False
+                            if order_id:
+                                for completed in self.order_manager.get_completed_orders():
+                                    if completed.order_id == order_id and completed.status == OrderStatus.FILLED:
+                                        sell_amount = float(completed.price) * int(completed.quantity)
+                                        self.fund_manager.release_investment(sell_amount)
+                                        logger.info(
+                                            f"💰 리밸런싱 매도 자금 회수: {stock_code}({stock_name}) "
+                                            f"{sell_amount:,.0f}원 → 가용잔고: {self.fund_manager.available_funds:,.0f}원"
+                                        )
+                                        fund_released = True
+                                        break
+                            if not fund_released:
+                                # order_manager 기록 지연 시 sell_result 수량으로 회수 (filled_quantity 경로)
+                                filled_qty = sell_result.get('filled_quantity') or sell_result.get('quantity', 0)
+                                trading_stock_tmp = self.trading_manager.get_trading_stock(stock_code)
+                                avg_price = (
+                                    trading_stock_tmp.position.avg_price
+                                    if trading_stock_tmp and trading_stock_tmp.position
+                                    else 0
+                                )
+                                if filled_qty and avg_price:
+                                    sell_amount = float(avg_price) * int(filled_qty)
                                     self.fund_manager.release_investment(sell_amount)
                                     logger.info(
-                                        f"💰 리밸런싱 매도 자금 회수: {stock_code}({stock_name}) "
+                                        f"💰 리밸런싱 매도 자금 회수 (fallback): {stock_code}({stock_name}) "
                                         f"{sell_amount:,.0f}원 → 가용잔고: {self.fund_manager.available_funds:,.0f}원"
                                     )
-                                    break
 
                         # 체결 확인됨 → 안전하게 정리
                         trading_stock = self.trading_manager.get_trading_stock(stock_code)

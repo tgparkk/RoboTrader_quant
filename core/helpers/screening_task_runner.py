@@ -212,6 +212,52 @@ class ScreeningTaskRunner:
                 await self.telegram.notify_error("Daily Data Collection", e)
             return False
 
+    async def run_after_market_data_collection(self) -> bool:
+        """장 마감 후 전체 종목 일봉 수집 (15:35 — 당일 종가 포함)
+
+        스크리닝에 필요한 전체 종목(2,484개)의 일봉 데이터를 DB에 저장합니다.
+        재무 데이터는 수집하지 않습니다 (변동 없음).
+        """
+        try:
+            logger.info("📊 15:35+ 장 마감 후 일봉 수집 시작")
+
+            # 전체 종목 코드 조회
+            stock_list = self.candidate_selector.get_all_stock_list()
+            if not stock_list:
+                logger.warning("⚠️ 전체 종목 리스트를 불러올 수 없습니다 — 일봉 수집 건너뜀")
+                return False
+
+            stock_codes = [s['code'] for s in stock_list if s.get('code')]
+            logger.info(f"📊 장 마감 후 일봉 수집 대상: {len(stock_codes)}개 종목")
+
+            loop = asyncio.get_event_loop()
+            price_results = await loop.run_in_executor(
+                None,
+                self.ml_data_collector.collect_all_candidates,
+                stock_codes,
+                True,   # collect_price
+                False,  # collect_financial (재무는 수집 안 함)
+                None,   # deadline 없음 (장 마감 후)
+            )
+
+            price_success = sum(1 for v in price_results.values() if v)
+            logger.info(f"✅ 장 마감 후 일봉 수집 완료: {price_success}/{len(stock_codes)}개")
+
+            if self.telegram:
+                await self.telegram.notify_system_status(
+                    f"📊 장 마감 후 일봉 수집 완료\n"
+                    f"가격 데이터: {price_success}/{len(stock_codes)}개"
+                )
+
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ 장 마감 후 일봉 수집 예외 발생: {e}")
+            traceback.print_exc()
+            if self.telegram:
+                await self.telegram.notify_error("After Market Data Collection", e)
+            return False
+
     async def run_ml_screening(self):
         """ML 멀티팩터 스크리닝 실행 (08:55)"""
         try:
