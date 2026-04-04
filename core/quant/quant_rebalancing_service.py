@@ -369,6 +369,31 @@ class QuantRebalancingService:
                             skipped_by_score += 1
                             continue
 
+                        # 점수 모멘텀 필터: 전일 대비 점수 상승 종목만 매수
+                        from config.constants import BUY_SCORE_MOMENTUM_MIN
+                        if BUY_SCORE_MOMENTUM_MIN is not None:
+                            try:
+                                prev_factors = self.db_manager.get_previous_quant_factors(
+                                    portfolio_date, code
+                                )
+                                if prev_factors:
+                                    prev_score = prev_factors.get('total_score', 0)
+                                    score_momentum = item_score - prev_score
+                                    if score_momentum < BUY_SCORE_MOMENTUM_MIN:
+                                        self.logger.info(
+                                            f"⏭️ {code}({portfolio_item['stock_name']}) 매수 스킵: "
+                                            f"점수 모멘텀 부족 ({score_momentum:+.1f} < {BUY_SCORE_MOMENTUM_MIN:+.1f}, "
+                                            f"현재 {item_score:.1f}, 전일 {prev_score:.1f})"
+                                        )
+                                        continue
+                                    else:
+                                        self.logger.debug(
+                                            f"✅ {code} 점수 모멘텀 통과: {score_momentum:+.1f} "
+                                            f"(현재 {item_score:.1f}, 전일 {prev_score:.1f})"
+                                        )
+                            except Exception as e:
+                                self.logger.debug(f"점수 모멘텀 조회 실패 ({code}): {e}")
+
                         # 5일 수익률 하드게이트: 급락 종목 매수 차단
                         from config.constants import BUY_RET5D_MIN
                         if BUY_RET5D_MIN is not None:

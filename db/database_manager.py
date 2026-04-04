@@ -913,6 +913,38 @@ class DatabaseManager:
         finally:
             self._put_connection(conn)
     
+    def get_previous_quant_factors(self, calc_date: str, stock_code: str) -> Optional[Dict[str, Any]]:
+        """특정 종목의 전일 팩터 점수 조회 (score_momentum 계산용)"""
+        conn = self._get_connection()
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT stock_code, value_score, momentum_score, quality_score,
+                           growth_score, total_score, factor_rank
+                    FROM quant_factors
+                    WHERE calc_date < %s AND stock_code = %s
+                    ORDER BY calc_date DESC
+                    LIMIT 1
+                ''', (calc_date, stock_code))
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        'stock_code': row[0],
+                        'value_score': row[1],
+                        'momentum_score': row[2],
+                        'quality_score': row[3],
+                        'growth_score': row[4],
+                        'total_score': row[5],
+                        'factor_rank': row[6]
+                    }
+                return None
+        except Exception as e:
+            self.logger.error(f"전일 팩터 점수 조회 실패 ({stock_code}): {e}")
+            return None
+        finally:
+            self._put_connection(conn)
+
     def get_minute_data(self, stock_code: str, date_str: str) -> Optional[pd.DataFrame]:
         """1분봉 데이터를 기존 stock_prices 테이블에서 조회"""
         conn = self._get_connection()
