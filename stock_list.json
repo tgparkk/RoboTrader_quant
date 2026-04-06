@@ -1,13 +1,13 @@
 {
-  "source": "FinanceDataReader",
-  "extract_date": "2026-02-27 08:20:04",
+  "source": "KRX (data.krx.co.kr)",
+  "extract_date": "2026-04-06 16:38:17",
   "markets": [
     "KOSPI",
     "KOSDAQ"
   ],
-  "total_stocks": 2484,
+  "total_stocks": 2486,
   "kospi_count": 801,
-  "kosdaq_count": 1683,
+  "kosdaq_count": 1685,
   "stocks": [
     {
       "code": "000020",
@@ -1592,11 +1592,6 @@
     {
       "code": "008060",
       "name": "대덕",
-      "market": "KOSPI"
-    },
-    {
-      "code": "008110",
-      "name": "대동전자",
       "market": "KOSPI"
     },
     {
@@ -3625,11 +3620,6 @@
       "market": "KOSDAQ"
     },
     {
-      "code": "036180",
-      "name": "지더블유바이텍",
-      "market": "KOSDAQ"
-    },
-    {
       "code": "036190",
       "name": "금화피에스시",
       "market": "KOSDAQ"
@@ -5340,6 +5330,11 @@
       "market": "KOSPI"
     },
     {
+      "code": "066590",
+      "name": "스모트로닉",
+      "market": "KOSDAQ"
+    },
+    {
       "code": "066620",
       "name": "국보디자인",
       "market": "KOSDAQ"
@@ -5591,7 +5586,7 @@
     },
     {
       "code": "070590",
-      "name": "한솔인티큐브",
+      "name": "인티큐브",
       "market": "KOSDAQ"
     },
     {
@@ -8256,7 +8251,7 @@
     },
     {
       "code": "182400",
-      "name": "엔케이맥스",
+      "name": "엔케이젠바이오텍코리아",
       "market": "KOSDAQ"
     },
     {
@@ -8311,7 +8306,7 @@
     },
     {
       "code": "187660",
-      "name": "현대ADM",
+      "name": "페니트리움바이오",
       "market": "KOSDAQ"
     },
     {
@@ -8622,11 +8617,6 @@
     {
       "code": "204620",
       "name": "글로벌텍스프리",
-      "market": "KOSDAQ"
-    },
-    {
-      "code": "204630",
-      "name": "스튜디오산타클로스",
       "market": "KOSDAQ"
     },
     {
@@ -9002,11 +8992,6 @@
     {
       "code": "222800",
       "name": "심텍",
-      "market": "KOSDAQ"
-    },
-    {
-      "code": "222810",
-      "name": "세토피아",
       "market": "KOSDAQ"
     },
     {
@@ -9858,6 +9843,11 @@
       "code": "278650",
       "name": "HLB바이오스텝",
       "market": "KOSDAQ"
+    },
+    {
+      "code": "279570",
+      "name": "케이뱅크",
+      "market": "KOSPI"
     },
     {
       "code": "279600",
@@ -11380,6 +11370,11 @@
       "market": "KOSDAQ"
     },
     {
+      "code": "394420",
+      "name": "리센스메디컬",
+      "market": "KOSDAQ"
+    },
+    {
       "code": "394800",
       "name": "쓰리빌리언",
       "market": "KOSDAQ"
@@ -11472,6 +11467,11 @@
     {
       "code": "407400",
       "name": "꿈비",
+      "market": "KOSDAQ"
+    },
+    {
+      "code": "408470",
+      "name": "한패스",
       "market": "KOSDAQ"
     },
     {
@@ -11960,6 +11960,11 @@
       "market": "KOSDAQ"
     },
     {
+      "code": "458350",
+      "name": "에스팀",
+      "market": "KOSDAQ"
+    },
+    {
       "code": "458870",
       "name": "씨어스테크놀로지",
       "market": "KOSDAQ"
@@ -12312,6 +12317,11 @@
     {
       "code": "491000",
       "name": "리브스메드",
+      "market": "KOSDAQ"
+    },
+    {
+      "code": "493280",
+      "name": "아이엠바이오로직스",
       "market": "KOSDAQ"
     },
     {

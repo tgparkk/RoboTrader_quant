@@ -1,7 +1,7 @@
 """
 종목 리스트 자동 업데이트 스크립트
 
-FDR(FinanceDataReader)로 KOSPI + KOSDAQ 종목을 수집하여
+KRX(한국거래소)에서 KOSPI + KOSDAQ 종목을 수집하여
 stock_list.json을 갱신합니다.
 
 사용법:
@@ -16,6 +16,8 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
+import requests
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.logger import setup_logger
 from utils.korean_time import now_kst
@@ -23,6 +25,12 @@ from utils.korean_time import now_kst
 logger = setup_logger(__name__)
 
 STOCK_LIST_PATH = Path(__file__).parent.parent / "stock_list.json"
+
+KRX_FINDER_URL = "http://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd"
+KRX_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "http://data.krx.co.kr/contents/MDC/MDI/mdiLoader/index.cmd?menuId=MDC0201020101",
+}
 
 
 def _should_exclude(code: str, name: str) -> Optional[str]:
@@ -54,53 +62,86 @@ def _should_exclude(code: str, name: str) -> Optional[str]:
     return None
 
 
+def _fetch_krx_stocks(market: str) -> list[dict]:
+    """
+    KRX data.krx.co.kr에서 종목 리스트 조회.
+
+    Args:
+        market: 'STK' (KOSPI) 또는 'KSQ' (KOSDAQ)
+
+    Returns:
+        [{'code': '005930', 'name': '삼성전자', 'market': 'KOSPI'}, ...]
+    """
+    market_name = 'KOSPI' if market == 'STK' else 'KOSDAQ'
+
+    payload = {
+        "bld": "dbms/comm/finder/finder_stkisu",
+        "mktsel": market,
+        "typeNo": "0",
+        "searchText": "",
+    }
+
+    resp = requests.post(KRX_FINDER_URL, data=payload, headers=KRX_HEADERS, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+
+    items = data.get("block1", [])
+    if not items:
+        raise ValueError(f"KRX {market_name} 응답에 block1 데이터 없음")
+
+    stocks = []
+    for item in items:
+        # short_code: 'A005930' → '005930'
+        raw_code = item.get("short_code", "")
+        code = raw_code.lstrip("A") if raw_code.startswith("A") else raw_code
+        name = item.get("codeName", "").strip()
+
+        if code and name:
+            stocks.append({
+                "code": code,
+                "name": name,
+                "market": market_name,
+            })
+
+    return stocks
+
+
 def update_stock_list(dry_run: bool = False) -> Optional[dict]:
     """
-    FDR로 KOSPI + KOSDAQ 종목을 수집하여 stock_list.json 갱신.
+    KRX에서 KOSPI + KOSDAQ 종목을 수집하여 stock_list.json 갱신.
 
     Returns:
         {'kospi': int, 'kosdaq': int, 'total': int, 'excluded': dict} 또는 실패 시 None
     """
+    # 1. KRX에서 양 시장 종목 수집
     try:
-        import FinanceDataReader as fdr
-    except ImportError:
-        logger.error("FinanceDataReader 미설치: pip install finance-datareader")
-        return None
-
-    # 1. FDR로 양 시장 종목 수집
-    try:
-        kospi_df = fdr.StockListing('KOSPI')
-        kosdaq_df = fdr.StockListing('KOSDAQ')
+        kospi_raw = _fetch_krx_stocks("STK")
+        kosdaq_raw = _fetch_krx_stocks("KSQ")
     except Exception as e:
-        logger.error(f"FDR 종목 리스트 조회 실패: {e}")
+        logger.error(f"KRX 종목 리스트 조회 실패: {e}")
         return None
 
-    if kospi_df is None or kospi_df.empty:
+    if not kospi_raw:
         logger.error("KOSPI 종목 리스트가 비어 있습니다")
         return None
-    if kosdaq_df is None or kosdaq_df.empty:
+    if not kosdaq_raw:
         logger.error("KOSDAQ 종목 리스트가 비어 있습니다")
         return None
 
-    # 2. 통합 및 필터링
+    # 2. 필터링
     stocks = []
     excluded_counts = {}
 
-    for df, market in [(kospi_df, 'KOSPI'), (kosdaq_df, 'KOSDAQ')]:
-        for _, row in df.iterrows():
-            code = str(row.get('Code', '')).strip()
-            name = str(row.get('Name', '')).strip()
+    for item in kospi_raw + kosdaq_raw:
+        code = item['code']
+        name = item['name']
 
-            reason = _should_exclude(code, name)
-            if reason:
-                excluded_counts[reason] = excluded_counts.get(reason, 0) + 1
-                continue
+        reason = _should_exclude(code, name)
+        if reason:
+            excluded_counts[reason] = excluded_counts.get(reason, 0) + 1
+            continue
 
-            stocks.append({
-                'code': code,
-                'name': name,
-                'market': market
-            })
+        stocks.append(item)
 
     # 3. 코드순 정렬
     stocks.sort(key=lambda x: x['code'])
@@ -129,7 +170,7 @@ def update_stock_list(dry_run: bool = False) -> Optional[dict]:
         shutil.copy2(STOCK_LIST_PATH, backup_path)
 
     data = {
-        'source': 'FinanceDataReader',
+        'source': 'KRX (data.krx.co.kr)',
         'extract_date': now_kst().strftime('%Y-%m-%d %H:%M:%S'),
         'markets': ['KOSPI', 'KOSDAQ'],
         'total_stocks': len(stocks),
