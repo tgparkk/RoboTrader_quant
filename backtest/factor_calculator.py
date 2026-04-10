@@ -437,8 +437,8 @@ class HistoricalFactorCalculator:
 
     def _calc_growth_score(self, fin_data, year_ago_fin, stock_prices: pd.DataFrame) -> float:
         """
-        Growth 팩터 (quant_screening_service.py:535-575와 동일)
-        매출1Y(30%) + 매출3Y(25%) + 순이익1Y(25%) + EPS1Y(20%)
+        Growth 팩터 (quant_screening_service.py:638-668과 동일)
+        매출1Y(55%) + 순이익1Y(45%)
 
         재무데이터 있으면: YoY 매출/순이익 성장률 (라이브와 동일 공식)
         재무데이터 없으면: 모멘텀 가속도 프록시
@@ -455,8 +455,8 @@ class HistoricalFactorCalculator:
                 cur_net_income = self._get_fin_val(fin_data, 'net_income')
                 prev_net_income = self._get_fin_val(year_ago_fin, 'net_income')
 
-                has_revenue_growth = (cur_revenue and prev_revenue and prev_revenue > 0)
-                has_income_growth = (cur_net_income and prev_net_income and prev_net_income > 0)
+                has_revenue_growth = (cur_revenue is not None and prev_revenue is not None and prev_revenue != 0)
+                has_income_growth = (cur_net_income is not None and prev_net_income is not None and prev_net_income != 0)
 
                 if has_revenue_growth or has_income_growth:
                     # 1년 매출 성장률 (음수 허용 — 역성장 변별)

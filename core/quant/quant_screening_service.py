@@ -637,15 +637,19 @@ class QuantScreeningService:
 
     def _calc_growth_score(self, ratio, income) -> float:
         """
-        Growth 팩터 계산 (6단계 기준)
-        Growth 점수 = 1년 매출(30%) + 3년 매출(25%) + 1년 순이익(25%) + 1년 EPS(20%)
+        Growth 팩터 계산
+        Growth 점수 = 1년 매출성장(55%) + 1년 순이익성장(45%)
         """
         try:
             # 1년 매출 성장률 (음수 허용 — 역성장 기업 변별)
             sales_growth_1y = ratio.sales_growth if ratio.sales_growth is not None else 0
+            if isinstance(sales_growth_1y, float) and (math.isnan(sales_growth_1y) or math.isinf(sales_growth_1y)):
+                sales_growth_1y = 0
 
             # 1년 순이익 성장률 (음수 허용)
             net_income_growth_1y = ratio.net_income_growth if ratio.net_income_growth is not None else 0
+            if isinstance(net_income_growth_1y, float) and (math.isnan(net_income_growth_1y) or math.isinf(net_income_growth_1y)):
+                net_income_growth_1y = 0
 
             # 점수화: 성장률이 높을수록 높은 점수
             def growth_to_score(growth: float) -> float:
