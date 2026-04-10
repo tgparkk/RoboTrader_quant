@@ -641,34 +641,24 @@ class QuantScreeningService:
         Growth 점수 = 1년 매출(30%) + 3년 매출(25%) + 1년 순이익(25%) + 1년 EPS(20%)
         """
         try:
-            # 1년 매출 성장률
-            sales_growth_1y = ratio.sales_growth if ratio.sales_growth > 0 else 0
-            
-            # 3년 매출 성장률 (추후 다년도 데이터 필요, 일단 1년 기준으로 근사)
-            sales_growth_3y = sales_growth_1y * 0.8  # 임시 근사값
-            
-            # 1년 순이익 성장률
-            net_income_growth_1y = ratio.net_income_growth if ratio.net_income_growth > 0 else 0
-            
-            # 1년 EPS 성장률 (EPS 증가율 근사)
-            eps_growth_1y = sales_growth_1y * 0.7  # 임시 근사값 (매출 성장률의 70%)
-            
+            # 1년 매출 성장률 (음수 허용 — 역성장 기업 변별)
+            sales_growth_1y = ratio.sales_growth if ratio.sales_growth is not None else 0
+
+            # 1년 순이익 성장률 (음수 허용)
+            net_income_growth_1y = ratio.net_income_growth if ratio.net_income_growth is not None else 0
+
             # 점수화: 성장률이 높을수록 높은 점수
             def growth_to_score(growth: float) -> float:
-                # 성장률 -50% ~ +200% 범위를 0~100 점수로 변환
                 return clamp(50 + growth / 2, 0, 100)
-            
+
             sales_1y_score = growth_to_score(sales_growth_1y)
-            sales_3y_score = growth_to_score(sales_growth_3y)
             income_1y_score = growth_to_score(net_income_growth_1y)
-            eps_1y_score = growth_to_score(eps_growth_1y)
-            
-            # Growth 점수 = 1년 매출(30%) + 3년 매출(25%) + 1년 순이익(25%) + 1년 EPS(20%)
+
+            # Growth 점수 = 1년 매출성장(55%) + 1년 순이익성장(45%)
+            # (3Y매출/EPS 근사값 제거 — 독립 데이터만 사용)
             growth_score = (
-                sales_1y_score * 0.30 +
-                sales_3y_score * 0.25 +
-                income_1y_score * 0.25 +
-                eps_1y_score * 0.20
+                sales_1y_score * 0.55 +
+                income_1y_score * 0.45
             )
             
             return clamp(growth_score)

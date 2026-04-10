@@ -459,27 +459,21 @@ class HistoricalFactorCalculator:
                 has_income_growth = (cur_net_income and prev_net_income and prev_net_income > 0)
 
                 if has_revenue_growth or has_income_growth:
-                    # 1년 매출 성장률
+                    # 1년 매출 성장률 (음수 허용 — 역성장 변별)
                     sales_growth_1y = 0
                     if has_revenue_growth:
                         sales_growth_1y = (cur_revenue - prev_revenue) / abs(prev_revenue) * 100
 
-                    # 3년 매출 성장률 (라이브도 1Y * 0.8 근사)
-                    sales_growth_3y = sales_growth_1y * 0.8
-
-                    # 1년 순이익 성장률
+                    # 1년 순이익 성장률 (음수 허용)
                     net_income_growth_1y = 0
                     if has_income_growth:
                         net_income_growth_1y = (cur_net_income - prev_net_income) / abs(prev_net_income) * 100
 
-                    # 1년 EPS 성장률 (라이브도 매출성장률 * 0.7 근사)
-                    eps_growth_1y = sales_growth_1y * 0.7
-
+                    # Growth = 매출성장(55%) + 순이익성장(45%)
+                    # (3Y매출/EPS 근사값 제거 — 독립 데이터만 사용)
                     return clamp(
-                        growth_to_score(sales_growth_1y) * 0.30 +
-                        growth_to_score(sales_growth_3y) * 0.25 +
-                        growth_to_score(net_income_growth_1y) * 0.25 +
-                        growth_to_score(eps_growth_1y) * 0.20
+                        growth_to_score(sales_growth_1y) * 0.55 +
+                        growth_to_score(net_income_growth_1y) * 0.45
                     )
             except Exception:
                 pass
