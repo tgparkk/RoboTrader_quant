@@ -271,10 +271,10 @@ class HistoricalFactorCalculator:
                 growth_score = clamp(growth_score)
 
                 total_score = clamp(
-                    value_score * 0.30 +
+                    value_score * 0.25 +
                     momentum_score * 0.30 +
-                    quality_score * 0.20 +
-                    growth_score * 0.20
+                    quality_score * 0.225 +
+                    growth_score * 0.225
                 )
 
                 # 타이밍 점수 계산 (전일 종가 기준)

@@ -412,12 +412,12 @@ class QuantScreeningService:
         growth_score = validate_score(growth_score, "Growth")
         momentum_score = validate_score(momentum_score, "Momentum")
 
-        # 최종 점수 = Value(30%) + Momentum(30%) + Quality(20%) + Growth(20%)
+        # 최종 점수 = Value(25%) + Momentum(30%) + Quality(22.5%) + Growth(22.5%)
         total_score = (
-            value_score * 0.30 +
+            value_score * 0.25 +
             momentum_score * 0.30 +
-            quality_score * 0.20 +
-            growth_score * 0.20
+            quality_score * 0.225 +
+            growth_score * 0.225
         )
 
         # 최종 점수도 검증
