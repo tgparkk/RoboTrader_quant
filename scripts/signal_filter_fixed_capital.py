@@ -33,22 +33,26 @@ PERIODS = [
     ("2023", "2023-01-01", "2023-12-31"),
     ("2024", "2024-01-01", "2024-12-31"),
     ("2025", "2025-01-01", "2025-12-31"),
-    ("2026Q1", "2026-01-01", "2026-03-31"),
-    ("전체", "2023-01-01", "2026-03-31"),
+    ("2026", "2026-01-01", "2026-04-07"),
+    ("전체", "2023-01-01", "2026-04-07"),
 ]
 
 FILTER_CONFIGS = [
     ("베이스라인", {}),
     ("score_mom>=0.5", {"score_momentum_min": 0.5}),
     ("score_mom>=1.0", {"score_momentum_min": 1.0}),
+    ("score_mom>=1.5", {"score_momentum_min": 1.5}),
+    ("rank_change<=-8", {"rank_change_min": -8}),
     ("ma60<=50", {"ma60_dist_max": 50}),
     ("ret20d<=60", {"ret_20d_max": 60}),
-    ("ma60<=50+ret20d<=60", {"ma60_dist_max": 50, "ret_20d_max": 60}),
     ("sm>=0.5+ma60<=50", {"score_momentum_min": 0.5, "ma60_dist_max": 50}),
     ("sm>=0.5+ret20d<=60", {"score_momentum_min": 0.5, "ret_20d_max": 60}),
-    ("sm>=0.5+ma60<=50+ret20d<=60", {"score_momentum_min": 0.5, "ma60_dist_max": 50, "ret_20d_max": 60}),
     ("sm>=1.0+ma60<=50", {"score_momentum_min": 1.0, "ma60_dist_max": 50}),
-    ("sm>=1.0+ma60<=50+ret20d<=60", {"score_momentum_min": 1.0, "ma60_dist_max": 50, "ret_20d_max": 60}),
+    ("sm>=1.0+ret20d<=60", {"score_momentum_min": 1.0, "ret_20d_max": 60}),
+    ("sm>=1.5+rc<=-8", {"score_momentum_min": 1.5, "rank_change_min": -8}),
+    ("sm>=1.0+rc<=-8", {"score_momentum_min": 1.0, "rank_change_min": -8}),
+    ("sm>=0.5+rc<=-8", {"score_momentum_min": 0.5, "rank_change_min": -8}),
+    ("sm>=1.5+ma60<=50+rc<=-8", {"score_momentum_min": 1.5, "ma60_dist_max": 50, "rank_change_min": -8}),
 ]
 
 
@@ -198,7 +202,7 @@ def main():
     print("\n데이터 로딩 중...")
     loader = Backtester(params=base_params)
     start_norm = loader._normalize_date("2023-01-01")
-    end_norm = loader._normalize_date("2026-03-31")
+    end_norm = loader._normalize_date("2026-04-07")
     trading_days = loader._get_trading_days(start_norm, end_norm)
     loader._preload_data(trading_days)
     saved_prices = loader.daily_prices_cache

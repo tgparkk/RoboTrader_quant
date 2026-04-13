@@ -92,6 +92,9 @@ class BacktestParams:
     # 5일 수익률 하드게이트 (None이면 비활성)
     buy_ret5d_min: float = None
 
+    # 스마트 Hard Cap: 포트폴리오 평균 점수에 따라 보유 상한 동적 조절 (default OFF)
+    use_smart_hard_cap: bool = False
+
     def to_dict(self) -> Dict[str, Any]:
         """딕셔너리로 변환"""
         return {
@@ -121,6 +124,7 @@ class BacktestParams:
             'vix_crisis': self.vix_crisis,
             'caution_max_buy': self.caution_max_buy,
             'buy_ret5d_min': self.buy_ret5d_min,
+            'use_smart_hard_cap': self.use_smart_hard_cap,
         }
 
     @classmethod

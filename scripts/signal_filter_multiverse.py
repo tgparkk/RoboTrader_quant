@@ -54,6 +54,19 @@ class FilteredBacktester(Backtester):
         target_portfolio = portfolio[:self.params.portfolio_size]
         target_codes = {item['stock_code'] for item in target_portfolio}
 
+        # 스마트 Hard Cap: 매수 후보 풀을 max_holdings 크기로 확장 (base class와 동일)
+        if self.params.use_smart_hard_cap and self.positions:
+            kept_scores_pre = []
+            for code in self.positions:
+                f = self._get_factors(date, code)
+                if f and f.get('total_score'):
+                    kept_scores_pre.append(f['total_score'])
+            avg_pre = sum(kept_scores_pre) / len(kept_scores_pre) if kept_scores_pre else 0.0
+            _pre_max = self._compute_smart_hard_cap(avg_pre)
+            buy_candidate_pool = portfolio[:_pre_max]
+        else:
+            buy_candidate_pool = target_portfolio
+
         # === 매도 로직 (원본과 동일) ===
         sell_list = []
         for stock_code, position in list(self.positions.items()):
@@ -97,17 +110,20 @@ class FilteredBacktester(Backtester):
         current_codes = set(self.positions.keys())
         buy_candidates = []
         kospi_change = self._get_kospi_change(date)
-        calc_date = date.replace("-", "")
-
-        # 전일 팩터 데이터 (score_momentum, rank_change 계산용)
-        sorted_dates = sorted(self.factors_cache.keys())
+        # Look-ahead 방지: 거래일 D의 의사결정에는 D-1 스크리닝 결과만 사용
+        # calc_date = D-1 (당일 사용 factor), prev_calc = D-2 (score_momentum/rank_change 비교 기준)
+        calc_date = self._get_prev_calc_date(date)
         prev_calc = None
-        for i, d in enumerate(sorted_dates):
-            if d == calc_date and i > 0:
-                prev_calc = sorted_dates[i - 1]
-                break
+        if calc_date is not None:
+            sd = self._sorted_factor_dates
+            try:
+                i = sd.index(calc_date)
+                if i > 0:
+                    prev_calc = sd[i - 1]
+            except ValueError:
+                prev_calc = None
 
-        for item in target_portfolio:
+        for item in buy_candidate_pool:
             stock_code = item['stock_code']
             if stock_code in current_codes:
                 continue
@@ -123,16 +139,16 @@ class FilteredBacktester(Backtester):
             # 매수 최소 점수
             if self.params.buy_min_score > 0 and item['total_score'] < self.params.buy_min_score:
                 continue
-            # 5일 수익률 하드게이트
+            # 5일 수익률 하드게이트 (Look-ahead 방지: D-1/D-6 종가 기준)
             if self.params.buy_ret5d_min is not None:
                 price_hist = self.daily_prices_cache.get(stock_code)
                 if price_hist is not None and date in price_hist.index:
                     idx = price_hist.index.get_loc(date)
-                    if idx >= 5:
-                        close_now = float(price_hist.iloc[idx]['close'])
-                        close_5d = float(price_hist.iloc[idx - 5]['close'])
-                        if close_5d > 0:
-                            ret_5d = (close_now / close_5d - 1) * 100
+                    if idx >= 6:
+                        close_prev = float(price_hist.iloc[idx - 1]['close'])
+                        close_6d = float(price_hist.iloc[idx - 6]['close'])
+                        if close_6d > 0:
+                            ret_5d = (close_prev / close_6d - 1) * 100
                             if ret_5d < self.params.buy_ret5d_min:
                                 continue
 
@@ -200,7 +216,18 @@ class FilteredBacktester(Backtester):
 
         # === 매수 실행 (원본과 동일) ===
         if buy_candidates:
-            available_slots = self.params.portfolio_size - len(self.positions)
+            # 스마트 Hard Cap: 포트폴리오 평균 점수 기반 동적 상한 계산 (base class와 동일)
+            if self.params.use_smart_hard_cap and self.positions:
+                kept_scores = []
+                for code in self.positions:
+                    f = self._get_factors(date, code)
+                    if f and f.get('total_score'):
+                        kept_scores.append(f['total_score'])
+                avg_score = sum(kept_scores) / len(kept_scores) if kept_scores else 0.0
+                max_holdings = self._compute_smart_hard_cap(avg_score)
+            else:
+                max_holdings = self.params.portfolio_size
+            available_slots = max_holdings - len(self.positions)
             if self._today_regime == 'CRISIS':
                 available_slots = 0
             elif self._today_regime == 'CAUTION':
@@ -238,7 +265,8 @@ class FilteredBacktester(Backtester):
                 self._today_rebalancing_bought.add(stock_code)
 
 
-def run_multiverse(start_date, end_date, slippage=None):
+def run_multiverse(start_date, end_date, slippage=None,
+                   use_smart_hard_cap=False, regime_filter_enabled=False):
     """다차원 멀티버스 실행"""
 
     bp_kw = dict(
@@ -255,11 +283,15 @@ def run_multiverse(start_date, end_date, slippage=None):
         min_hold_days=0,
         use_dynamic_targets=True,
         rebalancing_sell_cooldown_days=3,
+        use_smart_hard_cap=use_smart_hard_cap,
+        regime_filter_enabled=regime_filter_enabled,
     )
     if slippage is not None:
         bp_kw['slippage_rate'] = slippage
     base_params = BacktestParams(**bp_kw)
     print(f"  슬리피지: {base_params.slippage_rate:.4f} ({base_params.slippage_rate*100:.2f}%)")
+    print(f"  스마트 Hard Cap: {'ON' if use_smart_hard_cap else 'OFF'}")
+    print(f"  레짐 필터: {'ON' if regime_filter_enabled else 'OFF'}")
 
     # 데이터 1회 로드
     print("데이터 로딩 중...")
@@ -504,6 +536,10 @@ def main():
     parser.add_argument('--start', type=str, default='2023-01-01')
     parser.add_argument('--end', type=str, default='2026-03-31')
     parser.add_argument('--slippage', type=float, default=None, help='슬리피지 비율 (기본 0.001)')
+    parser.add_argument('--smart-hard-cap', action='store_true', default=False,
+                        help='스마트 Hard Cap 사용 (포트폴리오 평균 점수 기반 상한 동적 조절)')
+    parser.add_argument('--regime', action='store_true', default=False,
+                        help='레짐 필터 사용 (CRISIS/CAUTION 기반 매수 제한)')
     args = parser.parse_args()
 
     print(f"{'#' * 100}")
@@ -512,7 +548,9 @@ def main():
     print(f"{'#' * 100}")
 
     total_start = time.time()
-    run_multiverse(args.start, args.end, slippage=args.slippage)
+    run_multiverse(args.start, args.end, slippage=args.slippage,
+                   use_smart_hard_cap=args.smart_hard_cap,
+                   regime_filter_enabled=args.regime)
     elapsed = time.time() - total_start
     print(f"\n  총 소요 시간: {elapsed:.0f}초")
 

@@ -81,6 +81,8 @@ def run_multiverse(start_date: str, end_date: str,
             buy_cost_rate=base_params.buy_cost_rate,
             sell_cost_rate=base_params.sell_cost_rate,
             slippage_rate=base_params.slippage_rate,
+            use_smart_hard_cap=base_params.use_smart_hard_cap,
+            regime_filter_enabled=base_params.regime_filter_enabled,
         )
 
         # 백테스터 생성 + 캐시 주입 (데이터 재로드 없이)
@@ -240,6 +242,10 @@ def parse_args():
     parser.add_argument('--portfolio', type=int, default=10, help='포트폴리오 종목 수')
     parser.add_argument('--output', type=str, default=None, help='CSV 저장 경로')
     parser.add_argument('--slippage', type=float, default=None, help='슬리피지 비율 (미지정 시 기본값 0.001)')
+    parser.add_argument('--smart-hard-cap', action='store_true', default=False,
+                        help='스마트 Hard Cap 사용 (포트폴리오 평균 점수 기반 상한 동적 조절)')
+    parser.add_argument('--regime', action='store_true', default=False,
+                        help='레짐 필터 사용 (CRISIS/CAUTION 기반 매수 제한)')
     return parser.parse_args()
 
 
@@ -255,11 +261,15 @@ def main():
         hard_stop_score=65.0,
         soft_stop_score=67.0,
         use_dynamic_targets=False,  # TP/SL을 params에서 직접 사용
+        use_smart_hard_cap=args.smart_hard_cap,
+        regime_filter_enabled=args.regime,
     )
     if args.slippage is not None:
         bp_kwargs['slippage_rate'] = args.slippage
     base_params = BacktestParams(**bp_kwargs)
     print(f"  슬리피지: {base_params.slippage_rate:.4f} ({base_params.slippage_rate*100:.2f}%)")
+    print(f"  스마트 Hard Cap: {'ON' if args.smart_hard_cap else 'OFF'}")
+    print(f"  레짐 필터: {'ON' if args.regime else 'OFF'}")
 
     run_multiverse(
         start_date=args.start,

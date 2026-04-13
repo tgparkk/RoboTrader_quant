@@ -55,6 +55,8 @@ class Backtester:
         self._regime_stats: Dict[str, int] = {'NORMAL': 0, 'CAUTION': 0, 'CRISIS': 0}
         # 쿨다운 추적: {stock_code: sell_date} — 리밸런싱 매도된 종목과 매도일
         self._rebalancing_sold_dates: Dict[str, str] = {}
+        # look-ahead 방지: factors_cache 키 정렬 (prev_calc_date 이분탐색용)
+        self._sorted_factor_dates: Optional[List[str]] = None
 
     def backtest(self, start_date: str, end_date: str) -> BacktestResult:
         """백테스트 실행"""
@@ -209,19 +211,69 @@ class Backtester:
             'volume': int(row['volume'])
         }
 
-    def _get_portfolio(self, date: str) -> List[Dict]:
+    def _get_prev_calc_date(self, date: str) -> Optional[str]:
+        """거래일 D에 대해 직전 거래일의 calc_date(yyyymmdd) 반환.
+
+        Look-ahead 방지: 라이브는 D-1 15:35 스크리닝 결과를 D 09:05에 사용.
+        백테스트도 D의 의사결정에 calc_date=D-1 데이터만 사용해야 함.
+        factors_cache 키를 정렬해 직전 거래일 하나를 찾는다.
+        """
         calc_date = date.replace("-", "")
-        return self.portfolio_cache.get(calc_date, [])
+        if not hasattr(self, '_sorted_factor_dates') or self._sorted_factor_dates is None:
+            self._sorted_factor_dates = sorted(self.factors_cache.keys())
+        sd = self._sorted_factor_dates
+        # 이분 탐색
+        lo, hi = 0, len(sd)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if sd[mid] < calc_date:
+                lo = mid + 1
+            else:
+                hi = mid
+        # lo = calc_date 이상 첫 위치. 직전은 lo-1
+        if lo == 0:
+            return None
+        return sd[lo - 1]
+
+    def _get_portfolio(self, date: str) -> List[Dict]:
+        # Look-ahead 방지: 거래일 D에서는 calc_date = D-1 (전일 스크리닝)을 사용
+        prev = self._get_prev_calc_date(date)
+        if prev is None:
+            return []
+        return self.portfolio_cache.get(prev, [])
 
     def _get_factors(self, date: str, stock_code: str) -> Optional[Dict]:
-        calc_date = date.replace("-", "")
-        factors = self.factors_cache.get(calc_date, {})
+        # Look-ahead 방지: 거래일 D에서는 calc_date = D-1의 factor만 사용
+        prev = self._get_prev_calc_date(date)
+        if prev is None:
+            return None
+        factors = self.factors_cache.get(prev, {})
         return factors.get(stock_code)
 
     def _calculate_dynamic_targets(self, rank: int, total_score: float,
                                     momentum_score: float) -> Tuple[float, float]:
         # 단일 익절/손절선 (워크포워드 검증: TP16/SL8 종합 2위, 안정성 0.89)
         return self.params.target_profit_rate, self.params.stop_loss_rate
+
+    def _compute_smart_hard_cap(self, avg_score: float) -> int:
+        """
+        스마트 Hard Cap: 포트폴리오 평균 점수에 따라 최대 보유 상한 반환.
+
+        Tiers (config/constants.py SMART_HARD_CAP_TIERS):
+          [(75.0, 5), (72.0, 3), (0.0, 2)]
+          -> avg >= 75 => portfolio_size + 5
+          -> avg >= 72 => portfolio_size + 3
+          -> else      => portfolio_size + 2
+
+        Returns: max number of holdings allowed
+        """
+        from config.constants import SMART_HARD_CAP_TIERS
+        buffer = 2  # default (lowest tier)
+        for threshold, b in SMART_HARD_CAP_TIERS:
+            if avg_score >= threshold:
+                buffer = b
+                break
+        return self.params.portfolio_size + buffer
 
     def _execute_rebalancing(self, date: str):
         portfolio = self._get_portfolio(date)
@@ -230,6 +282,20 @@ class Backtester:
 
         target_portfolio = portfolio[:self.params.portfolio_size]
         target_codes = {item['stock_code'] for item in target_portfolio}
+
+        # 스마트 Hard Cap: 매수 후보 풀을 max_holdings 크기로 확장
+        # (live와 동일: target_portfolio_size 고정, max_holdings까지 추가 매수 허용)
+        if self.params.use_smart_hard_cap and self.positions:
+            kept_scores_pre = []
+            for code in self.positions:
+                f = self._get_factors(date, code)
+                if f and f.get('total_score'):
+                    kept_scores_pre.append(f['total_score'])
+            avg_pre = sum(kept_scores_pre) / len(kept_scores_pre) if kept_scores_pre else 0.0
+            _pre_max = self._compute_smart_hard_cap(avg_pre)
+            buy_candidate_pool = portfolio[:_pre_max]
+        else:
+            buy_candidate_pool = target_portfolio
 
         sell_list = []
         for stock_code, position in list(self.positions.items()):
@@ -275,7 +341,7 @@ class Backtester:
         buy_candidates = []
         kospi_change = self._get_kospi_change(date)
 
-        for item in target_portfolio:
+        for item in buy_candidate_pool:
             stock_code = item['stock_code']
             if stock_code in current_codes:
                 continue
@@ -292,15 +358,17 @@ class Backtester:
             if self.params.buy_min_score > 0 and item['total_score'] < self.params.buy_min_score:
                 continue
             # 5일 수익률 하드게이트
+            # Look-ahead 방지: D 09:05 매수 시점에는 D 종가를 모르므로 D-1 종가와
+            # D-6 종가 기준으로 직전 5거래일 수익률을 계산한다.
             if self.params.buy_ret5d_min is not None:
                 price_hist = self.daily_prices_cache.get(stock_code)
                 if price_hist is not None and date in price_hist.index:
                     idx = price_hist.index.get_loc(date)
-                    if idx >= 5:
-                        close_now = float(price_hist.iloc[idx]['close'])
-                        close_5d = float(price_hist.iloc[idx - 5]['close'])
-                        if close_5d > 0:
-                            ret_5d = (close_now / close_5d - 1) * 100
+                    if idx >= 6:
+                        close_prev = float(price_hist.iloc[idx - 1]['close'])
+                        close_6d = float(price_hist.iloc[idx - 6]['close'])
+                        if close_6d > 0:
+                            ret_5d = (close_prev / close_6d - 1) * 100
                             if ret_5d < self.params.buy_ret5d_min:
                                 continue
             price_data = self._get_daily_price(stock_code, date)
@@ -311,7 +379,18 @@ class Backtester:
             buy_candidates.append(item)
 
         if buy_candidates:
-            available_slots = self.params.portfolio_size - len(self.positions)
+            # 스마트 Hard Cap: 포트폴리오 평균 점수 기반 동적 상한 계산
+            if self.params.use_smart_hard_cap and self.positions:
+                kept_scores = []
+                for code in self.positions:
+                    f = self._get_factors(date, code)
+                    if f and f.get('total_score'):
+                        kept_scores.append(f['total_score'])
+                avg_score = sum(kept_scores) / len(kept_scores) if kept_scores else 0.0
+                max_holdings = self._compute_smart_hard_cap(avg_score)
+            else:
+                max_holdings = self.params.portfolio_size
+            available_slots = max_holdings - len(self.positions)
             # 레짐 필터: CRISIS → 매수 중단, CAUTION → 매수 제한
             if self._today_regime == 'CRISIS':
                 available_slots = 0

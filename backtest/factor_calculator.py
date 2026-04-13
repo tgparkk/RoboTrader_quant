@@ -108,9 +108,22 @@ class HistoricalFactorCalculator:
     MAX_PRICE = 500_000
     MIN_LISTING_DAYS = 250
 
-    def __init__(self, db_path: str = None):
+    # 재무 공시 지연 (K-IFRS 분기보고 45일, 연간보고 90일)
+    # yfinance의 report_date는 분기말 날짜이므로, 실제 공시 전 데이터를
+    # 참조하지 않도록 지연(available_date)을 적용한다.
+    QUARTERLY_FILING_LAG_DAYS = 45
+    ANNUAL_FILING_LAG_DAYS = 90
+
+    def __init__(self, db_path: str = None,
+                 quarterly_lag: Optional[int] = None,
+                 annual_lag: Optional[int] = None):
         from config.db_config import BACKTEST_DB_CONFIG
         self._db_config = BACKTEST_DB_CONFIG
+
+        self._quarterly_lag = (quarterly_lag if quarterly_lag is not None
+                               else self.QUARTERLY_FILING_LAG_DAYS)
+        self._annual_lag = (annual_lag if annual_lag is not None
+                            else self.ANNUAL_FILING_LAG_DAYS)
 
         # 메모리 캐시 (전체 데이터 미리 로드)
         self._prices_df: Optional[pd.DataFrame] = None
@@ -173,7 +186,18 @@ class HistoricalFactorCalculator:
         self._fin_by_stock = {}
         if self._financial_df is not None and len(self._financial_df) > 0:
             for code, group in self._financial_df.groupby('stock_code'):
-                self._fin_by_stock[code] = group.sort_values('report_date').reset_index(drop=True)
+                df = group.sort_values('report_date').reset_index(drop=True)
+                # 공시 지연 반영: available_date = report_date + (연간 90일 / 분기 45일)
+                rd = pd.to_datetime(df['report_date'])
+                is_annual = (rd.dt.month == 12) & (rd.dt.day == 31)
+                lag_days = np.where(is_annual, self._annual_lag, self._quarterly_lag)
+                avail = rd + pd.to_timedelta(lag_days, unit='D')
+                df['available_date'] = avail.dt.strftime('%Y-%m-%d')
+                self._fin_by_stock[code] = df
+        logger.info(
+            f"재무 공시 지연 적용: 분기 {self._quarterly_lag}일, "
+            f"연간 {self._annual_lag}일 (report_date -> available_date)"
+        )
 
         self._date_stocks = {}
         for date, group in self._prices_df.groupby('date'):
@@ -254,7 +278,9 @@ class HistoricalFactorCalculator:
                 year_ago_fin = None
                 stock_fin = self._fin_by_stock.get(code)
                 if stock_fin is not None and not stock_fin.empty:
-                    fin_up_to = stock_fin[stock_fin['report_date'] <= calc_date]
+                    # Look-ahead 방지: report_date가 아니라 공시 지연이 반영된
+                    # available_date 기준으로 calc_date에 실제로 알 수 있는 데이터만 사용
+                    fin_up_to = stock_fin[stock_fin['available_date'] <= calc_date]
                     if not fin_up_to.empty:
                         latest_fin = fin_up_to.iloc[-1]
                         if len(fin_up_to) >= 5:
