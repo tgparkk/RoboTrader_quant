@@ -67,7 +67,8 @@ class BacktestParams:
     sell_cost_rate: float = 0.00245   # 매도 위탁수수료 0.015% + 거래세 0.18% + 농특세 0.05%
 
     # 슬리피지 (시장가 주문 체결 미끄러짐)
-    slippage_rate: float = 0.001      # 0.1%
+    # 실측값 (2026-04-13, 2/27~3/26 실전 81건): 매수 +0.222%, 매도 -0.229%, 왕복 0.451%
+    slippage_rate: float = 0.0025     # 0.25% (실측 반영)
 
     # 장전 레짐 필터 (NXT 프록시 + 미장)
     regime_filter_enabled: bool = False      # 레짐 필터 사용 여부

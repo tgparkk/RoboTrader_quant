@@ -239,6 +239,7 @@ def parse_args():
     parser.add_argument('--end', type=str, default='2026-02-28', help='종료일')
     parser.add_argument('--portfolio', type=int, default=10, help='포트폴리오 종목 수')
     parser.add_argument('--output', type=str, default=None, help='CSV 저장 경로')
+    parser.add_argument('--slippage', type=float, default=None, help='슬리피지 비율 (미지정 시 기본값 0.001)')
     return parser.parse_args()
 
 
@@ -249,12 +250,16 @@ def main():
     tp_values = [0.10, 0.12, 0.14, 0.15, 0.16, 0.17, 0.18, 0.19, 0.20, 0.22, 0.25]
     sl_values = [0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.11, 0.12, 0.14]
 
-    base_params = BacktestParams(
+    bp_kwargs = dict(
         portfolio_size=args.portfolio,
         hard_stop_score=65.0,
         soft_stop_score=67.0,
         use_dynamic_targets=False,  # TP/SL을 params에서 직접 사용
     )
+    if args.slippage is not None:
+        bp_kwargs['slippage_rate'] = args.slippage
+    base_params = BacktestParams(**bp_kwargs)
+    print(f"  슬리피지: {base_params.slippage_rate:.4f} ({base_params.slippage_rate*100:.2f}%)")
 
     run_multiverse(
         start_date=args.start,

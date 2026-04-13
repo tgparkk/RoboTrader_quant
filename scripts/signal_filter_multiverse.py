@@ -238,10 +238,10 @@ class FilteredBacktester(Backtester):
                 self._today_rebalancing_bought.add(stock_code)
 
 
-def run_multiverse(start_date, end_date):
+def run_multiverse(start_date, end_date, slippage=None):
     """다차원 멀티버스 실행"""
 
-    base_params = BacktestParams(
+    bp_kw = dict(
         initial_capital=50_000_000,
         portfolio_size=10,
         target_profit_rate=0.12,
@@ -256,6 +256,10 @@ def run_multiverse(start_date, end_date):
         use_dynamic_targets=True,
         rebalancing_sell_cooldown_days=3,
     )
+    if slippage is not None:
+        bp_kw['slippage_rate'] = slippage
+    base_params = BacktestParams(**bp_kw)
+    print(f"  슬리피지: {base_params.slippage_rate:.4f} ({base_params.slippage_rate*100:.2f}%)")
 
     # 데이터 1회 로드
     print("데이터 로딩 중...")
@@ -499,6 +503,7 @@ def main():
     parser = argparse.ArgumentParser(description='신호 필터 멀티버스')
     parser.add_argument('--start', type=str, default='2023-01-01')
     parser.add_argument('--end', type=str, default='2026-03-31')
+    parser.add_argument('--slippage', type=float, default=None, help='슬리피지 비율 (기본 0.001)')
     args = parser.parse_args()
 
     print(f"{'#' * 100}")
@@ -507,7 +512,7 @@ def main():
     print(f"{'#' * 100}")
 
     total_start = time.time()
-    run_multiverse(args.start, args.end)
+    run_multiverse(args.start, args.end, slippage=args.slippage)
     elapsed = time.time() - total_start
     print(f"\n  총 소요 시간: {elapsed:.0f}초")
 
