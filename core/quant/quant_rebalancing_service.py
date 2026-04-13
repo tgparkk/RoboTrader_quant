@@ -50,8 +50,11 @@ class QuantRebalancingService:
         self.safe_score = 75.0       # 안전 점수: >= 75점은 순위 무관 유지 (65→75 강화)
         self.safe_rank = 25          # 안전 순위: <= 25위면 점수 낮아도 유지 (40→25 강화)
 
-        # 매수 최소 점수: hard_stop 이하 종목은 매수 차단 ("팔 종목을 사지 않는다")
-        self.buy_min_score = self.hard_stop_score
+        # 매수 최소 점수: V100 전환 후 멀티버스 검증 결과 95점이 최적
+        # (2026-04-14 측정, 1,000만원 기준 2년 알파 +21만 → +355만, 16배 개선)
+        # V100 점수 분포가 top 10 구간에 94+로 몰려 있어 65~90 구간은 필터 무의미.
+        # 95점 미만 "경계선 저평가" 종목이 손실 주도 → 제외 시 성과 크게 개선.
+        self.buy_min_score = 95.0
 
         # 스마트 Hard Cap: 포트폴리오 평균 점수에 따라 상한 동적 조절
         self.smart_hard_cap_tiers = SMART_HARD_CAP_TIERS
