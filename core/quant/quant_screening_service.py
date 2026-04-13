@@ -412,13 +412,11 @@ class QuantScreeningService:
         growth_score = validate_score(growth_score, "Growth")
         momentum_score = validate_score(momentum_score, "Momentum")
 
-        # 최종 점수 = Value(25%) + Momentum(30%) + Quality(22.5%) + Growth(22.5%)
-        total_score = (
-            value_score * 0.25 +
-            momentum_score * 0.30 +
-            quality_score * 0.225 +
-            growth_score * 0.225
-        )
+        # 최종 점수 = Value 100% (2026-04-13 look-ahead 제거 후 멀티버스 검증 결과)
+        # 세 기간(2024-04~2025-06, 2025-07~2026-04, 전체 2년) 모두 KOSPI 초과 수익 확인
+        # Momentum/Growth는 현재 시장에서 역작동 (단독 시 ALL -88%~-92%)
+        # Quality는 무승부 (-8.9%). Value 단독 조합 효과가 가장 안정적.
+        total_score = value_score
 
         # 최종 점수도 검증
         total_score = validate_score(total_score, "Total")
