@@ -60,7 +60,26 @@ def cache_stats():
             print(f"  {tbl}: {cnt}건 / {n}종목")
 
 
-def backfill(limit: int = None, skip_cached: bool = False):
+def _backfill_one(code: str) -> tuple[bool, bool, bool]:
+    """단일 종목 3개 캐시 채우기 — (ratio, income, balance) 성공 여부"""
+    try:
+        r = bool(get_financial_ratio_cached(code))
+    except Exception:
+        r = False
+    try:
+        i = bool(get_income_statement_cached(code))
+    except Exception:
+        i = False
+    try:
+        b = bool(get_balance_sheet_cached(code))
+    except Exception:
+        b = False
+    return r, i, b
+
+
+def backfill(limit: int = None, skip_cached: bool = False, max_workers: int = 4):
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     universe = get_universe()
     if skip_cached:
         cached = get_already_cached()
@@ -70,7 +89,7 @@ def backfill(limit: int = None, skip_cached: bool = False):
         universe = universe[:limit]
 
     total = len(universe)
-    print(f"\n백필 대상: {total}종목")
+    print(f"\n백필 대상: {total}종목 (workers={max_workers})")
     print("=" * 60)
     cache_stats()
     print("=" * 60)
@@ -78,35 +97,25 @@ def backfill(limit: int = None, skip_cached: bool = False):
     t0 = time.time()
     ok = {"ratio": 0, "income": 0, "balance": 0}
     fail = {"ratio": 0, "income": 0, "balance": 0}
-    skip = 0
 
-    for idx, code in enumerate(universe, 1):
-        try:
-            r = get_financial_ratio_cached(code)
-            ok["ratio"] += 1 if r else 0
-            fail["ratio"] += 0 if r else 1
-        except Exception as e:
-            fail["ratio"] += 1
-        try:
-            i = get_income_statement_cached(code)
-            ok["income"] += 1 if i else 0
-            fail["income"] += 0 if i else 1
-        except Exception:
-            fail["income"] += 1
-        try:
-            b = get_balance_sheet_cached(code)
-            ok["balance"] += 1 if b else 0
-            fail["balance"] += 0 if b else 1
-        except Exception:
-            fail["balance"] += 1
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_backfill_one, code): code for code in universe}
+        for idx, future in enumerate(as_completed(futures), 1):
+            try:
+                r, i, b = future.result()
+            except Exception:
+                r = i = b = False
+            ok["ratio"] += int(r); fail["ratio"] += int(not r)
+            ok["income"] += int(i); fail["income"] += int(not i)
+            ok["balance"] += int(b); fail["balance"] += int(not b)
 
-        if idx % 100 == 0 or idx == total:
-            elapsed = time.time() - t0
-            rate = idx / elapsed if elapsed > 0 else 0
-            eta = (total - idx) / rate if rate > 0 else 0
-            print(f"[{idx}/{total}] elapsed={elapsed:.0f}s rate={rate:.1f}st/s "
-                  f"eta={eta:.0f}s | ratio ok/fail {ok['ratio']}/{fail['ratio']} "
-                  f"income {ok['income']}/{fail['income']} balance {ok['balance']}/{fail['balance']}")
+            if idx % 100 == 0 or idx == total:
+                elapsed = time.time() - t0
+                rate = idx / elapsed if elapsed > 0 else 0
+                eta = (total - idx) / rate if rate > 0 else 0
+                print(f"[{idx}/{total}] elapsed={elapsed:.0f}s rate={rate:.1f}st/s "
+                      f"eta={eta:.0f}s | ratio {ok['ratio']}/{fail['ratio']} "
+                      f"income {ok['income']}/{fail['income']} balance {ok['balance']}/{fail['balance']}")
 
     print("=" * 60)
     print(f"완료: {time.time()-t0:.1f}초 / 대상 {total}종목")
@@ -117,5 +126,6 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--limit", type=int, default=None, help="첫 N종목만 처리 (테스트용)")
     p.add_argument("--skip-cached", action="store_true", help="이미 캐시된 종목 스킵")
+    p.add_argument("--workers", type=int, default=4, help="동시 작업자 수 (기본 4)")
     args = p.parse_args()
-    backfill(limit=args.limit, skip_cached=args.skip_cached)
+    backfill(limit=args.limit, skip_cached=args.skip_cached, max_workers=args.workers)

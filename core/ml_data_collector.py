@@ -137,26 +137,49 @@ class MLDataCollector:
                         last_date = cursor.fetchone()[0]
                         if last_date:
                             # 마지막 날짜 다음날부터 수집
-                            from datetime import datetime as dt
-                            next_day = last_date + timedelta(days=1)
-                            start_date = next_day.strftime("%Y%m%d")
-                            if start_date > end_date:
-                                self.logger.debug(f"📊 [{stock_code}] 이미 최신 데이터 보유 (마지막: {last_date})")
-                                return True
-                            self.logger.info(f"📊 [{stock_code}] 증분 수집: {start_date} ~ {end_date} (마지막 DB: {last_date})")
+                            from datetime import datetime as dt, date as _date
+                            # daily_prices.date가 TEXT('YYYY-MM-DD') 또는 date 타입 모두 처리
+                            if isinstance(last_date, str):
+                                last_dt = dt.strptime(last_date.replace('-', ''), "%Y%m%d").date()
+                            elif isinstance(last_date, dt):
+                                last_dt = last_date.date()
+                            elif isinstance(last_date, _date):
+                                last_dt = last_date
+                            else:
+                                last_dt = None
+
+                            if last_dt is not None:
+                                next_day = last_dt + timedelta(days=1)
+                                start_date = next_day.strftime("%Y%m%d")
+                                if start_date > end_date:
+                                    self.logger.debug(f"📊 [{stock_code}] 이미 최신 데이터 보유 (마지막: {last_date})")
+                                    return True
+                                self.logger.info(f"📊 [{stock_code}] 증분 수집: {start_date} ~ {end_date} (마지막 DB: {last_date})")
+                            else:
+                                start_date = (now_kst() - timedelta(days=1100)).strftime("%Y%m%d")
                         else:
                             start_date = (now_kst() - timedelta(days=1100)).strftime("%Y%m%d")
-                except Exception:
+                except Exception as _e:
+                    self.logger.warning(f"⚠️ [{stock_code}] 마지막 날짜 조회 실패 → 1100일치 수집: {_e}")
                     start_date = (now_kst() - timedelta(days=1100)).strftime("%Y%m%d")
 
             self.logger.info(f"📊 [{stock_code}] 일별 가격 데이터 수집 시작: {start_date} ~ {end_date}")
             self.last_call_made_api = True
 
+            # max_count 적응형: 1일 수집 시 1회 호출만으로 충분, 신규 종목은 1100일치 필요
+            try:
+                from datetime import datetime as _dt
+                days_needed = (_dt.strptime(end_date, "%Y%m%d") - _dt.strptime(start_date, "%Y%m%d")).days + 1
+                # 캘린더 기준이라 영업일은 약 70%; 여유 있게 1.5배 + 최소 20
+                max_count = max(20, min(500, int(days_needed * 1.5)))
+            except Exception:
+                max_count = 500
+
             daily_data = get_inquire_daily_itemchartprice_extended(
                 div_code="J", itm_no=stock_code,
                 period_code="D", adj_prc="0",
                 inqr_strt_dt=start_date, inqr_end_dt=end_date,
-                max_count=500
+                max_count=max_count
             )
             
             if daily_data is None or daily_data.empty:
@@ -648,49 +671,64 @@ class MLDataCollector:
             traceback.print_exc()
             return False
     
+    def _collect_one(self, stock_code: str, collect_price: bool, collect_financial: bool) -> bool:
+        """단일 종목 데이터 수집 (ThreadPoolExecutor worker용).
+
+        sleep 없음: kis_auth의 글로벌 60ms 락이 자동으로 rate limit 강제.
+        DB는 thread-safe ConnectionPool 사용 → worker별 독립 connection.
+        """
+        try:
+            success_price = self.save_daily_price_data(stock_code) if collect_price else True
+            success_financial = self.save_financial_data(stock_code) if collect_financial else True
+            return success_price and success_financial
+        except Exception as e:
+            self.logger.error(f"❌ [{stock_code}] 데이터 수집 오류: {e}")
+            return False
+
     def collect_all_candidates(self, stock_codes: List[str], collect_price: bool = True,
                               collect_financial: bool = True,
-                              deadline: "datetime | None" = None) -> Dict[str, bool]:
-        """여러 종목의 데이터 일괄 수집
+                              deadline: "datetime | None" = None,
+                              max_workers: int = 4) -> Dict[str, bool]:
+        """여러 종목의 데이터 일괄 수집 (ThreadPoolExecutor 병렬)
 
         Args:
-            deadline: 이 시각 이후에는 수집을 중단합니다 (None이면 무제한).
-                      예) datetime(2026, 3, 31, 8, 58) → 08:58 이후 루프 중단
+            deadline: 이 시각 이후엔 새 작업 제출 중단 (이미 제출된 작업은 진행).
+                      예) datetime(2026, 3, 31, 8, 58) → 08:58 이후 신규 제출 중단
+            max_workers: 동시 작업자 수 (기본 4). 4가 최적 — 8로 늘려도 KIS 서버측
+                         rate limit(HTTP 500) 발동 빈도만 늘고 실효 속도 동일 (벤치마크 검증).
         """
-        import time
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         from datetime import datetime as _datetime
-        results = {}
+
+        results: Dict[str, bool] = {}
         total_stocks = len(stock_codes)
+        if total_stocks == 0:
+            return results
 
-        for idx, stock_code in enumerate(stock_codes, 1):
-            # deadline 초과 시 나머지 종목 건너뜀
-            if deadline is not None and _datetime.now() >= deadline:
-                self.logger.warning(
-                    f"⏰ 수집 마감 시각({deadline.strftime('%H:%M')}) 도달 — "
-                    f"남은 {total_stocks - idx + 1}개 종목 수집 중단"
-                )
-                break
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {}
+            for stock_code in stock_codes:
+                if deadline is not None and _datetime.now() >= deadline:
+                    self.logger.warning(
+                        f"⏰ 수집 마감 시각({deadline.strftime('%H:%M')}) 도달 — "
+                        f"남은 {total_stocks - len(futures)}개 종목 제출 중단"
+                    )
+                    break
+                fut = executor.submit(self._collect_one, stock_code, collect_price, collect_financial)
+                futures[fut] = stock_code
 
-            try:
-                success_price = True
-                success_financial = True
+            for idx, future in enumerate(as_completed(futures), 1):
+                stock_code = futures[future]
+                try:
+                    results[stock_code] = future.result()
+                except Exception as e:
+                    self.logger.error(f"❌ [{stock_code}] 데이터 수집 예외: {e}")
+                    results[stock_code] = False
+                if idx % 100 == 0:
+                    self.logger.info(f"📊 일괄 수집 진행: {idx}/{len(futures)}")
 
-                if collect_price:
-                    success_price = self.save_daily_price_data(stock_code)
-                    # API 호출이 실제로 일어났을 때만 rate limit 위해 sleep
-                    if idx < total_stocks and getattr(self, 'last_call_made_api', True):
-                        time.sleep(0.2)
-
-                if collect_financial:
-                    success_financial = self.save_financial_data(stock_code)
-                    if idx < total_stocks:
-                        time.sleep(0.2)
-
-                results[stock_code] = success_price and success_financial
-
-            except Exception as e:
-                self.logger.error(f"❌ [{stock_code}] 데이터 수집 오류: {e}")
-                results[stock_code] = False
-
-        self.logger.info(f"📊 일괄 수집 완료: {sum(results.values())}/{total_stocks}개 성공")
+        self.logger.info(
+            f"📊 일괄 수집 완료: {sum(results.values())}/{total_stocks}개 성공 "
+            f"(workers={max_workers})"
+        )
         return results
