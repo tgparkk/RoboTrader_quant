@@ -4,10 +4,12 @@
 현재 운영 세팅 기준 전체 기간 시뮬 (실측 슬리피지 반영)
 
 구성:
+- 팩터 가중치: V100 (Value 100%, 2026-04-13 전환)
+- 포트폴리오 랭킹: V100 (2026-04-14, hybrid → V100 전환)
 - TP 12% / SL 6%, portfolio 10
-- buy_min_score 65, hard 65, soft 67, safe 75
+- buy_min_score 95 (V100 임계값, 2026-04-14 재보정), hard 65, soft 67, safe 75
 - buy_ret5d_min = -3.0 (5일 급락 필터)
-- score_momentum_min = 0.5 (점수 모멘텀 필터)
+- score_momentum_min = None (V100에서 비활성, constants.BUY_SCORE_MOMENTUM_MIN과 정합)
 - slippage 0.25% (2026-04-13 실측 반영, models.py 기본값)
 
 기간: 백테스트 DB에 있는 모든 기간 (quant_factors 기준 2023-01-02 ~ 2026-04-09)
@@ -37,7 +39,7 @@ def make_current_params():
         soft_stop_rank=30,
         safe_score=75.0,
         safe_rank=25,
-        buy_min_score=65.0,
+        buy_min_score=95.0,
         buy_ret5d_min=-3.0,
         min_hold_days=0,
         use_dynamic_targets=False,
@@ -48,7 +50,8 @@ def make_current_params():
 
 def run_period(label: str, start: str, end: str):
     params = make_current_params()
-    bt = FilteredBacktester(params=params, score_momentum_min=0.5)
+    from config.constants import BUY_SCORE_MOMENTUM_MIN
+    bt = FilteredBacktester(params=params, score_momentum_min=BUY_SCORE_MOMENTUM_MIN)
     t0 = time.time()
     result = bt.backtest(start, end)
     elapsed = time.time() - t0
@@ -85,15 +88,17 @@ def print_row(r):
 def main():
     print("=" * 110)
     print("현재 운영 세팅 전체 기간 시뮬 (슬리피지 0.25% 실측)")
-    print("  TP 12% / SL 6% | portfolio 10 | buy_min_score 65 | ret5d≥-3% | sm≥0.5 | cooldown 3d")
+    from config.constants import BUY_SCORE_MOMENTUM_MIN
+    sm_str = f"sm≥{BUY_SCORE_MOMENTUM_MIN}" if BUY_SCORE_MOMENTUM_MIN is not None else "sm off"
+    print(f"  V100 | TP 12% / SL 6% | portfolio 10 | buy_min_score 95 | ret5d≥-3% | {sm_str} | cooldown 3d")
     print("=" * 110)
 
     periods = [
-        ('2023', '2023-01-01', '2023-12-31'),
-        ('2024', '2024-01-01', '2024-12-31'),
-        ('2025', '2025-01-01', '2025-12-31'),
-        ('2026Q1+', '2026-01-01', '2026-04-09'),
-        ('전체', '2023-01-02', '2026-04-09'),
+        ('2024',      '2024-01-01', '2024-12-31'),
+        ('2025',      '2025-01-01', '2025-12-31'),
+        ('2026전체',  '2026-01-01', '2026-04-14'),
+        ('실전2개월', '2026-02-12', '2026-04-14'),
+        ('전체참고',  '2024-01-02', '2026-04-14'),
     ]
 
     results = []

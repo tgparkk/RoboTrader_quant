@@ -296,12 +296,10 @@ class HistoricalFactorCalculator:
                 quality_score = clamp(quality_score)
                 growth_score = clamp(growth_score)
 
-                total_score = clamp(
-                    value_score * 0.25 +
-                    momentum_score * 0.30 +
-                    quality_score * 0.225 +
-                    growth_score * 0.225
-                )
+                # V100 (2026-04-13 전환, 커밋 137b0cd): 멀티버스 검증에서 Value 단독이
+                # 세 기간 모두 KOSPI 초과. Momentum/Growth 단독 -88~-92%, Quality -8.9%.
+                # production quant_screening_service.py:422-426과 동일.
+                total_score = clamp(value_score)
 
                 # 타이밍 점수 계산 (전일 종가 기준)
                 timing_score = calc_timing_score(stock_prices['close'].values)
@@ -331,8 +329,9 @@ class HistoricalFactorCalculator:
         for rank, row in enumerate(factor_rows, 1):
             row['factor_rank'] = rank
 
-        # 포트폴리오 선정: hybrid_score 기준 (매수 순위 결정)
-        portfolio_rows = sorted(factor_rows, key=lambda x: (x['hybrid_score'], x['momentum_score']), reverse=True)
+        # 포트폴리오 선정: total_score(=value, V100) 기준 — production quant_screening_service.py:374와 정합
+        # (이전엔 hybrid_score 기준이었으나 V100 전환 후 실전과 불일치 → 2026-04-14 동기화)
+        portfolio_rows = sorted(factor_rows, key=lambda x: (x['total_score'], x['momentum_score']), reverse=True)
 
         # DB 저장
         self._save_factors(calc_date_yyyymmdd, factor_rows, portfolio_size, portfolio_rows)

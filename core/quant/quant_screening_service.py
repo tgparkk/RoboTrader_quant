@@ -370,8 +370,11 @@ class QuantScreeningService:
             return False
 
         # 종합 스코어링
-        # 포트폴리오 선정: hybrid_score(퀀트50%+타이밍50%) 내림차순
-        rows.sort(key=lambda x: (x['hybrid_score'], x.get('momentum_score', 0)), reverse=True)
+        # 2026-04-14: V100 전환(137b0cd) 후 hybrid_score → total_score(=value) 기준 정렬로 변경.
+        #   V100 철학("value 단독이 가장 안정적")과 정합. hybrid는 timing 가중이라 value 95+ 종목이 밀림.
+        #   10M 백테스트 2년: hybrid 랭킹 시 +23% vs V100 랭킹 시 +214%.
+        # 포트폴리오 선정: total_score(=value_score, V100) 내림차순
+        rows.sort(key=lambda x: (x['total_score'], x.get('momentum_score', 0)), reverse=True)
         # 팩터 순위: 퀀트 total_score 기준 (리밸런싱 임계값 판단용)
         factor_rows.sort(key=lambda x: (x['total_score'], x['momentum_score']), reverse=True)
 

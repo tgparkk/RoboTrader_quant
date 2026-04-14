@@ -137,8 +137,13 @@ class FilteredBacktester(Backtester):
                     if days_since_sell <= self.params.rebalancing_sell_cooldown_days:
                         continue
             # 매수 최소 점수
-            if self.params.buy_min_score > 0 and item['total_score'] < self.params.buy_min_score:
-                continue
+            # 주의: item['total_score']는 quant_portfolio의 hybrid_score. 실전(quant_rebalancing_service.py)과
+            # 의미 일치를 위해 pure 팩터 total_score를 factors_cache에서 조회해 사용.
+            if self.params.buy_min_score > 0:
+                _f_now = self.factors_cache.get(calc_date, {}).get(stock_code, {}) if calc_date else {}
+                _factor_total = _f_now.get('total_score', 0) if _f_now else 0
+                if _factor_total < self.params.buy_min_score:
+                    continue
             # 5일 수익률 하드게이트 (Look-ahead 방지: D-1/D-6 종가 기준)
             if self.params.buy_ret5d_min is not None:
                 price_hist = self.daily_prices_cache.get(stock_code)

@@ -355,8 +355,13 @@ class Backtester:
                     if days_since_sell <= self.params.rebalancing_sell_cooldown_days:
                         continue
             # 매수 최소 점수 필터: 절대 품질 기준 미달 시 매수 스킵
-            if self.params.buy_min_score > 0 and item['total_score'] < self.params.buy_min_score:
-                continue
+            # 주의: item['total_score']는 quant_portfolio에 저장된 hybrid_score이므로
+            # 실전(quant_rebalancing_service.py:197)과 의미 일치를 위해 pure 팩터 total_score 사용
+            if self.params.buy_min_score > 0:
+                _f = self._get_factors(date, stock_code)
+                _factor_total = _f.get('total_score', 0) if _f else 0
+                if _factor_total < self.params.buy_min_score:
+                    continue
             # 5일 수익률 하드게이트
             # Look-ahead 방지: D 09:05 매수 시점에는 D 종가를 모르므로 D-1 종가와
             # D-6 종가 기준으로 직전 5거래일 수익률을 계산한다.
