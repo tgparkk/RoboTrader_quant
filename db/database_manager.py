@@ -740,17 +740,20 @@ class DatabaseManager:
                             float(row.get('total_score', 0) or 0),
                             int(row.get('rank') or row.get('factor_rank') or idx),
                             factor_details or '',
+                            float(row.get('timing_score') or 0) if row.get('timing_score') is not None else None,
+                            float(row.get('hybrid_score') or 0) if row.get('hybrid_score') is not None else None,
                             now_str,
                             now_str
                         ))
-                    
+
                     cursor.executemany('''
                         INSERT INTO quant_factors (
                             calc_date, stock_code,
                             value_score, momentum_score, quality_score, growth_score,
                             total_score, factor_rank, factor_details,
+                            timing_score, hybrid_score,
                             created_at, updated_at
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ''', rows)
                 
                 self.logger.info(f"{calc_date} 팩터 스코어 {len(rows)}건 저장")
@@ -786,15 +789,18 @@ class DatabaseManager:
                             int(row.get('rank') or row.get('portfolio_rank') or 0),
                             float(row.get('total_score', 0) or 0),
                             row.get('reason', ''),
+                            float(row.get('timing_score') or 0) if row.get('timing_score') is not None else None,
+                            float(row.get('hybrid_score') or 0) if row.get('hybrid_score') is not None else None,
                             now_str,
                             now_str
                         ))
-                    
+
                     cursor.executemany('''
                         INSERT INTO quant_portfolio (
                             calc_date, stock_code, stock_name, rank, total_score, reason,
+                            timing_score, hybrid_score,
                             created_at, updated_at
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ''', rows)
                 
                 self.logger.info(f"{calc_date} 포트폴리오 {len(rows)}건 저장")

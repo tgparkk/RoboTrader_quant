@@ -38,8 +38,9 @@ def test_primary_filter_pass(monkeypatch):
     monkeypatch.setattr(kis_fin, "get_financial_ratio", lambda code, div_cls="0": [types.SimpleNamespace(eps=100, bps=1000, sps=50000, roe_value=10.0, reserve_ratio=200.0, liability_ratio=80.0, sales_growth=10.0, net_income_growth=5.0)])
 
     svc = QuantScreeningService(DummyAPI(price=20_000), DummyDB(), DummySelector())
-    passed, reason = svc._apply_primary_filter("005930", "삼성전자")
+    passed, reason, ratio_entries = svc._apply_primary_filter("005930", "삼성전자")
     assert passed is True
     assert reason is None
+    assert ratio_entries is not None and len(ratio_entries) > 0
 
 

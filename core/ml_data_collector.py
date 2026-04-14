@@ -105,12 +105,25 @@ class MLDataCollector:
     def save_daily_price_data(self, stock_code: str, start_date: str = None, end_date: str = None) -> bool:
         """
         일별 가격 데이터 수집 및 daily_prices 테이블에 저장
+
+        반환 후 API 호출 여부는 ``self.last_call_made_api`` 로 확인 가능
+        (호출자가 sleep 여부를 판단하기 위함).
         """
+        # API 호출 여부 트래킹 (caller가 sleep 여부 결정)
+        self.last_call_made_api = False
         try:
             if end_date is None:
-                prev_trading_day = get_previous_trading_day(now_kst())
-                end_date = prev_trading_day.strftime("%Y%m%d")
-                self.logger.info(f"📊 [{stock_code}] 전 영업일까지 수집 (end_date: {end_date})")
+                today_kst = now_kst()
+                # 장 마감(15:30) 후 영업일이면 오늘 종가 포함, 그 외엔 전 영업일까지
+                from utils.korean_holidays import is_holiday
+                after_close = (today_kst.hour > 15) or (today_kst.hour == 15 and today_kst.minute >= 30)
+                if after_close and not is_holiday(today_kst):
+                    end_date = today_kst.strftime("%Y%m%d")
+                    self.logger.info(f"📊 [{stock_code}] 당일 종가까지 수집 (end_date: {end_date})")
+                else:
+                    prev_trading_day = get_previous_trading_day(today_kst)
+                    end_date = prev_trading_day.strftime("%Y%m%d")
+                    self.logger.info(f"📊 [{stock_code}] 전 영업일까지 수집 (end_date: {end_date})")
 
             if start_date is None:
                 # DB에서 마지막 저장 날짜 확인 → 이후만 수집 (증분 수집)
@@ -137,7 +150,8 @@ class MLDataCollector:
                     start_date = (now_kst() - timedelta(days=1100)).strftime("%Y%m%d")
 
             self.logger.info(f"📊 [{stock_code}] 일별 가격 데이터 수집 시작: {start_date} ~ {end_date}")
-            
+            self.last_call_made_api = True
+
             daily_data = get_inquire_daily_itemchartprice_extended(
                 div_code="J", itm_no=stock_code,
                 period_code="D", adj_prc="0",
@@ -663,7 +677,8 @@ class MLDataCollector:
 
                 if collect_price:
                     success_price = self.save_daily_price_data(stock_code)
-                    if idx < total_stocks:
+                    # API 호출이 실제로 일어났을 때만 rate limit 위해 sleep
+                    if idx < total_stocks and getattr(self, 'last_call_made_api', True):
                         time.sleep(0.2)
 
                 if collect_financial:

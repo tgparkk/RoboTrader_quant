@@ -6,7 +6,11 @@ from datetime import datetime, timedelta
 
 from utils.logger import setup_logger
 from utils.korean_time import now_kst
-from api.kis_financial_api import get_financial_ratio, get_income_statement, get_balance_sheet
+from api.kis_financial_cache import (
+    get_financial_ratio_cached as get_financial_ratio,
+    get_income_statement_cached as get_income_statement,
+    get_balance_sheet_cached as get_balance_sheet,
+)
 from api import kis_market_api
 
 
@@ -143,70 +147,71 @@ class QuantScreeningService:
         - 관리/거래정지 제외
         - 상장 1년 이상 (거래일 250일 이상)
         - 재무데이터 존재
-        
+
         Returns:
-            (필터 통과 여부, 제외 사유)
+            (필터 통과 여부, 제외 사유, ratio_entries) — 통과 시 ratio_entries는
+            8단계에서 받아온 재무비율로, 호출자가 점수 계산에 재사용 가능
         """
         try:
             # 1. 현재가 및 시가총액 조회
             current_price_data = self.api_manager.get_current_price(stock_code)
             if current_price_data is None:
-                return False, "현재가 조회 실패"
-            
+                return False, "현재가 조회 실패", None
+
             current_price = current_price_data.current_price
             if current_price == 0:
-                return False, "현재가 정보 없음"
-            
+                return False, "현재가 정보 없음", None
+
             # 2. 주가 범위 체크 (1,000~500,000원)
             if current_price < self.min_price or current_price > self.max_price:
-                return False, f"주가 범위 초과: {current_price:,.0f}원"
-            
+                return False, f"주가 범위 초과: {current_price:,.0f}원", None
+
             # 3. 시가총액 조회
             market_cap_info = kis_market_api.get_stock_market_cap(stock_code)
             if market_cap_info is None or market_cap_info.get('market_cap', 0) < self.min_market_cap:
-                return False, f"시가총액 부족: {market_cap_info.get('market_cap_billion', 0) if market_cap_info else 0:,.0f}억원"
-            
+                return False, f"시가총액 부족: {market_cap_info.get('market_cap_billion', 0) if market_cap_info else 0:,.0f}억원", None
+
             # 4. 일봉 데이터 조회 (상장일 체크 + 거래대금 계산용)
             # 250 거래일 필요 → 캘린더 기준 약 400일 조회
             price_data = self.api_manager.get_ohlcv_data(stock_code, "D", 400)
             if price_data is None or price_data.empty:
-                return False, "일봉 데이터 없음"
-            
+                return False, "일봉 데이터 없음", None
+
             # 5. 상장 1년 이상 체크 (거래일 250일 이상)
             if len(price_data) < self.min_listing_days:
-                return False, f"상장일 부족: {len(price_data)}일"
-            
+                return False, f"상장일 부족: {len(price_data)}일", None
+
             # 6. 일평균 거래대금 계산 (최근 20일)
             df = price_data.copy()
             df = df.sort_values('stck_bsop_date')
             if len(df) < 20:
-                return False, "거래대금 계산용 데이터 부족"
-            
+                return False, "거래대금 계산용 데이터 부족", None
+
             recent_20d = df.tail(20)
             closes = recent_20d['stck_clpr'].astype(float)
             volumes = recent_20d['acml_vol'].astype(float)
-            
+
             # 거래대금 = 종가 * 거래량
             trading_values = closes * volumes
             avg_trading_value = trading_values.mean()
-            
+
             if avg_trading_value < self.min_avg_trading_value:
-                return False, f"일평균 거래대금 부족: {avg_trading_value/1_000_000_000:.1f}억원"
-            
+                return False, f"일평균 거래대금 부족: {avg_trading_value/1_000_000_000:.1f}억원", None
+
             # 7. 관리/거래정지 체크 (현재가 조회 응답에서 확인)
             # 주의: KIS API에서 관리종목/거래정지 정보를 제공하는 필드 확인 필요
             # 일단 통과시키고 추후 개선
-            
-            # 8. 재무데이터 존재 체크
-            ratio_entries = get_financial_ratio(stock_code, div_cls="0")
+
+            # 8. 재무데이터 존재 체크 (캐시 우선, miss 시 API)
+            ratio_entries = get_financial_ratio(stock_code)
             if not ratio_entries:
-                return False, "재무데이터 없음"
-            
-            return True, None
-            
+                return False, "재무데이터 없음", None
+
+            return True, None, ratio_entries
+
         except Exception as e:
             self.logger.warning(f"⚠️ {stock_code} 1차 필터링 중 오류: {e}")
-            return False, f"필터링 오류: {str(e)}"
+            return False, f"필터링 오류: {str(e)}", None
 
     def run_daily_screening(self, calc_date: Optional[str] = None, portfolio_size: int = 30, max_retries: int = 3) -> bool:
         """
@@ -277,8 +282,8 @@ class QuantScreeningService:
             filter_stats['total'] += 1
 
             try:
-                # 1차 필터링 적용
-                passed, reason = self._apply_primary_filter(stock_code, stock_name)
+                # 1차 필터링 적용 (8단계에서 받은 재무비율을 그대로 재사용)
+                passed, reason, ratio_entries = self._apply_primary_filter(stock_code, stock_name)
                 if not passed:
                     filter_stats['filtered'] += 1
                     if reason:
@@ -287,16 +292,15 @@ class QuantScreeningService:
 
                 filter_stats['passed_filter'] += 1
 
-                ratio_entries = get_financial_ratio(stock_code, div_cls="0")
                 if not ratio_entries:
                     filter_stats['no_financial'] += 1
                     continue
                 ratio = ratio_entries[0]
 
-                income_entries = get_income_statement(stock_code, div_cls="0")
+                income_entries = get_income_statement(stock_code)
                 income = income_entries[0] if income_entries else None
 
-                balance_entries = get_balance_sheet(stock_code, div_cls="0")
+                balance_entries = get_balance_sheet(stock_code)
                 balance = balance_entries[0] if balance_entries else None
 
                 # 모멘텀 계산용: 12개월(250거래일) 필요 → DB에서 조회 (API 미사용)
@@ -328,6 +332,7 @@ class QuantScreeningService:
                     'growth_score': scores['growth_score'],
                     'total_score': scores['total_score'],
                     'timing_score': timing_score,
+                    'hybrid_score': hybrid_score,
                     'factor_details': scores['details']
                 })
 
@@ -381,6 +386,8 @@ class QuantScreeningService:
                 'stock_name': row['stock_name'],
                 'rank': rank,
                 'total_score': row['total_score'],
+                'timing_score': row.get('timing_score'),
+                'hybrid_score': row.get('hybrid_score'),
                 'reason': row['reason']
             })
 
