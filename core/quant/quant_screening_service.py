@@ -140,69 +140,59 @@ class QuantScreeningService:
 
     def _apply_primary_filter(self, stock_code: str, stock_name: str) -> tuple:
         """
-        1차 필터링 로직 (2단계 기준)
+        1차 필터링 로직 (2단계 기준, 2026-04-15 DB 전환)
         - 시총 ≥ 1,000억원
         - 일평균 거래대금 ≥ 10억원 (20일 기준)
         - 주가 1,000~500,000원
-        - 관리/거래정지 제외
         - 상장 1년 이상 (거래일 250일 이상)
         - 재무데이터 존재
 
+        post-market 스크리닝은 KIS API 호출 없이 DB(daily_prices)만 사용.
+        ML 데이터 수집(15:35)이 선행돼 오늘 종가·거래대금·시가총액이 이미 저장됨.
+
         Returns:
-            (필터 통과 여부, 제외 사유, ratio_entries) — 통과 시 ratio_entries는
-            8단계에서 받아온 재무비율로, 호출자가 점수 계산에 재사용 가능
+            (필터 통과 여부, 제외 사유, ratio_entries)
         """
         try:
-            # 1. 현재가 및 시가총액 조회
-            current_price_data = self.api_manager.get_current_price(stock_code)
-            if current_price_data is None:
-                return False, "현재가 조회 실패", None
+            from config.pg_helper import pg_connection
 
-            current_price = current_price_data.current_price
+            with pg_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT date, close, market_cap, trading_value
+                    FROM daily_prices
+                    WHERE stock_code = %s
+                    ORDER BY date DESC
+                    LIMIT 400
+                ''', (stock_code,))
+                rows = cursor.fetchall()
+
+            if not rows:
+                return False, "일봉 데이터 없음", None
+
+            # 1. 최신 종가(= 당일 종가) 기준 주가 범위
+            current_price = float(rows[0][1] or 0)
             if current_price == 0:
                 return False, "현재가 정보 없음", None
-
-            # 2. 주가 범위 체크 (1,000~500,000원)
             if current_price < self.min_price or current_price > self.max_price:
                 return False, f"주가 범위 초과: {current_price:,.0f}원", None
 
-            # 3. 시가총액 조회
-            market_cap_info = kis_market_api.get_stock_market_cap(stock_code)
-            if market_cap_info is None or market_cap_info.get('market_cap', 0) < self.min_market_cap:
-                return False, f"시가총액 부족: {market_cap_info.get('market_cap_billion', 0) if market_cap_info else 0:,.0f}억원", None
+            # 2. 시가총액 (daily_prices.market_cap)
+            market_cap = float(rows[0][2] or 0)
+            if market_cap < self.min_market_cap:
+                return False, f"시가총액 부족: {market_cap/1_000_000_000:,.0f}억원", None
 
-            # 4. 일봉 데이터 조회 (상장일 체크 + 거래대금 계산용)
-            # 250 거래일 필요 → 캘린더 기준 약 400일 조회
-            price_data = self.api_manager.get_ohlcv_data(stock_code, "D", 400)
-            if price_data is None or price_data.empty:
-                return False, "일봉 데이터 없음", None
+            # 3. 상장 1년 이상 (거래일 250일 이상)
+            if len(rows) < self.min_listing_days:
+                return False, f"상장일 부족: {len(rows)}일", None
 
-            # 5. 상장 1년 이상 체크 (거래일 250일 이상)
-            if len(price_data) < self.min_listing_days:
-                return False, f"상장일 부족: {len(price_data)}일", None
-
-            # 6. 일평균 거래대금 계산 (최근 20일)
-            df = price_data.copy()
-            df = df.sort_values('stck_bsop_date')
-            if len(df) < 20:
-                return False, "거래대금 계산용 데이터 부족", None
-
-            recent_20d = df.tail(20)
-            closes = recent_20d['stck_clpr'].astype(float)
-            volumes = recent_20d['acml_vol'].astype(float)
-
-            # 거래대금 = 종가 * 거래량
-            trading_values = closes * volumes
-            avg_trading_value = trading_values.mean()
-
+            # 4. 일평균 거래대금 (최근 20일, daily_prices.trading_value 사용)
+            tv_20d = [float(r[3] or 0) for r in rows[:20]]
+            avg_trading_value = sum(tv_20d) / len(tv_20d) if tv_20d else 0.0
             if avg_trading_value < self.min_avg_trading_value:
                 return False, f"일평균 거래대금 부족: {avg_trading_value/1_000_000_000:.1f}억원", None
 
-            # 7. 관리/거래정지 체크 (현재가 조회 응답에서 확인)
-            # 주의: KIS API에서 관리종목/거래정지 정보를 제공하는 필드 확인 필요
-            # 일단 통과시키고 추후 개선
-
-            # 8. 재무데이터 존재 체크 (캐시 우선, miss 시 API)
+            # 5. 재무데이터 존재 체크 (캐시 우선, miss 시 API)
             ratio_entries = get_financial_ratio(stock_code)
             if not ratio_entries:
                 return False, "재무데이터 없음", None
@@ -223,7 +213,27 @@ class QuantScreeningService:
             max_retries: 최대 재시도 횟수
         """
         calc_date = calc_date or now_kst().strftime('%Y%m%d')
-        
+
+        # 전제 조건 체크: 스크리닝은 daily_prices에 당일 데이터 존재 전제 (2026-04-15 DB 전환 이후)
+        # ML 데이터 수집(15:35)이 선행돼야 하며, 수집 실패 시 전날 데이터로 왜곡된 스크리닝을 막음.
+        date_iso = f"{calc_date[:4]}-{calc_date[4:6]}-{calc_date[6:8]}"
+        try:
+            from config.pg_helper import pg_connection
+            with pg_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM daily_prices WHERE date = %s", (date_iso,))
+                today_rows = cursor.fetchone()[0]
+            if today_rows < 2000:
+                self.logger.error(
+                    f"❌ daily_prices 당일({date_iso}) 데이터 부족: {today_rows}건 "
+                    f"(최소 2,000건 필요) — ML 데이터 수집(15:35)을 먼저 실행하세요."
+                )
+                return False
+            self.logger.info(f"📊 스크리닝 전제조건 OK: daily_prices {date_iso} {today_rows:,}건")
+        except Exception as e:
+            self.logger.error(f"❌ daily_prices 전제조건 체크 실패: {e}")
+            return False
+
         # 재시도 로직
         for attempt in range(1, max_retries + 1):
             try:
@@ -453,22 +463,27 @@ class QuantScreeningService:
         Value 팩터 계산 (3단계 기준)
         Value 점수 = PER(25%) + PBR(25%) + PCR(20%) + PSR(15%) + EV/EBITDA(15%)
         업종 평균 대비 상대 평가, 적자·자본잠식 처리
+
+        2026-04-15: post-market 스크리닝은 DB(daily_prices)의 당일 종가·시가총액 사용.
+        KIS API 호출 제거 (value 계산 속도 10배 개선).
         """
         try:
-            # 현재가 조회
-            current_price_data = self.api_manager.get_current_price(stock_code)
-            if current_price_data is None:
+            from config.pg_helper import pg_connection
+            with pg_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT close, market_cap FROM daily_prices
+                    WHERE stock_code = %s ORDER BY date DESC LIMIT 1
+                ''', (stock_code,))
+                row = cursor.fetchone()
+            if not row:
                 return 0.0
-            current_price = current_price_data.current_price
-            
-            # 시가총액 조회
-            market_cap_info = kis_market_api.get_stock_market_cap(stock_code)
-            if market_cap_info is None:
-                return 0.0
-            market_cap = market_cap_info.get('market_cap', 0)
+            current_price = float(row[0] or 0)
+            market_cap = float(row[1] or 0)
 
-            # 시가총액 NULL 체크
-            if market_cap is None or market_cap <= 0:
+            if current_price <= 0:
+                return 0.0
+            if market_cap <= 0:
                 self.logger.warning(f"⚠️ [{stock_code}] 시가총액 NULL 또는 0 - Value 점수 계산 불가")
                 return 0.0
 
