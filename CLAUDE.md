@@ -56,24 +56,16 @@ DB에서 미체결 포지션을 로드하여 메모리에 복원합니다:
 
 ## 2단계 스코어링 시스템
 
-### Stage 1: 퀀트 팩터 필터 (종목 선별)
-- `total_score = Value(25%) + Momentum(30%) + Quality(22.5%) + Growth(22.5%)`
-- 65점 이상인 종목만 매수 후보로 통과
-- 매도 임계값(hard_stop=65, soft_stop=67, safe_score=75)에도 사용
-- **점수 모멘텀 필터**: `BUY_SCORE_MOMENTUM_MIN = 0.5` (전일 대비 +0.5점 이상만 매수, 2026-04-04 적용)
+### Stage 1: V100 Value 단일 팩터 (2026-04-14 전환, 커밋 9cf650d)
+- `total_score = value_score` (Momentum/Quality/Growth 미사용)
+- **매수 최소 점수**: 95점 이상 (V100 임계값 재보정, 커밋 0ec2f1a)
+- 매도 임계값(hard_stop=65, soft_stop=67, safe_score=75)은 유지
+- **점수 모멘텀 필터 비활성** (`BUY_SCORE_MOMENTUM_MIN = None`)
+  - V100 재무비율은 일변동이 거의 0 → sm 필터가 거래 85%를 무의미 차단
 
-### Stage 2: 타이밍 점수 (매수 순위 결정)
-- `timing_score = MA60거리(40%) + 20일수익률(30%) + 변동성(20%) + MA20거리(10%)`
-  - MA60 거리: 60일선 거리 기준 스코어 (거리 ≤ -10% 일 때 100점, 20% 초과 시 10점)
-  - 20일 수익률: `clamp(60 - ret_20d × 2.0, 0, 100)` (최근 수익률이 낮을수록 가점)
-  - 변동성: `clamp(100 - vol × 1.25, 0, 100)` (저변동성이 높은 점수)
-  - MA20 거리: `clamp(60 - ma20_dist × 3.0, 0, 100)` (20일선 근처에 가점)
-- 60일선 근처의 저변동성 종목에 높은 점수 (평균회귀 기반)
-- 전일 종가 기준으로 계산 (look-ahead bias 없음)
-
-### 최종 매수 순위
-- `hybrid_score = total_score × 50% + timing_score × 50%`
-- 포트폴리오 상위 10종목은 hybrid_score 순으로 선정
+### 매수 순위
+- V100 `total_score` 내림차순으로 포트폴리오 상위 10종목 선정 (hybrid_score 폐기)
+- timing_score 로직은 코드에 남아있으나 랭킹에 미사용
 
 ## 데이터 저장 전략
 
@@ -121,7 +113,7 @@ REBALANCING_SELL_COOLDOWN_DAYS = 3     # 리밸런싱 매도 후 재매수 차�
 
 # 매수 필터
 BUY_RET5D_MIN = -3.0                   # 직전 5거래일 수익률 필터 (-3% 이하 급락 종목 매수 차단)
-BUY_SCORE_MOMENTUM_MIN = 0.5           # 점수 모멘텀 필터 (전일 대비 +0.5점 이상만 매수, 2026-04-04 적용)
+BUY_SCORE_MOMENTUM_MIN = None          # 점수 모멘텀 필터 (V100 전환으로 2026-04-14 비활성)
 
 # Smart Hard Cap: 포트폴리오 평균 점수에 따라 보유 상한 동적 조절
 SMART_HARD_CAP_TIERS = [
@@ -139,7 +131,7 @@ soft_stop_score = 67.0   # 2단계 조건부 매도: 65점 ≤ 점수 < 67점 AN
 soft_stop_rank = 30      # 조건부 매도 순위 기준 (> 30위일 때만 적용)
 safe_score = 75.0        # 3단계 안전 점수: >= 75점은 순위 무관 유지
 safe_rank = 25           # 안전 순위: <= 25위면 점수 낮아도 유지
-buy_min_score = 65.0     # 매수 최소 점수 (= hard_stop_score, "팔 종목을 사지 않는다")
+buy_min_score = 95.0     # V100 전환 후 임계값 (2026-04-14, 커밋 0ec2f1a)
 ```
 
 **리밸런싱 매도 3단계 로직**:
