@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from config.pg_helper import pg_connection
@@ -42,7 +42,8 @@ DEFAULT_MAX_AGE_DAYS = 80
 def _is_stale(fetched_at: Optional[datetime], max_age_days: int) -> bool:
     if fetched_at is None:
         return True
-    return (datetime.now() - fetched_at) > timedelta(days=max_age_days)
+    now = datetime.now(timezone.utc) if fetched_at.tzinfo else datetime.now()
+    return (now - fetched_at) > timedelta(days=max_age_days)
 
 
 def _safe_json(raw) -> str:
