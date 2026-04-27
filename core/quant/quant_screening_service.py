@@ -410,52 +410,51 @@ class QuantScreeningService:
         return True
 
     def _calculate_scores(self, ratio, income, balance, price_data, stock_code: str) -> Optional[Dict[str, Any]]:
-        """팩터 점수 계산 (계획서 3~6단계 기준)"""
-        value_score = self._calc_value_score(ratio, stock_code)
-        quality_score = self._calc_quality_score(ratio, income, balance)
-        growth_score = self._calc_growth_score(ratio, income)
-        momentum_score = self._calc_momentum_score(price_data)
+        """mom_006676 risk-adjusted momentum 점수 계산.
 
-        if math.isnan(value_score) or math.isnan(momentum_score) or \
-           math.isnan(quality_score) or math.isnan(growth_score):
+        ratio/income/balance(재무 데이터)는 사용하지 않음. price_data 만으로
+        12M lookback / 1M skip risk-adjusted momentum 계산.
+
+        반환 dict 의 value/quality/growth 필드는 0.0 (DB schema/호출부 호환용 legacy).
+        total_score = momentum_score = affine 0-100 스케일.
+        """
+        from core.quant.momentum_scorer import compute_risk_adjusted_momentum
+
+        if price_data is None or len(price_data) < 274:
             return None
 
-        # Factor 점수 범위 검증 (0-100)
-        def validate_score(score: float, name: str) -> float:
-            if score < 0 or score > 100:
-                self.logger.warning(f"⚠️ [{stock_code}] {name} 점수 범위 오류: {score:.2f}, 조정됨")
-                return max(0, min(100, score))
-            return score
+        try:
+            df_sorted = price_data.sort_values('stck_bsop_date')
+            closes = df_sorted['stck_clpr'].astype(float).reset_index(drop=True)
+        except Exception as e:
+            self.logger.warning(f"⚠️ [{stock_code}] price_data 파싱 실패: {e}")
+            return None
 
-        value_score = validate_score(value_score, "Value")
-        quality_score = validate_score(quality_score, "Quality")
-        growth_score = validate_score(growth_score, "Growth")
-        momentum_score = validate_score(momentum_score, "Momentum")
+        raw_score = compute_risk_adjusted_momentum(closes, lookback_months=12, skip_months=1)
+        if not isinstance(raw_score, (int, float)) or math.isnan(raw_score) or math.isinf(raw_score):
+            return None
 
-        # 최종 점수 = Value 100% (2026-04-13 look-ahead 제거 후 멀티버스 검증 결과)
-        # 세 기간(2024-04~2025-06, 2025-07~2026-04, 전체 2년) 모두 KOSPI 초과 수익 확인
-        # Momentum/Growth는 현재 시장에서 역작동 (단독 시 ALL -88%~-92%)
-        # Quality는 무승부 (-8.9%). Value 단독 조합 효과가 가장 안정적.
-        total_score = value_score
-
-        # 최종 점수도 검증
-        total_score = validate_score(total_score, "Total")
+        # Affine 0-100 스케일: cross-section 내 상대 순위 보존이 목적 (절대값 의미 없음).
+        # 슬로프 1.0 채택 근거: 80-종목 시뮬에서 raw_score 분포 [-24, +112], p25/p75 = -6/17.
+        # 슬로프 25 (plan 권장) 사용 시 80 중 distinct=13 → 랭킹 붕괴. 슬로프 1.0 → distinct=75/80.
+        # buy_min_score 임계값(T5/T9)은 이 스케일 분포에 맞춰 별도 튜닝.
+        scaled = max(0.0, min(100.0, 50.0 + 1.0 * raw_score))
 
         details = {
-            'value': value_score,
-            'momentum': momentum_score,
-            'quality': quality_score,
-            'growth': growth_score,
-            'reason': f"Value {value_score:.1f}, Momentum {momentum_score:.1f}, Quality {quality_score:.1f}, Growth {growth_score:.1f}"
+            'value': 0.0,
+            'momentum': scaled,
+            'quality': 0.0,
+            'growth': 0.0,
+            'reason': f"momentum risk-adj raw={raw_score:.3f} scaled={scaled:.1f}",
         }
 
         return {
-            'value_score': value_score,
-            'momentum_score': momentum_score,
-            'quality_score': quality_score,
-            'growth_score': growth_score,
-            'total_score': total_score,
-            'details': details
+            'value_score': 0.0,
+            'momentum_score': scaled,
+            'quality_score': 0.0,
+            'growth_score': 0.0,
+            'total_score': scaled,
+            'details': details,
         }
 
     def _calc_value_score(self, ratio, stock_code: str) -> float:
