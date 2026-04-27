@@ -44,12 +44,14 @@ class QuantRebalancingService:
         self._last_rebalancing_week = None
         self._last_rebalancing_month = None
 
-        # 점수 기반 매도 임계값 설정 (백테스트 최적화: 샤프비율 3.81)
-        self.hard_stop_score = 65.0  # 긴급 매도: 점수 < 65점 (70→65 완화, 최적화)
-        self.soft_stop_score = 67.0  # 조건부 매도: 점수 65~67점 (72→67 완화, 최적화)
-        self.soft_stop_rank = 30     # 조건부 매도 순위 기준: > 30위 (50→30 강화)
-        self.safe_score = 75.0       # 안전 점수: >= 75점은 순위 무관 유지 (65→75 강화)
-        self.safe_rank = 25          # 안전 순위: <= 25위면 점수 낮아도 유지 (40→25 강화)
+        # 점수 기반 매도 임계값 — mom-strategy 에선 모두 비활성.
+        # 청산은 매월 첫 거래일 포트폴리오 교체 시 "target 에 없으면 매도" 단순 로직만 사용.
+        # 임계값 0-100 범위 밖으로 설정하여 3-tier (hard/soft/safe) 가지 모두 무효화.
+        self.hard_stop_score = -1.0  # mom: hard stop 비활성 (score >= 0 항상 통과)
+        self.soft_stop_score = -1.0  # mom: soft stop 비활성 (구간 [-1, -1) 공집합)
+        self.soft_stop_rank = 30     # 사용 안 함 (soft_stop_score 가 비활성이라 분기 도달 불가)
+        self.safe_score = 999.0      # mom: "안전 점수" 통과 불가 → non-target 항상 매도
+        self.safe_rank = 0           # mom: "안전 순위" 통과 불가 (rank >= 1)
 
         # 매수 최소 점수: mom_006676 sim 은 top-N 랭크 선정만 사용 (절대 임계값 없음).
         # 운영도 동일 의미를 위해 0.0 으로 비활성 (buy_min_score > 0 조건이 line 367 에서 통과).

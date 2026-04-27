@@ -169,25 +169,19 @@ class ScreeningTaskRunner:
                 self.ml_data_collector.collect_all_candidates,
                 stock_codes,
                 True,  # collect_price
-                False, # collect_financial (별도 실행)
+                False, # collect_financial (mom-strategy: 재무 수집 비활성)
                 deadline,
             )
 
-            # 재무 데이터 수집
-            financial_results = await loop.run_in_executor(
-                None,
-                self.ml_data_collector.collect_all_candidates,
-                stock_codes,
-                False,  # collect_price
-                True,   # collect_financial
-                deadline,
-            )
+            # mom-strategy: 재무 데이터 수집 비활성 (momentum 은 가격만 사용).
+            # multiverse_min mom_006676 paramset 과 동일 의미.
+            financial_results = {}
 
             # 결과 요약
             price_success = sum(1 for v in price_results.values() if v)
-            financial_success = sum(1 for v in financial_results.values() if v)
+            financial_success = 0  # mom-strategy: 재무 수집 비활성
 
-            logger.info(f"✅ 일일 데이터 수집 완료: 가격 {price_success}/{len(stock_codes)}개, 재무 {financial_success}/{len(stock_codes)}개")
+            logger.info(f"✅ 일일 데이터 수집 완료: 가격 {price_success}/{len(stock_codes)}개 (mom-strategy: 재무 수집 비활성)")
 
             # ✅ 추가: 데이터 검증 (당일 일봉 데이터 저장 여부 확인)
             data_verified = False

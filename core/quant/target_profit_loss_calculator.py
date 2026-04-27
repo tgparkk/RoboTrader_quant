@@ -75,13 +75,14 @@ class TargetProfitLossCalculator:
                 momentum_normalized * self.momentum_weight
             )
             
-            # 단일 익절/손절선 (백테스트 실행순서 수정 후 재검증: TP12/SL6이 샤프 1위)
-            return 0.12, 0.06  # 12% 익절, 6% 손절
+            # mom-strategy: TP/SL 비활성 (sim tp_sl_mode=none 동일성).
+            # 99.0 = +9900%/-9900% → 사실상 무한, 장중 트리거 안 됨.
+            # 청산은 매월 첫 거래일 리밸런싱 시 포트폴리오 교체로만.
+            return 99.0, 99.0
 
         except Exception as e:
             logger.error(f"목표 익절/손절률 계산 오류: {e}")
-            # 오류 시 기본값 반환
-            return 0.12, 0.06
+            return 99.0, 99.0
     
     def calculate_from_portfolio_item(self, portfolio_item: dict, 
                                      factors_data: Optional[dict] = None) -> Tuple[float, float]:

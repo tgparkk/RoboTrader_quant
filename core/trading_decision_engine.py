@@ -256,6 +256,10 @@ class TradingDecisionEngine:
         Returns:
             Tuple[매도신호여부, 매도사유]
         """
+        # mom-strategy: 장중 매도 판단 전면 비활성. 청산은 매월 첫 거래일
+        # 리밸런싱(포트폴리오 교체) 시에만 수행. multiverse_min sim tp_sl_mode=none 동일성.
+        return False, ""
+
         try:
             stock_code = trading_stock.stock_code
 

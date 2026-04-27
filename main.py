@@ -735,72 +735,20 @@ class DayTradingBot:
                         # 이전 완료 주문 메모리 정리
                         self.order_manager.cleanup_old_completed_orders()
 
-                # 08:40 장전 시장 파악 (NXT + 미장)
+                # 08:40 장전 시장 파악 — mom-strategy 비활성 (sim regime_filter=off 동일성).
+                # NewsQuant/yfinance/NXT 호출 모두 skip. PreMarketResult 를 NORMAL 로 stub
+                # 하여 09:05 리밸런싱 분기(line 519)가 fallback evaluate_market_regime() 에
+                # 빠지지 않도록 한다 — fallback 도 CRISIS 트리거할 수 있음.
                 if current_time.hour == 8 and current_time.minute >= 40:
                     if self._last_pre_market_date != current_time.date():
                         self._last_pre_market_date = current_time.date()
-                        self.logger.info(f"🔍 08:40+ 장전 시장 파악 시작 ({current_time.strftime('%H:%M:%S')})")
-                        try:
-                            self._pre_market_result = await asyncio.to_thread(
-                                self.pre_market_analyzer.analyze
-                            )
-                            regime_name = self._pre_market_result.regime.name
-                            self.logger.info(f"📊 장전 레짐: {regime_name} — {self._pre_market_result.reason}")
-
-                            # 텔레그램 알림
-                            if self.telegram:
-                                msg_lines = [
-                                    f"📊 장전 시장 파악: {regime_name}",
-                                    f"근거: {self._pre_market_result.reason}",
-                                ]
-                                if self._pre_market_result.expected_kospi_pct is not None:
-                                    msg_lines.append(
-                                        f"예상KOSPI: {self._pre_market_result.expected_kospi_pct:+.2f}%"
-                                    )
-                                if self._pre_market_result.expected_kosdaq_pct is not None:
-                                    msg_lines.append(
-                                        f"예상KOSDAQ: {self._pre_market_result.expected_kosdaq_pct:+.2f}%"
-                                    )
-                                for k, v in self._pre_market_result.us_data.items():
-                                    msg_lines.append(f"{v['label']}: {v['last']:,.2f} ({v['change_pct']:+.2f}%)")
-                                news = self._pre_market_result.news_data
-                                if news.get('available'):
-                                    dir_icon = {'up': '▲', 'down': '▼', 'neutral': '━'}
-                                    msg_lines.append(
-                                        f"글로벌뉴스: {dir_icon.get(news['direction'], '?')} "
-                                        f"{news['strength']} (감성 {news['sentiment']:+.3f}, "
-                                        f"신뢰도 {news['confidence']:.0%}, {news['total_count']}건)"
-                                    )
-                                    for f in news.get('key_factors', [])[:3]:
-                                        msg_lines.append(f"  {f['impact']} {f['factor']}: {f['avg_sentiment']:+.3f}")
-                                try:
-                                    await self.telegram.send_message("\n".join(msg_lines))
-                                except Exception:
-                                    pass
-
-                            # CRISIS 즉시 매도: 08:40에 바로 시장가 매도 주문
-                            # (KRX 08:21부터 주문 접수 가능, 09:00 시가에 체결)
-                            from core.market_regime_filter import MarketRegime
-                            if self._pre_market_result.regime == MarketRegime.CRISIS:
-                                self.logger.warning(
-                                    f"🚨 CRISIS 감지 — 08:40 즉시 전량 매도 주문 "
-                                    f"(09:00 시가 체결 예정)"
-                                )
-                                if self.telegram:
-                                    try:
-                                        await self.telegram.send_message(
-                                            f"🚨 CRISIS 발동! 즉시 전량 매도 주문\n"
-                                            f"근거: {self._pre_market_result.reason}\n"
-                                            f"08:40 주문 → 09:00 시가 체결 예정"
-                                        )
-                                    except Exception:
-                                        pass
-                                await self._execute_crisis_sell_all()
-                                # 09:05 리밸런싱에서 매수 차단하도록 결과 유지
-
-                        except Exception as e:
-                            self.logger.error(f"❌ 장전 시장 파악 오류: {e}")
-                            self._pre_market_result = None
+                        from core.pre_market_analyzer import PreMarketResult
+                        from core.market_regime_filter import MarketRegime
+                        self._pre_market_result = PreMarketResult(
+                            regime=MarketRegime.NORMAL,
+                            reason="mom-strategy: pre-market analysis disabled (sim parity)",
+                        )
+                        self.logger.info("📊 mom-strategy: 장전 분석 비활성 — NORMAL stub 적용")
 
                 # 08:30 전일 데이터 수집 (장 시작 전)
                 if current_time.hour == 8:
