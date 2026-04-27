@@ -12,6 +12,7 @@ from enum import Enum
 
 from utils.logger import setup_logger
 from utils.korean_time import now_kst
+from utils.trading_calendar import is_first_trading_day_of_month
 from api import kis_account_api, kis_market_api
 from core.quant.target_profit_loss_calculator import TargetProfitLossCalculator
 from config.constants import SMART_HARD_CAP_TIERS
@@ -35,9 +36,9 @@ class QuantRebalancingService:
         self.fund_manager = fund_manager
         self.logger = setup_logger(__name__)
 
-        # 리밸런싱 설정
-        self.rebalancing_period = RebalancingPeriod.DAILY  # 기본값: 일간
-        self.target_portfolio_size = 10  # 목표 포트폴리오 크기 (15→10 축소, 백테스트 최적화)
+        # 리밸런싱 설정 (mom_006676 paramset)
+        self.rebalancing_period = RebalancingPeriod.MONTHLY  # mom: 매월 첫 거래일
+        self.target_portfolio_size = 15  # mom_006676 paramset (V100 10 → 15)
         self.equal_weight = True  # 동등 비중
         self._last_rebalancing_date = None
         self._last_rebalancing_week = None
@@ -50,11 +51,10 @@ class QuantRebalancingService:
         self.safe_score = 75.0       # 안전 점수: >= 75점은 순위 무관 유지 (65→75 강화)
         self.safe_rank = 25          # 안전 순위: <= 25위면 점수 낮아도 유지 (40→25 강화)
 
-        # 매수 최소 점수: V100 전환 후 멀티버스 검증 결과 95점이 최적
-        # (2026-04-14 측정, 1,000만원 기준 2년 알파 +21만 → +355만, 16배 개선)
-        # V100 점수 분포가 top 10 구간에 94+로 몰려 있어 65~90 구간은 필터 무의미.
-        # 95점 미만 "경계선 저평가" 종목이 손실 주도 → 제외 시 성과 크게 개선.
-        self.buy_min_score = 95.0
+        # 매수 최소 점수: mom_006676 sim 은 top-N 랭크 선정만 사용 (절대 임계값 없음).
+        # 운영도 동일 의미를 위해 0.0 으로 비활성 (buy_min_score > 0 조건이 line 367 에서 통과).
+        # T9 백테스트 검증 후 필요 시 재조정 (현재 momentum scaled 분포 p25/p50/p75 ≈ 43/52/67).
+        self.buy_min_score = 0.0  # mom: top-N 선정으로 충분, 임계값 비활성
 
         # 스마트 Hard Cap: 포트폴리오 평균 점수에 따라 상한 동적 조절
         self.smart_hard_cap_tiers = SMART_HARD_CAP_TIERS
@@ -92,9 +92,12 @@ class QuantRebalancingService:
                     return True
         
         elif self.rebalancing_period == RebalancingPeriod.MONTHLY:
-            # 월간: 월 단위 (매월 1일)
+            # 월간: 매월 첫 거래일 (KRX 공휴일/주말 제외)
             current_month = (current_date.year, current_date.month)
-            if current_date.day == 1 and self._last_rebalancing_month != current_month:
+            if (
+                self._last_rebalancing_month != current_month
+                and is_first_trading_day_of_month(current_date)
+            ):
                 return True
         
         return False
