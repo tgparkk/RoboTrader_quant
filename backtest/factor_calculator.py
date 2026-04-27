@@ -102,7 +102,7 @@ class HistoricalFactorCalculator:
     """역사적 팩터 점수 계산기"""
 
     # 필터 기준값 (quant_screening_service.py와 동일)
-    MIN_MARKET_CAP = 100_000_000_000  # 1,000억원
+    MIN_MARKET_CAP = 3_000_000_000_000  # 3조 (mom_006676 paramset, ~80 종목 풀)
     MIN_AVG_TRADING_VALUE = 1_000_000_000  # 10억원
     MIN_PRICE = 1_000
     MAX_PRICE = 500_000

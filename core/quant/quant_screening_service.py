@@ -105,7 +105,7 @@ class QuantScreeningService:
         self.logger = setup_logger(__name__)
         
         # 필터 기준값
-        self.min_market_cap = 100_000_000_000  # 1,000억원
+        self.min_market_cap = 3_000_000_000_000  # 3조 (mom_006676 paramset, ~80 종목 풀)
         self.min_avg_trading_value = 1_000_000_000  # 10억원 (일평균)
         self.min_price = 1_000  # 최소 주가 1,000원
         self.max_price = 500_000  # 최대 주가 500,000원
