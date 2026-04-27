@@ -3,7 +3,7 @@
 """
 
 # 포트폴리오 및 스크리닝 관련
-PORTFOLIO_SIZE = 10  # 퀀트/ML 포트폴리오 종목 수 (15→10 축소, 백테스트 최적화)
+PORTFOLIO_SIZE = 15  # mom_006676 paramset
 QUANT_CANDIDATE_LIMIT = 50  # 장중 퀀트 후보 종목 최대 수
 
 # 스마트 Hard Cap: 포트폴리오 평균 점수에 따라 보유 상한 동적 조절
@@ -33,7 +33,7 @@ QUANT_SCREENING_MAX_RETRIES = 3  # 퀀트 스크리닝 최대 재시도 횟수
 
 # 승률 개선 필터: 5일 수익률 하드게이트
 # 직전 5거래일 수익률이 이 값 미만이면 매수 차단 (None이면 비활성)
-BUY_RET5D_MIN = -3.0  # -3% 이하 급락 종목 매수 차단
+BUY_RET5D_MIN = None  # momentum sim 동일성
 
 # 승률 개선 필터: 점수 모멘텀 (전일 대비 퀀트 점수 변화량)
 # None이면 비활성

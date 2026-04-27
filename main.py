@@ -54,7 +54,7 @@ class DayTradingBot:
         self.logger = setup_logger(__name__)
         self.is_running = False
         # 프로젝트 고유 PID 파일명으로 충돌 방지
-        self.pid_file = Path("robotrader_quant.pid")
+        self.pid_file = Path("robotrader_quant_mom.pid")
         self._last_eod_liquidation_date = None  # 장마감 일괄청산 실행 일자
 
         # 프로세스 중복 실행 방지

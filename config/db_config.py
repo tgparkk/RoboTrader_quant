@@ -9,7 +9,7 @@ import os
 DB_CONFIG = {
     'host': os.environ.get('DB_HOST', '127.0.0.1'),
     'port': int(os.environ.get('DB_PORT', '5433')),
-    'dbname': os.environ.get('DB_NAME', 'robotrader_quant'),
+    'dbname': os.environ.get('DB_NAME', 'robotrader_quant_mom'),
     'user': os.environ.get('DB_USER', 'postgres'),
     'password': os.environ.get('DB_PASSWORD', 'postgres'),
 }
