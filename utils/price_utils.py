@@ -48,7 +48,7 @@ def round_to_tick(price: float) -> float:
         return float(int(price))
 
 
-def check_duplicate_process(pid_file_path: str = 'robotrader_quant.pid'):
+def check_duplicate_process(pid_file_path: str = 'robotrader_quant_mom.pid'):
     """
     프로세스 중복 실행 방지
 
