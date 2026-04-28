@@ -132,9 +132,15 @@ class DayTradingBot:
         self._last_rebalancing_date = None  # 마지막 리밸런싱 실행 날짜
 
         # 장전 시장 파악 (예상체결지수 + 미장 + 글로벌뉴스)
+        # mom-strategy: 비활성. 09:05 분기에서 fallback evaluate_market_regime() 가
+        # CRISIS 발동시키지 않도록 __init__ 에서 NORMAL stub 으로 즉시 set.
         from core.pre_market_analyzer import PreMarketAnalyzer, PreMarketResult
+        from core.market_regime_filter import MarketRegime
         self.pre_market_analyzer = PreMarketAnalyzer()
-        self._pre_market_result: Optional[PreMarketResult] = None
+        self._pre_market_result: PreMarketResult = PreMarketResult(
+            regime=MarketRegime.NORMAL,
+            reason="mom-strategy: pre-market analysis disabled (sim parity)",
+        )
         self._last_pre_market_date = None
 
         # 🆕 헬퍼 초기화
