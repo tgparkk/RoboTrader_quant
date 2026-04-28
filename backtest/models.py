@@ -36,18 +36,19 @@ class BacktestParams:
     """백테스트 파라미터"""
     # 기본 설정
     initial_capital: float = 50_000_000  # 초기 자본 (5천만원)
-    portfolio_size: int = 10  # 포트폴리오 종목 수 (라이브 설정과 일치)
+    portfolio_size: int = 15  # mom_006676 paramset (V100 10 → 15)
 
-    # 손익절 파라미터 (워크포워드 검증: TP16/SL8이 종합 2위, 안정성 0.89)
-    target_profit_rate: float = 0.16  # 익절률 (16%)
-    stop_loss_rate: float = 0.08  # 손절률 (8%)
+    # 손익절 — mom-strategy: 사실상 무한 (sim tp_sl_mode=none 동일성).
+    target_profit_rate: float = 99.0  # mom: 비활성
+    stop_loss_rate: float = 99.0      # mom: 비활성
 
-    # 리밸런싱 기준 (라이브 설정과 일치)
-    hard_stop_score: float = 65.0  # 긴급 매도 점수
-    soft_stop_score: float = 67.0  # 조건부 매도 점수
-    soft_stop_rank: int = 30  # 조건부 매도 순위
-    safe_score: float = 75.0  # 안전 유지 점수
-    safe_rank: int = 25  # 안전 유지 순위
+    # 리밸런싱 점수 임계값 — mom-strategy: 0-100 범위 밖으로 비활성.
+    # 매월 첫 거래일 포트폴리오 교체로만 청산 (3-tier 매도 가지 무효).
+    hard_stop_score: float = -1.0   # mom: hard stop 비활성 (score >= 0 항상 통과)
+    soft_stop_score: float = -1.0   # mom: soft stop 비활성 (구간 [-1, -1) 공집합)
+    soft_stop_rank: int = 30        # 사용 안 함 (soft_stop_score 비활성이라 분기 도달 불가)
+    safe_score: float = 999.0       # mom: non-target 항상 매도 (sim 포트폴리오 교체)
+    safe_rank: int = 0              # mom: rank >= 1 이라 안전 순위 통과 불가
 
     # 최소 보유일수 (리밸런싱 매도 보호, 손절은 항상 허용)
     min_hold_days: int = 0
@@ -141,8 +142,8 @@ class Position:
     quantity: int
     buy_price: float
     buy_date: str
-    target_profit_rate: float = 0.15
-    stop_loss_rate: float = 0.08
+    target_profit_rate: float = 99.0  # mom: 사실상 무한 (sim 동일성)
+    stop_loss_rate: float = 99.0      # mom: 사실상 무한 (sim 동일성)
     total_score: float = 0.0
     factor_rank: int = 999
 

@@ -19,6 +19,7 @@ from backtest.models import (
     DailySnapshot, TradeAction, SellReason
 )
 from utils.logger import setup_logger
+from utils.trading_calendar import is_first_trading_day_of_month
 from config.pg_helper import pg_connection
 from config.db_config import BACKTEST_DB_CONFIG
 
@@ -93,10 +94,13 @@ class Backtester:
             if self.params.crisis_sell_all and self.positions:
                 crisis_sold = self._check_crisis_sell_all(date)
 
-            # TP/SL을 리밸런싱보다 먼저 체크 (실전과 동일: 3초마다 TP/SL → 09:05 리밸런싱)
+            # mom-strategy: TP/SL 체크는 params 99/99 로 실효 비활성, 리밸런싱은 매월 첫 거래일만.
+            # multiverse_min mom_006676 paramset (rebalance_freq="monthly") 동일성.
             if not crisis_sold:
-                self._check_stop_profit_loss(date)
-                self._execute_rebalancing(date)
+                self._check_stop_profit_loss(date)  # params=99 → 트리거 안 됨, 호출 비용 무시
+                date_obj = datetime.strptime(self._normalize_date(date), '%Y-%m-%d').date()
+                if is_first_trading_day_of_month(date_obj):
+                    self._execute_rebalancing(date)
 
             total_value = self._calculate_total_value(date)
             daily_return = (total_value - prev_total_value) / prev_total_value if prev_total_value > 0 else 0

@@ -267,39 +267,27 @@ class HistoricalFactorCalculator:
                 # 해당 종목의 가격 히스토리 (최대 400일)
                 stock_prices = stock_up_to.tail(400)
 
-                # 팩터 계산
-                momentum_score = self._calc_momentum_score(stock_prices)
-                if math.isnan(momentum_score):
+                # mom-strategy: V100 4-팩터 → risk-adjusted momentum 단일 스코어 교체.
+                # multiverse_min mom_006676 paramset (lookback=12M, skip=1M).
+                # 운영 quant_screening_service._calculate_scores 와 동일 식 + 동일 affine.
+                from core.quant.momentum_scorer import compute_risk_adjusted_momentum
+                if len(stock_prices) < 274:  # (lookback+skip)*21 + 1
                     continue
-                momentum_score = clamp(momentum_score)
+                raw_momentum = compute_risk_adjusted_momentum(
+                    stock_prices['close'].reset_index(drop=True),
+                    lookback_months=12, skip_months=1,
+                )
+                if not isinstance(raw_momentum, (int, float)) or math.isnan(raw_momentum) or math.isinf(raw_momentum):
+                    continue
 
-                # 재무데이터 (프리인덱스 기반 O(1) 조회)
-                latest_fin = None
-                year_ago_fin = None
-                stock_fin = self._fin_by_stock.get(code)
-                if stock_fin is not None and not stock_fin.empty:
-                    # Look-ahead 방지: report_date가 아니라 공시 지연이 반영된
-                    # available_date 기준으로 calc_date에 실제로 알 수 있는 데이터만 사용
-                    fin_up_to = stock_fin[stock_fin['available_date'] <= calc_date]
-                    if not fin_up_to.empty:
-                        latest_fin = fin_up_to.iloc[-1]
-                        if len(fin_up_to) >= 5:
-                            year_ago_fin = fin_up_to.iloc[-5]
-                        elif len(fin_up_to) >= 3:
-                            year_ago_fin = fin_up_to.iloc[0]
+                # Affine slope=1.0 (T4 와 동일, 80-종목 시뮬에서 distinct=75/80)
+                scaled_momentum = max(0.0, min(100.0, 50.0 + 1.0 * raw_momentum))
 
-                value_score = self._calc_value_score(code, today_row, latest_fin)
-                quality_score = self._calc_quality_score(latest_fin, stock_prices)
-                growth_score = self._calc_growth_score(latest_fin, year_ago_fin, stock_prices)
-
-                value_score = clamp(value_score)
-                quality_score = clamp(quality_score)
-                growth_score = clamp(growth_score)
-
-                # V100 (2026-04-13 전환, 커밋 137b0cd): 멀티버스 검증에서 Value 단독이
-                # 세 기간 모두 KOSPI 초과. Momentum/Growth 단독 -88~-92%, Quality -8.9%.
-                # production quant_screening_service.py:422-426과 동일.
-                total_score = clamp(value_score)
+                value_score = 0.0
+                quality_score = 0.0
+                growth_score = 0.0
+                momentum_score = scaled_momentum
+                total_score = scaled_momentum
 
                 # 타이밍 점수 계산 (전일 종가 기준)
                 timing_score = calc_timing_score(stock_prices['close'].values)
