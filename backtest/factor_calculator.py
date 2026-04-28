@@ -241,10 +241,12 @@ class HistoricalFactorCalculator:
                 if stock_all is None:
                     continue
 
-                # calc_date 직전 데이터만 (look-ahead 방지: 오늘 시가에 체결하므로
-                # 결정은 어제 종가까지의 정보만 사용 가능. multiverse_min execution.py:54
-                # "T-1 스냅샷 기반 주문을 T 시가로 체결" 와 동일 의미.)
-                stock_up_to = stock_all[stock_all['date'] < calc_date]
+                # calc_date 이전 데이터만 (종목별 ~800행, 빠른 필터링).
+                # 주의: <= 가 정상. backtester 가 거래일 D 에서 _get_prev_calc_date(D)=D-1
+                # 의 factor 만 사용하므로 (line 245+), factor_calculator 가 X 종가까지 써도
+                # 백테스트 의사결정은 D-1 종가 기준 (look-ahead 없음). 이 곳을 < 로 바꾸면
+                # 백테스트 실효 lag 가 D-2 가 되어 알파 약화.
+                stock_up_to = stock_all[stock_all['date'] <= calc_date]
                 if len(stock_up_to) < self.MIN_LISTING_DAYS:
                     continue
 
