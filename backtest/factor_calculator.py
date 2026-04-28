@@ -280,14 +280,16 @@ class HistoricalFactorCalculator:
                 if not isinstance(raw_momentum, (int, float)) or math.isnan(raw_momentum) or math.isinf(raw_momentum):
                     continue
 
-                # Affine slope=1.0 (T4 와 동일, 80-종목 시뮬에서 distinct=75/80)
-                scaled_momentum = max(0.0, min(100.0, 50.0 + 1.0 * raw_momentum))
-
+                # 점수 = raw risk-adjusted momentum 그대로 (clamp 없음).
+                # 사유: clamp(0,100) 시 강한 모멘텀 종목들이 상한 100 에 saturate →
+                #       top-N 랭킹에서 동점 다발 → 정렬 순서가 비결정적.
+                #       T9 sharpe 1.44 (sim 1.76) → ranking 노이즈 의심.
+                # multiverse_min 도 raw 점수 그대로 cross-sectional 정렬에 사용.
                 value_score = 0.0
                 quality_score = 0.0
                 growth_score = 0.0
-                momentum_score = scaled_momentum
-                total_score = scaled_momentum
+                momentum_score = float(raw_momentum)
+                total_score = float(raw_momentum)
 
                 # 타이밍 점수 계산 (전일 종가 기준)
                 timing_score = calc_timing_score(stock_prices['close'].values)

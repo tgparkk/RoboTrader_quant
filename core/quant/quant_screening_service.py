@@ -434,26 +434,24 @@ class QuantScreeningService:
         if not isinstance(raw_score, (int, float)) or math.isnan(raw_score) or math.isinf(raw_score):
             return None
 
-        # Affine 0-100 스케일: cross-section 내 상대 순위 보존이 목적 (절대값 의미 없음).
-        # 슬로프 1.0 채택 근거: 80-종목 시뮬에서 raw_score 분포 [-24, +112], p25/p75 = -6/17.
-        # 슬로프 25 (plan 권장) 사용 시 80 중 distinct=13 → 랭킹 붕괴. 슬로프 1.0 → distinct=75/80.
-        # buy_min_score 임계값(T5/T9)은 이 스케일 분포에 맞춰 별도 튜닝.
-        scaled = max(0.0, min(100.0, 50.0 + 1.0 * raw_score))
-
+        # 점수 = raw risk-adjusted momentum 그대로 (clamp 없음, T9 backtest 검증).
+        # multiverse_min 과 정렬 순서 일치 보장. 0-100 가정 코드 (validate_score 등)
+        # 는 T6 에서 이미 비활성화했으므로 음수/100+ 값 흘러도 안전.
+        score = float(raw_score)
         details = {
             'value': 0.0,
-            'momentum': scaled,
+            'momentum': score,
             'quality': 0.0,
             'growth': 0.0,
-            'reason': f"momentum risk-adj raw={raw_score:.3f} scaled={scaled:.1f}",
+            'reason': f"momentum risk-adj raw={score:.3f}",
         }
 
         return {
             'value_score': 0.0,
-            'momentum_score': scaled,
+            'momentum_score': score,
             'quality_score': 0.0,
             'growth_score': 0.0,
-            'total_score': scaled,
+            'total_score': score,
             'details': details,
         }
 
