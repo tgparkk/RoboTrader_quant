@@ -1,7 +1,8 @@
 @echo off
 chcp 65001 > nul
 echo ========================================
-echo    RoboTrader_quant Trading System
+echo    RoboTrader_quant_mom Trading System
+echo    (mom_006676 monthly momentum strategy)
 echo ========================================
 
 cd /d "%~dp0"
@@ -37,11 +38,11 @@ if not exist "config\key.ini" (
 if not exist "logs" mkdir logs
 
 echo.
-echo Starting RoboTrader_quant...
+echo Starting RoboTrader_quant_mom...
 echo Press Ctrl+C to stop.
 echo.
 python main.py
 
 echo.
-echo RoboTrader_quant stopped.
+echo RoboTrader_quant_mom stopped.
 pause
