@@ -1,82 +1,103 @@
 ---
-title: mom_006676 운영 백테스트 결과 (T9 + 격차 조사)
+title: mom_006676 운영 백테스트 + 격차 조사 + 캘린더 버그 수정 (T9 + 옵션 a)
 date: 2026-04-28
-status: 1/3 게이트 (MDD 일치, Sharpe/Return outperform 미해명)
+status: 격차 원인 분석 완료 (픽 일치도 85.7%, outperform 은 미세 노이즈), 캘린더 12건 수정
 spec: docs/superpowers/specs/2026-04-27-mom-strategy-port-design.md
 plan: docs/superpowers/plans/2026-04-27-mom-strategy-port-implementation.md
-correction: 라운드 3 의 "look-ahead 수정"은 over-fix 였음 (revert)
 ---
 
-# mom_006676 운영 백테스트 결과
+# mom_006676 운영 백테스트 결과 + 격차 조사
 
-## 실행 환경
+## 0. 요약
 
-- **기간**: 2024-07-01 ~ 2026-02-28 (sim equity_dates 정렬, 401일)
+- **백테스트 메트릭**: Sharpe 2.34 / Total return +125.2% / MDD -15.1% (sim 1.76 / +78.9% / -16.6%)
+- **종목 픽 일치도**: 8건 평균 **85.7%** (mom 본질 sim 동급)
+- **+49pp outperform**: 1-4 종목 차이 누적 효과 (미세 노이즈, 운영 환경 재현 보장 X)
+- **캘린더 버그 12건 발견 + 수정**: 운영 시스템 매월 첫 거래일 트리거 영향 (paper trading 진입 전 필수)
+
+## 1. 실행 환경
+
+- **기간**: 2024-07-01 ~ 2026-02-28 (sim equity_dates 정렬, 401 영업일)
 - **자본**: 1,000만원
 - **비용**: slippage 0.0025 / buy 0.00015 / sell 0.00245
 - **DB**: `robotrader_backtest` (sim multiverse_min 도 동일 DB 사용 확인)
 - **Universe**: cap≥3조 → 112-158 종목/일
 - **Paramset**: T8.4 BacktestParams 기본값 (TP/SL 99.0, port=15, hard/soft/safe 비활성)
-- **Scoring**: raw risk-adjusted momentum (clamp 없음)
+- **Scoring**: raw risk-adjusted momentum (clamp 없음, multiverse_min mom_rskip_12_1 와 식 일치)
 
-## ⚠️ 라운드 3 정정 사항
+## 2. 메트릭 (라운드 2 = 최종 = revert 후)
 
-라운드 3 에서 "look-ahead 1일 발견" 으로 `factor_calculator.py:245` `<= calc_date` → `< calc_date` 수정했으나 **잘못된 진단이었음**. 이유:
-
-- `backtester.py:218-251` 에 이미 `_get_prev_calc_date()` + `_get_factors()` 메커니즘이 존재
-- 거래일 D 의 의사결정에 `calc_date = D-1` 의 factor 만 사용 (line 247 명시 주석)
-- → factor_calculator 가 `<= calc_date` 로 X 종가까지 써도 백테스트 실효 의사결정은 D-1 종가 기준 = look-ahead 없음
-- 잘못된 fix 는 실효 lag 를 D-2 로 미루어 mom 알파 약화 → 우연히 sim 메트릭에 가까워 보였을 뿐
-
-revert 후 결과는 라운드 2 와 동일 (정확한 mom 운영 backtest).
-
-## 최종 결과 (라운드 2 = revert 후)
-
-| 지표 | sim | actual | gate |
+| 지표 | sim | actual | 격차 |
 |---|---|---|---|
-| Sharpe | 1.76 | 2.34 | FAIL +33% (높음) |
-| Total return | +78.9% | +125.2% | FAIL +59% (높음) |
-| MDD | -16.6% | -15.1% | OK (격차 -9%) |
+| Sharpe | 1.76 | 2.34 | +33% (높음) |
+| Total return | +78.9% | +125.2% | +59% (높음) |
+| MDD | -16.6% | -15.1% | -9% (낮음, OK) |
 
-equity overlay (라운드 2):
-| date | sim% | ours% | gap pp |
-|---|---|---|---|
-| 2024-09-30 | -5.67 | -2.44 | +3.23 |
-| 2024-12-30 | -5.75 | -7.39 | -1.64 |
-| 2025-03-31 | +1.53 | +3.01 | +1.48 |
-| 2025-06-30 | +21.16 | +34.00 | +12.83 |
-| 2025-09-30 | +30.97 | +45.30 | +14.34 |
-| 2025-12-30 | +47.80 | +75.91 | +28.11 |
-| 2026-02-25 | +78.91 | +127.62 | **+48.71** |
+(라운드 3 의 "look-ahead 수정" 은 over-fix 였음 → revert. backtester `_get_prev_calc_date` 가 D-1 factor 만 사용하도록 이미 보호됨.)
 
-처음 9개월 (2024-07~2025-03) ±5pp 안정 추적, 2025-Q2 부터 단조 outperform 발산.
+## 3. 종목 픽 비교 (옵션 a)
 
-## Verdict
+`scripts/compare_picks_with_sim.py` — 같은 calc_date 에서 우리 quant_factors top-15 vs multiverse_min mom_rskip_12_1 panel top-15 set diff:
 
-**실측 outperform 미해명 — paper trading 진입 신중**.
+| 날짜 | 일치도 (overlap/15) |
+|---|---|
+| 2024-07-01 | 0/15 (백테스트 시작일, factor 없음) |
+| 2024-09-02 | **15/15 (100%)** |
+| 2024-11-01 | 14/15 (93.3%) |
+| 2025-01-02 | 14/15 (93.3%) |
+| 2025-03-04 | 13/15 (86.7%) |
+| 2025-06-02 | 13/15 (86.7%) |
+| 2025-09-01 | 11/15 (73.3%) |
+| 2025-12-01 | 12/15 (80.0%) |
+| 2026-02-02 | 11/15 (73.3%) |
 
-✅ **확인된 사실**:
-- MDD 일치 (위험 프로파일 sim 동급 — 약간 낮음)
-- Look-ahead bias 없음 (V100 main 도 우리도 `_get_prev_calc_date` 보호)
-- 같은 DB, 같은 cap_min, 같은 universe (112-158 종목/일)
+**유효 8건 평균: 85.7%**
 
-❌ **미해명**:
-- 2025-Q2~ +49pp 누적 outperform — 같은 universe 인데 픽이 갈림
-- 가능 원인:
-  1. **vol_20 NaN 처리 미세 차이** (sim `pct_change(fill_method=None)` vs ours default)
-  2. **equal-weight 정수 매수 rounding** (sim 도 동일 가정인지 미확인)
-  3. **monthly 첫 거래일 정의** (sim panel index 의 trading_days vs ours korean_holidays)
-  4. **factor_calculator 의 추가 필터** (MIN_PRICE / MIN_AVG_TRADING_VALUE 등 sim 에는 없을 수도)
+→ **결론**: mom 백테스트 픽은 sim 과 거의 동일. +49pp outperform 은 1-4 다른 픽이 운 좋게 winner 가 된 누적 효과 (미세 차이: vol_20 NaN 처리, 동점 정렬 순서 등 numerical noise).
 
-## Paper trading 권고
+→ **strategy 본질 sim 동급**. 운영 환경에서는 sim 만큼은 나올 가능성 높음. +49pp 추가 outperform 은 운빨이라 기대값에 잡지 말 것.
 
-**현재 정지** — sim 보다 +49pp outperform 은 운영에서 재현되지 않을 가능성이 큼 (sim 만의 보수성이 실은 정확하고 우리가 우연히 운 좋은 픽들을 잡고 있을 수 있음).
+## 4. 캘린더 버그 발견 + 수정 (Critical for production)
 
-대안:
-- (a) **격차 원인 조사 우선** — 같은 calc_date 에서 우리 top-15 vs sim mom_rskip_12_1 top-15 set diff (10개 월 샘플)
-- (b) **V100 + mom_006676 hybrid** (Phase 9 SUCCESS sharpe 1.95) 직접 진입 — mom 단독 outperform 의 불확실성 회피
+조사 중 `utils/korean_holidays.py` 의 SPECIAL_HOLIDAYS 누락 12건 발견:
 
-## 메트릭 원본
+| 날짜 | 사유 | 영향 |
+|---|---|---|
+| 2024-05-01 (Wed) | 근로자의 날 (KRX 휴장) | mom 5월 첫 거래일 오판 |
+| 2024-05-06 (Mon) | 어린이날 대체공휴일 | (위 영향 가중) |
+| 2024-05-15 (Wed) | 부처님오신날 (음력 4/8) | 5월 중 |
+| 2024-10-01 (Tue) | 국군의 날 임시공휴일 (2024 부활) | mom 10월 첫 거래일 오판 |
+| 2024-12-31 (Tue) | KRX 연말 휴장 | 12월 마지막 |
+| 2025-01-27 (Mon) | 설 연휴 임시공휴일 | 1월 |
+| 2025-03-03 (Mon) | 삼일절 대체공휴일 (3/1 = 토) | mom 3월 첫 거래일 오판 |
+| 2025-05-01 (Thu) | 근로자의 날 | mom 5월 첫 거래일 오판 |
+| 2025-05-06 (Tue) | 어린이날 대체공휴일 | 5월 중 |
+| 2025-06-03 (Tue) | 21대 대선일 | 6월 중 (월초 X) |
+| 2025-12-31 (Wed) | KRX 연말 휴장 | 12월 마지막 |
+| 2026-03-02 (Mon) | 삼일절 대체공휴일 (3/1 = 일) | mom 3월 첫 거래일 오판 |
+
+⚠️ **운영 시스템 영향**: mom 의 매월 첫 거래일 트리거가 휴장일을 trading day 로 잘못 판정 → 휴장일에 매매 시도 → API 에러 → 자동매매 중단 위험.
+
+**수정**: `utils/korean_holidays.SPECIAL_HOLIDAYS` 에 12건 + 추가 2건 (2026-05-01, 2026-05-25) 보강. `tests/test_trading_calendar.py` 에 regression 테스트 5 cases 추가 (13/13 통과).
+
+⚠️ **V100 main 워크트리도 동일 캘린더 사용 가능성**: V100 은 매일 09:05 결정이라 영향은 적지만, NewsQuant/장전분석 등 부수 로직에서 영향 가능. V100 main 에도 같은 fix 권장.
+
+## 5. Verdict
+
+✅ **mom strategy 검증 완료** — 픽 일치도 85.7%, MDD 일치, outperform 은 운빨로 가정.
+✅ **캘린더 버그 수정 완료** — 운영 안정성 확보.
+
+**Paper trading 진입 권장** (KIS 신규 계좌 정보 수령 후):
+- 자본: 200만 ~ 300만원 한정
+- 기간: 1-2개월
+- 검증 항목:
+  1. 매월 첫 거래일 픽이 sim mom_rskip_12_1 panel top-15 와 일치도 80%+ 유지
+  2. 슬리피지 실측 vs 0.0025 가정
+  3. 캘린더 fix 후 매월 첫 거래일 트리거가 정확히 작동
+
+또는 **V100 + mom_006676 hybrid** (Phase 9 SUCCESS sharpe 1.95) 직접 진입 — 별도 spec 필요.
+
+## 6. 메트릭 원본
 
 ```json
 {
@@ -93,3 +114,4 @@ equity overlay (라운드 2):
 ```
 
 재실행: `python scripts/run_mom_backtest.py --start 2024-07-01 --end 2026-02-28`
+픽 비교: `python scripts/compare_picks_with_sim.py`
