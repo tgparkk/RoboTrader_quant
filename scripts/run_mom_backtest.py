@@ -116,7 +116,9 @@ def _compare_to_sim(metrics: dict) -> tuple[int, list[str]]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--start", default="2024-07-01")
-    parser.add_argument("--end", default="2026-03-31")
+    # sim multiverse_min mom_006676 의 equity_dates 마지막 = 2026-02-25.
+    # 정확한 비교를 위해 거의 동일한 끝일자 사용 (2026-02-28 권장).
+    parser.add_argument("--end", default="2026-02-28")
     parser.add_argument("--portfolio-size", type=int, default=15)
     parser.add_argument("--skip-recompute", action="store_true",
                         help="quant_factors 재계산 생략 (이전 mom run 결과 재사용)")
