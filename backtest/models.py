@@ -42,13 +42,14 @@ class BacktestParams:
     target_profit_rate: float = 99.0  # mom: 비활성
     stop_loss_rate: float = 99.0      # mom: 비활성
 
-    # 리밸런싱 점수 임계값 — mom-strategy: 0-100 범위 밖으로 비활성.
+    # 리밸런싱 점수 임계값 — mom-strategy: -inf/+inf 로 비활성.
     # 매월 첫 거래일 포트폴리오 교체로만 청산 (3-tier 매도 가지 무효).
-    hard_stop_score: float = -1.0   # mom: hard stop 비활성 (score >= 0 항상 통과)
-    soft_stop_score: float = -1.0   # mom: soft stop 비활성 (구간 [-1, -1) 공집합)
-    soft_stop_rank: int = 30        # 사용 안 함 (soft_stop_score 비활성이라 분기 도달 불가)
-    safe_score: float = 999.0       # mom: non-target 항상 매도 (sim 포트폴리오 교체)
-    safe_rank: int = 0              # mom: rank >= 1 이라 안전 순위 통과 불가
+    # raw risk-adjusted momentum 은 음수 가능 (약세 종목) → -inf 로 hard/soft 비활성.
+    hard_stop_score: float = float('-inf')   # mom: hard stop 절대 비활성
+    soft_stop_score: float = float('-inf')   # mom: soft stop 절대 비활성
+    soft_stop_rank: int = 30                  # 사용 안 함
+    safe_score: float = float('inf')         # mom: non-target 항상 매도
+    safe_rank: int = 0                        # mom: rank >= 1 이라 안전 순위 통과 불가
 
     # 최소 보유일수 (리밸런싱 매도 보호, 손절은 항상 허용)
     min_hold_days: int = 0

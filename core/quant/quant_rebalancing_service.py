@@ -46,12 +46,13 @@ class QuantRebalancingService:
 
         # 점수 기반 매도 임계값 — mom-strategy 에선 모두 비활성.
         # 청산은 매월 첫 거래일 포트폴리오 교체 시 "target 에 없으면 매도" 단순 로직만 사용.
-        # 임계값 0-100 범위 밖으로 설정하여 3-tier (hard/soft/safe) 가지 모두 무효화.
-        self.hard_stop_score = -1.0  # mom: hard stop 비활성 (score >= 0 항상 통과)
-        self.soft_stop_score = -1.0  # mom: soft stop 비활성 (구간 [-1, -1) 공집합)
-        self.soft_stop_rank = 30     # 사용 안 함 (soft_stop_score 가 비활성이라 분기 도달 불가)
-        self.safe_score = 999.0      # mom: "안전 점수" 통과 불가 → non-target 항상 매도
-        self.safe_rank = 0           # mom: "안전 순위" 통과 불가 (rank >= 1)
+        # raw risk-adjusted momentum 은 음수 가능 (약세 종목) → -inf 로 hard/soft 비활성.
+        # ⚠️ T6.3 의 -1.0 은 raw 음수 점수에서 hard_stop 발동 가능 → -inf 로 정정.
+        self.hard_stop_score = float('-inf')  # mom: hard stop 절대 비활성
+        self.soft_stop_score = float('-inf')  # mom: soft stop 절대 비활성 (-inf < x < -inf 공집합)
+        self.soft_stop_rank = 30              # 사용 안 함
+        self.safe_score = float('inf')        # mom: non-target "안전 점수" 통과 불가 → 항상 매도
+        self.safe_rank = 0                    # mom: rank >= 1 이라 안전 순위 통과 불가
 
         # 매수 최소 점수: mom_006676 sim 은 top-N 랭크 선정만 사용 (절대 임계값 없음).
         # 운영도 동일 의미를 위해 0.0 으로 비활성 (buy_min_score > 0 조건이 line 367 에서 통과).

@@ -473,8 +473,10 @@ class RebalancingExecutor:
                         continue
 
                     # 목표 익절/손절률 설정 (매수 전에 설정)
-                    target_profit_rate = buy_item.get('target_profit_rate', 0.15)
-                    stop_loss_rate = buy_item.get('stop_loss_rate', 0.08)
+                    # mom-strategy: 99.0 = 사실상 무한 (sim tp_sl_mode=none). buy_item 이 정상이면
+                    # T6.1 calculator 가 99.0/99.0 으로 채움. fallback 도 99.0 으로 방어.
+                    target_profit_rate = buy_item.get('target_profit_rate', 99.0)
+                    stop_loss_rate = buy_item.get('stop_loss_rate', 99.0)
 
                     # FundManager 자금 예약 (Race condition 방지)
                     buy_amount = current_price * target_quantity
