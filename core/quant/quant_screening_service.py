@@ -112,10 +112,10 @@ class QuantScreeningService:
         self.min_listing_days = 250  # 상장 1년 이상 (거래일 기준)
 
     def _get_price_data_from_db(self, stock_code: str, days: int = 400) -> Optional[pd.DataFrame]:
-        """DB에서 일봉 데이터 조회, 부족하면 API 폴백"""
+        """DB에서 일봉 데이터 조회, 부족하면 API 폴백 (SHARED_DB = V100 robotrader_quant)"""
         try:
-            from config.pg_helper import pg_connection
-            with pg_connection() as conn:
+            from config.pg_helper import shared_pg_connection
+            with shared_pg_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     SELECT date as stck_bsop_date,
@@ -154,9 +154,9 @@ class QuantScreeningService:
             (필터 통과 여부, 제외 사유, ratio_entries)
         """
         try:
-            from config.pg_helper import pg_connection
+            from config.pg_helper import shared_pg_connection
 
-            with pg_connection() as conn:
+            with shared_pg_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     SELECT date, close, market_cap, trading_value
@@ -218,8 +218,8 @@ class QuantScreeningService:
         # ML 데이터 수집(15:35)이 선행돼야 하며, 수집 실패 시 전날 데이터로 왜곡된 스크리닝을 막음.
         date_iso = f"{calc_date[:4]}-{calc_date[4:6]}-{calc_date[6:8]}"
         try:
-            from config.pg_helper import pg_connection
-            with pg_connection() as conn:
+            from config.pg_helper import shared_pg_connection
+            with shared_pg_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT COUNT(*) FROM daily_prices WHERE date = %s", (date_iso,))
                 today_rows = cursor.fetchone()[0]
@@ -465,8 +465,8 @@ class QuantScreeningService:
         KIS API 호출 제거 (value 계산 속도 10배 개선).
         """
         try:
-            from config.pg_helper import pg_connection
-            with pg_connection() as conn:
+            from config.pg_helper import shared_pg_connection
+            with shared_pg_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     SELECT close, market_cap FROM daily_prices

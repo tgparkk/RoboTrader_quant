@@ -38,7 +38,7 @@ from config.market_hours import MarketHours
 from core.quant.quant_screening_service import QuantScreeningService
 from core.ml_screening_service import MLScreeningService
 from core.ml_data_collector import MLDataCollector
-from core.quant.quant_rebalancing_service import QuantRebalancingService, RebalancingPeriod
+from core.quant.quant_rebalancing_service import QuantRebalancingService
 from scripts.daily_trading_summary import print_today_trading_summary
 from config.constants import (
     PORTFOLIO_SIZE, QUANT_CANDIDATE_LIMIT, REBALANCING_ORDER_INTERVAL,
@@ -128,7 +128,8 @@ class DayTradingBot:
             telegram=self.telegram,
             fund_manager=self.fund_manager
         )
-        self.rebalancing_service.rebalancing_period = RebalancingPeriod.DAILY  # 일간 리밸런싱
+        # mom-strategy: rebalancing_period 는 quant_rebalancing_service.__init__ 에서
+        # MONTHLY (mom_006676 paramset) 로 set 됨. V100 의 DAILY 오버라이드 제거.
         self._last_rebalancing_date = None  # 마지막 리밸런싱 실행 날짜
 
         # 장전 시장 파악 (예상체결지수 + 미장 + 글로벌뉴스)
@@ -764,11 +765,13 @@ class DayTradingBot:
                             self.logger.info(f"📊 08:30+ 전일 데이터 수집 스케줄 트리거 ({current_time.strftime('%H:%M:%S')})")
                             self._daily_data_collection_task = asyncio.create_task(self._run_daily_data_collection())
 
-                # 15:35 장 마감 후: 전체 일봉 수집 → 퀀트 스크리닝 → 일일 매매 리포트 (순차 실행)
-                if current_time.hour == 15 and current_time.minute >= 35:
+                # 16:00 장 마감 후: 퀀트 스크리닝 → 일일 매매 리포트 (mom-strategy: V100 collection 완료 후 트리거)
+                # mom 은 자체 일봉 수집을 하지 않고 SHARED_DB (V100 robotrader_quant) 를 read 하므로,
+                # V100 의 15:35 ~ ~15:50 collection 이 완료된 시점인 16:00 부터 실행한다.
+                if current_time.hour == 16 and current_time.minute >= 0:
                     if (self._last_daily_report_date != current_time.date() and
                             self._quant_screening_task is None):
-                        self.logger.info(f"📊 15:35+ 장 마감 후 플로우 트리거 ({current_time.strftime('%H:%M:%S')})")
+                        self.logger.info(f"📊 16:00+ 장 마감 후 플로우 트리거 ({current_time.strftime('%H:%M:%S')})")
                         self._quant_screening_task = asyncio.create_task(self._run_after_market_flow())
 
                 #             self.logger.info("✅ 장 마감 후 차트 생성 완료 (1회 실행 완료)")
@@ -969,10 +972,14 @@ class DayTradingBot:
             self.logger.error(f"❌ 시스템 상태 로깅 오류: {e}")
     
     async def _run_after_market_flow(self):
-        """15:35 장 마감 후 순차 실행: 전체 일봉 수집 → 퀀트 스크리닝 → 일일 리포트"""
+        """16:00 장 마감 후 순차 실행 (mom-strategy): 퀀트 스크리닝 → 일일 리포트
+
+        mom 은 일봉 수집을 SHARED_DB (V100 robotrader_quant) 에 위임하므로 자체 수집 단계 없음.
+        16:00 시점에 V100 의 15:35~15:50 collection 이 완료되어 있어야 함.
+        """
         try:
-            # 1단계: 전체 종목 일봉 수집
-            self.logger.info("📊 15:35+ 장 마감 후 일봉 수집 시작")
+            # 1단계: mom-strategy: 일봉 수집 skip (SHARED_DB 사용). 호환성 유지를 위해 호출만 유지.
+            self.logger.info("📊 16:00+ 장 마감 후 플로우 시작 (mom: 일봉 수집은 V100 SHARED_DB 위임)")
             collection_ok = await self.screening_task_runner.run_after_market_data_collection()
             if not collection_ok:
                 self.logger.warning("⚠️ 장 마감 후 일봉 수집 실패 — 스크리닝은 계속 진행")
@@ -1076,22 +1083,21 @@ class DayTradingBot:
         try:
             today = now_kst().strftime('%Y-%m-%d')
 
-            conn = self.db_manager._get_connection()
-            cursor = conn.cursor()
-
-            # 당일 데이터 조회
-            cursor.execute(
-                """
-                SELECT COUNT(DISTINCT stock_code) as count,
-                       MIN(close) as min_price,
-                       MAX(close) as max_price
-                FROM daily_prices
-                WHERE date = %s
-                """,
-                (today,)
-            )
-            result = cursor.fetchone()
-            conn.close()
+            # mom-strategy: daily_prices 는 SHARED_DB (V100 robotrader_quant) 에서 read
+            from config.pg_helper import shared_pg_connection
+            with shared_pg_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT COUNT(DISTINCT stock_code) as count,
+                           MIN(close) as min_price,
+                           MAX(close) as max_price
+                    FROM daily_prices
+                    WHERE date = %s
+                    """,
+                    (today,)
+                )
+                result = cursor.fetchone()
 
             count = result[0] if result else 0
 

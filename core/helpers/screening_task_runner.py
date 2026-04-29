@@ -113,11 +113,22 @@ class ScreeningTaskRunner:
     async def run_daily_data_collection(self, verify_callback=None):
         """일일 데이터 수집 실행 (08:30 - 전일 데이터)
 
-        퀀트 포트폴리오 및 보유 종목의 일봉/재무 데이터를 수집합니다.
+        mom-strategy: daily_prices 는 SHARED_DB (V100 robotrader_quant) 에서 read 하므로
+        mom 자체 수집은 비활성. V100 이 단일 collector 역할.
 
         Args:
             verify_callback: 데이터 검증 콜백 함수 (선택적)
         """
+        logger.info("⏭️ 08:30 데이터 수집 skip — mom-strategy 는 SHARED_DB 사용 (V100 단일 collector)")
+        if verify_callback:
+            try:
+                await verify_callback()
+            except Exception as e:
+                logger.debug(f"verify_callback 오류 (무시): {e}")
+        return True
+
+    async def _legacy_run_daily_data_collection(self, verify_callback=None):
+        """Legacy: V100 호환 코드 (mom 에선 호출되지 않음). 보존만."""
         try:
             logger.info("📊 08:30 전일 데이터 수집 시작")
 
@@ -209,9 +220,15 @@ class ScreeningTaskRunner:
     async def run_after_market_data_collection(self) -> bool:
         """장 마감 후 전체 종목 일봉 수집 (15:35 — 당일 종가 포함)
 
-        스크리닝에 필요한 전체 종목(2,484개)의 일봉 데이터를 DB에 저장합니다.
-        재무 데이터는 수집하지 않습니다 (변동 없음).
+        mom-strategy: 비활성. V100 운영 시스템(`RoboTrader_quant`) 가 15:35 부터 동일 작업을
+        수행하므로 mom 은 SHARED_DB (V100 robotrader_quant) 에서 read 하기만 함.
+        16:00 mom 스크리닝 트리거 시점에 V100 collection 이 완료된 상태.
         """
+        logger.info("⏭️ 15:35 장 마감 후 일봉 수집 skip — mom-strategy 는 V100 SHARED_DB 사용")
+        return True
+
+    async def _legacy_run_after_market_data_collection(self) -> bool:
+        """Legacy: V100 호환 코드 (mom 에선 호출되지 않음). 보존만."""
         try:
             logger.info("📊 15:35+ 장 마감 후 일봉 수집 시작")
 

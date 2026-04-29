@@ -12,7 +12,7 @@ from datetime import datetime
 
 from utils.logger import setup_logger
 from utils.data_cache import DataCache
-from config.pg_helper import pg_connection
+from config.pg_helper import shared_pg_connection
 
 
 logger = setup_logger(__name__)
@@ -73,7 +73,7 @@ class UnifiedDataLoader:
                 from utils.korean_time import now_kst
                 end_date = now_kst().strftime("%Y-%m-%d")
             
-            with pg_connection() as conn:
+            with shared_pg_connection() as conn:
                 query = '''
                     SELECT date, open, high, low, close, volume, trading_value,
                            returns_1d, returns_5d, returns_20d, volatility_20d
@@ -98,7 +98,7 @@ class UnifiedDataLoader:
     def _load_daily_from_db(self, stock_code: str, date: str) -> Optional[pd.DataFrame]:
         """DB에서 일봉 데이터 조회"""
         try:
-            with pg_connection() as conn:
+            with shared_pg_connection() as conn:
                 query = '''
                     SELECT date, open, high, low, close, volume, trading_value,
                            returns_1d, returns_5d, returns_20d, volatility_20d

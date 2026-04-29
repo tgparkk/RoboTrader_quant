@@ -9,7 +9,7 @@ import pandas as pd
 from contextlib import contextmanager
 from typing import Optional
 
-from config.db_config import DB_CONFIG, BACKTEST_DB_CONFIG
+from config.db_config import DB_CONFIG, BACKTEST_DB_CONFIG, SHARED_DB_CONFIG
 
 
 @contextmanager
@@ -40,6 +40,13 @@ def pg_connection(config=None):
 def backtest_pg_connection():
     """Context manager for backtest DB connection."""
     with pg_connection(BACKTEST_DB_CONFIG) as conn:
+        yield conn
+
+
+@contextmanager
+def shared_pg_connection():
+    """Context manager for shared DB (V100 robotrader_quant) — daily_prices read 전용."""
+    with pg_connection(SHARED_DB_CONFIG) as conn:
         yield conn
 
 
