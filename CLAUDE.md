@@ -6,7 +6,7 @@
 
 - **워크트리**: `D:\GIT\RoboTrader_quant_mom`
 - **브랜치**: `mom-strategy` (origin/mom-strategy 추적, main 무영향)
-- **운영 상태**: T9 백테스트 검증 완료, T10 paper trading 대기 (KIS 신규 계좌 후 진입)
+- **운영 상태**: T9 백테스트 검증 완료, **실전매매 모드 활성** (`config/trading_config.json` `paper_trading=false`). KIS 신규 계좌 키 + 자금 입력 후 즉시 운영 가능
 
 운영 main(`D:\GIT\RoboTrader_quant`, branch `main`, V100) 은 별개 시스템으로 동시 운영 가능. 두 시스템은 별도 PG DB · 별도 KIS 계좌 사용.
 
@@ -141,7 +141,9 @@ BUY_SCORE_MOMENTUM_MIN = None          # V100 sm 필터 비활성 (line 44)
 - 캘린더 12건 누락 fix 동시 수행 (`utils/korean_holidays.py`)
 - 상세: `docs/superpowers/reports/2026-04-28-mom-strategy-backtest-result.md`
 
-## T10 paper trading 대기 (Pending)
+## T10 운영 진입 대기 (실전매매 모드, 신규 계좌 키 대기)
+
+코드는 `paper_trading=false` 로 **실전매매 모드 ready**. paper 역할은 **소액 신규 KIS 계좌** 가 수행 (V100 main 계좌와 격리).
 
 사전 조건:
 1. KIS 신규 계좌 (V100 main 별개)
@@ -170,19 +172,9 @@ cd D:\GIT\RoboTrader_quant_mom
 python main.py
 ```
 
-## ⚠️ 미진행 / 미해결 (paper trading 진입 전 반드시 검토)
+## ⚠️ 미진행 / 미해결 (운영 진입 전 검토 — 모두 선택 사항)
 
-### P0 — 운영 진입 전 필수 fix
-
-- **`main.py:131` MONTHLY 강제 오버라이드 의심**:
-  ```python
-  self.rebalancing_service.rebalancing_period = RebalancingPeriod.DAILY  # 일간 리밸런싱
-  ```
-  `quant_rebalancing_service.py:40` 의 기본값 `RebalancingPeriod.MONTHLY` 를 `DAILY` 로 덮어씀. V100 main.py 의 잔존 코드로 추정. 이 상태에서 실 운영 시 매일 전 포트폴리오 교체 발생 (hard_stop=-inf + safe_score=+inf 조합으로 non-target 종목 항상 매도) → 막대한 회전·슬리피지·비용. **paper trading 진입 전 line 131 삭제 또는 `MONTHLY` 로 교체 필요**. T9 백테스트는 별도 `backtest/backtester.py` 경로라 영향 없었음.
-
-### 그 외 잔여
-
-- **T10 paper trading**: KIS 신규 계좌 대기
+- **T10 운영 진입**: 신규 KIS 계좌 키 (`config/key.ini`) + 자본 결정 대기. 코드는 실전매매 ready
 - **M-1**: `config/constants.py` 주석 보강 (영향 미미)
 - **M-4**: regression 테스트 추가 (영향 미미)
 - **캘린더 12건 fix V100 main 백포팅**: 권장 (선택, V100 NewsQuant/장전분석 안정성)
