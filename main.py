@@ -768,8 +768,18 @@ class DayTradingBot:
                 # 16:00 장 마감 후: 퀀트 스크리닝 → 일일 매매 리포트 (mom-strategy: V100 collection 완료 후 트리거)
                 # mom 은 자체 일봉 수집을 하지 않고 SHARED_DB (V100 robotrader_quant) 를 read 하므로,
                 # V100 의 15:35 ~ ~15:50 collection 이 완료된 시점인 16:00 부터 실행한다.
+                # 비영업일(주말/공휴일)에는 스킵 — quant_portfolio 빈/부분 데이터 저장으로
+                # 다음 영업일 09:05 리밸런싱 fallback이 잘못된 날짜를 픽업하는 것을 방지
                 if current_time.hour == 16 and current_time.minute >= 0:
-                    if (self._last_daily_report_date != current_time.date() and
+                    from utils.korean_holidays import is_holiday
+                    is_business_day = current_time.weekday() < 5 and not is_holiday(current_time)
+                    if not is_business_day:
+                        if self._last_daily_report_date != current_time.date():
+                            self.logger.info(
+                                f"📅 비영업일({current_time.strftime('%Y-%m-%d %a')}) — 장 마감 후 플로우 스킵"
+                            )
+                            self._last_daily_report_date = current_time.date()
+                    elif (self._last_daily_report_date != current_time.date() and
                             self._quant_screening_task is None):
                         self.logger.info(f"📊 16:00+ 장 마감 후 플로우 트리거 ({current_time.strftime('%H:%M:%S')})")
                         self._quant_screening_task = asyncio.create_task(self._run_after_market_flow())
