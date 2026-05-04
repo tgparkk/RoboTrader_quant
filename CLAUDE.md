@@ -300,5 +300,5 @@ Growth:   26.0%      25.8%      20%     ↑ (올리면 개선)
 ## 참고 문서
 
 - [docs/safety_mechanisms.md](docs/safety_mechanisms.md) — 안전 메커니즘 상세
-- [docs/PORTFOLIO_SNAPSHOT_GUIDE.md](docs/PORTFOLIO_SNAPSHOT_GUIDE.md) — 포트폴리오 스냅샷 가이드
+- [docs/portfolio_snapshot_guide.md](docs/portfolio_snapshot_guide.md) — 포트폴리오 스냅샷 가이드
 - [docs/archive/changelog_2025-12_2026-02.md](docs/archive/changelog_2025-12_2026-02.md) — 변경 이력
