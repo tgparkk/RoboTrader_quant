@@ -355,6 +355,13 @@ self.safe_rank = 25          # 안전 유지: <= 25위
 
 ## 종목 리스트 관리
 
+`stock_list.json`은 매일 변경되는 자동 갱신 데이터라 git에서 추적하지 않습니다(.gitignore).
+**신규 클론 직후엔 한 번 부트스트랩**:
+
+```bash
+python scripts/update_stock_list.py
+```
+
 ### 자동 갱신
 
 매일 08:20에 `scripts/update_stock_list.py`가 자동 실행되어 KOSPI + KOSDAQ 종목 리스트를 갱신합니다.

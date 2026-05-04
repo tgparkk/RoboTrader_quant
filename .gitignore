@@ -144,6 +144,14 @@ data/
 .DS_Store
 Thumbs.db
 
+# 런타임/캐시
+.omc/
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+robotrader_quant.pid
+# KRX 자동 갱신 (08:20). 신규 클론 시 `python scripts/update_stock_list.py`로 부트스트랩
+stock_list.json
+
 # 백업 파일
 *.bak
 *.backup
