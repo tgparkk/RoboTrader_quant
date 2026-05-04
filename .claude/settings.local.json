@@ -3,6 +3,8 @@
   "permissions": {
     "allow": [
       "Read",
+      "Glob",
+      "Grep",
       "Bash(git log:*)",
       "Bash(git diff:*)",
       "Bash(git status:*)",
@@ -29,7 +31,11 @@
       "Bash(powershell -Command:*)",
       "Bash(cd:*)",
       "Bash(iconv:*)",
-      "Bash(python -c \":*)"
+      "Bash(python -c \":*)",
+      "Skill(update-config)",
+      "Skill(update-config:*)",
+      "Bash(python -c \"print\\(''hello''\\)\")",
+      "Read(//d/GIT/RoboTrader_quant/**)"
     ],
     "deny": [],
     "ask": []
