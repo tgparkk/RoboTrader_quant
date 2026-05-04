@@ -500,7 +500,13 @@ class DayTradingBot:
                     if not is_market_open(current_time):
                         await asyncio.sleep(60)
                         continue
-                    
+
+                    # 공휴일 가드: is_market_open()은 주말만 차단, 공휴일 미체크
+                    from utils.korean_holidays import is_holiday
+                    if is_holiday(current_time):
+                        await asyncio.sleep(60)
+                        continue
+
                     # 09:05 시점 체크 (시초가 형성 후) — 09:05~09:30 범위 (재시작 대응)
                     if current_time.hour == 9 and 5 <= current_time.minute <= 30:
                         # 하루에 한 번만 실행
