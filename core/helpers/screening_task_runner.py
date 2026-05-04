@@ -4,6 +4,7 @@ main.py에서 분리된 스크리닝 태스크 실행 로직을 포함합니다.
 """
 import asyncio
 import traceback
+from datetime import timedelta
 from typing import List, Dict
 from utils.logger import setup_logger
 from utils.korean_time import now_kst
@@ -243,10 +244,25 @@ class ScreeningTaskRunner:
             price_success = sum(1 for v in price_results.values() if v)
             logger.info(f"✅ 장 마감 후 일봉 수집 완료: {price_success}/{len(stock_codes)}개")
 
+            # KS11/KQ11 지수 수집 (서킷브레이커·국면 분석 등 통합용)
+            ks_count, kq_count = 0, 0
+            try:
+                from core.helpers.index_collector import collect_indices
+                today_str = now_kst().strftime('%Y-%m-%d')
+                # 최근 30일 lookback (변동률·이동평균 등 향후 활용 대비)
+                start_str = (now_kst() - timedelta(days=30)).strftime('%Y-%m-%d')
+                ks_count, kq_count = await loop.run_in_executor(
+                    None, collect_indices, start_str, today_str,
+                )
+                logger.info(f"📈 지수 일봉 수집 완료: KS11={ks_count}, KQ11={kq_count}")
+            except Exception as idx_err:
+                logger.warning(f"⚠️ KS11/KQ11 지수 수집 실패: {idx_err}")
+
             if self.telegram:
                 await self.telegram.notify_system_status(
                     f"📊 장 마감 후 일봉 수집 완료\n"
-                    f"가격 데이터: {price_success}/{len(stock_codes)}개"
+                    f"가격 데이터: {price_success}/{len(stock_codes)}개\n"
+                    f"지수 데이터: KS11={ks_count}, KQ11={kq_count}"
                 )
 
             return True
