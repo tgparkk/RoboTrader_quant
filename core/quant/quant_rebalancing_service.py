@@ -14,7 +14,6 @@ from utils.logger import setup_logger
 from utils.korean_time import now_kst
 from api import kis_account_api, kis_market_api
 from core.quant.target_profit_loss_calculator import TargetProfitLossCalculator
-from config.constants import SMART_HARD_CAP_TIERS
 
 
 class RebalancingPeriod(Enum):
@@ -55,9 +54,6 @@ class QuantRebalancingService:
         # V100 점수 분포가 top 10 구간에 94+로 몰려 있어 65~90 구간은 필터 무의미.
         # 95점 미만 "경계선 저평가" 종목이 손실 주도 → 제외 시 성과 크게 개선.
         self.buy_min_score = 95.0
-
-        # 스마트 Hard Cap: 포트폴리오 평균 점수에 따라 상한 동적 조절
-        self.smart_hard_cap_tiers = SMART_HARD_CAP_TIERS
 
         # 목표 익절/손절률 계산기
         self.profit_loss_calculator = TargetProfitLossCalculator(
@@ -236,102 +232,12 @@ class QuantRebalancingService:
                         'factor_rank': factor_rank
                     })
             
-            # ============ 4단계: 스마트 Hard Cap 강제 매도 ============
-            # 유지 종목의 평균 점수를 기반으로 상한을 동적 결정
-            sell_codes = {s['stock_code'] for s in sell_list}
-            kept_holdings = [h for h in current_holdings if h['stock_code'] not in sell_codes]
+            # ============ 4단계: 보유 상한 ============
+            # V100 운영 후 14거래일 실측 보유 ≤ 7로 PORTFOLIO_SIZE=10 자체에도 도달 못함.
+            # 과거 Smart Hard Cap(buffer +2~+5)은 V100 시대에 미활용된 dead code로 제거.
+            max_holdings = self.target_portfolio_size
 
-            kept_scores = []
-            for h in kept_holdings:
-                fd = factors_map.get(h['stock_code'])
-                if fd and fd.get('total_score'):
-                    kept_scores.append(fd['total_score'])
-            avg_score = sum(kept_scores) / len(kept_scores) if kept_scores else 0
-
-            # 평균 점수에 따라 상한 결정
-            hard_cap_buffer = 2  # 기본값
-            for threshold, buffer in self.smart_hard_cap_tiers:
-                if avg_score >= threshold:
-                    hard_cap_buffer = buffer
-                    break
-            max_holdings = self.target_portfolio_size + hard_cap_buffer
-
-            self.logger.info(
-                f"스마트 Hard Cap: 유지 {len(kept_holdings)}종목, 평균 {avg_score:.1f}점 "
-                f"-> 상한 {max_holdings} (target {self.target_portfolio_size} + buffer {hard_cap_buffer})"
-            )
-
-            excess_count = len(kept_holdings) - max_holdings
-
-            if excess_count > 0:
-                # 당일 매수 종목 보호
-                calc_date_formatted = f"{calc_date[:4]}-{calc_date[4:6]}-{calc_date[6:8]}"
-                today_bought_codes = set(self.db_manager.get_today_bought_stocks(
-                    calc_date_formatted, include_real=True
-                ))
-
-                # 강제매도 후보 구성 (당일 매수 제외)
-                force_sell_candidates = []
-                for holding in kept_holdings:
-                    if holding['stock_code'] in today_bought_codes:
-                        continue  # 당일 매수 보호
-
-                    fd = factors_map.get(holding['stock_code'])
-                    score = fd.get('total_score', 0) if fd else 0
-                    rank = fd.get('factor_rank', 999) if fd else 999
-                    in_target = holding['stock_code'] in target_codes
-
-                    # 수익률 추정 (현재가 조회)
-                    profit_rate = 0.0
-                    avg_price = holding.get('avg_price', 0)
-                    if avg_price > 0:
-                        try:
-                            price_data = self.api_manager.get_current_price(holding['stock_code'])
-                            if price_data:
-                                profit_rate = (price_data.current_price - avg_price) / avg_price
-                        except Exception:
-                            pass
-
-                    force_sell_candidates.append({
-                        'stock_code': holding['stock_code'],
-                        'stock_name': holding.get('stock_name', ''),
-                        'quantity': holding.get('quantity', 0),
-                        'total_score': score,
-                        'factor_rank': rank,
-                        'in_target': in_target,
-                        'profit_rate': profit_rate,
-                    })
-
-                # 정렬: 목표 밖 우선 -> 점수 낮은 순 -> 수익률 높은 순 (수익 실현 우선)
-                force_sell_candidates.sort(key=lambda x: (
-                    x['in_target'],       # False(0) < True(1) -> 목표 밖 우선
-                    x['total_score'],     # 점수 낮은 순
-                    -x['profit_rate']     # 수익률 높은 순 (수익 종목 먼저 매도)
-                ))
-
-                actual_force_sell = min(excess_count, len(force_sell_candidates))
-                for candidate in force_sell_candidates[:actual_force_sell]:
-                    sell_list.append({
-                        'stock_code': candidate['stock_code'],
-                        'stock_name': candidate['stock_name'],
-                        'quantity': candidate['quantity'],
-                        'reason': (f"[리밸런싱] Hard Cap 강제매도 "
-                                   f"(보유 {len(kept_holdings)} > 상한 {max_holdings}, "
-                                   f"평균 {avg_score:.1f}점, "
-                                   f"점수 {candidate['total_score']:.1f}, {candidate['factor_rank']}위, "
-                                   f"수익률 {candidate['profit_rate']*100:+.1f}%)"),
-                        'total_score': candidate['total_score'],
-                        'factor_rank': candidate['factor_rank'],
-                    })
-
-                self.logger.info(
-                    f"Hard Cap 강제매도: {actual_force_sell}종목 "
-                    f"({', '.join(c['stock_code'] for c in force_sell_candidates[:actual_force_sell])})"
-                )
-            else:
-                self.logger.info(f"Hard Cap 초과 없음: 유지 {len(kept_holdings)} <= 상한 {max_holdings}")
-
-            # 5. 매수 대상: 목표 포트에 있지만 보유하지 않은 종목 (스마트 Hard Cap 반영)
+            # 5. 매수 대상: 목표 포트에 있지만 보유하지 않은 종목
             buy_list = []
             # will_keep_codes 재계산 (강제매도 반영)
             sell_codes_final = {s['stock_code'] for s in sell_list}

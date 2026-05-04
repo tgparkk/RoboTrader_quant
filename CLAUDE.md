@@ -114,13 +114,6 @@ REBALANCING_SELL_COOLDOWN_DAYS = 3     # 리밸런싱 매도 후 재매수 차�
 # 매수 필터
 BUY_RET5D_MIN = -3.0                   # 직전 5거래일 수익률 필터 (-3% 이하 급락 종목 매수 차단)
 BUY_SCORE_MOMENTUM_MIN = None          # 점수 모멘텀 필터 (V100 전환으로 2026-04-14 비활성)
-
-# Smart Hard Cap: 포트폴리오 평균 점수에 따라 보유 상한 동적 조절
-SMART_HARD_CAP_TIERS = [
-    (75.0, 5),  # 평균 >= 75점 → target + 5 = 15
-    (72.0, 3),  # 평균 >= 72점 → target + 3 = 13
-    (0.0,  2),  # 그 외        → target + 2 = 12
-]
 ```
 
 ### 리밸런싱 기준 (quant_rebalancing_service.py)

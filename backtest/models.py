@@ -93,9 +93,6 @@ class BacktestParams:
     buy_ret5d_min: float = None
     buy_ret5d_max: float = None  # 5일 누적 수익률 상한 (모멘텀 과열 차단, 백분율 단위)
 
-    # 스마트 Hard Cap: 포트폴리오 평균 점수에 따라 보유 상한 동적 조절 (default OFF)
-    use_smart_hard_cap: bool = False
-
     def to_dict(self) -> Dict[str, Any]:
         """딕셔너리로 변환"""
         return {
@@ -126,7 +123,6 @@ class BacktestParams:
             'caution_max_buy': self.caution_max_buy,
             'buy_ret5d_min': self.buy_ret5d_min,
             'buy_ret5d_max': self.buy_ret5d_max,
-            'use_smart_hard_cap': self.use_smart_hard_cap,
         }
 
     @classmethod

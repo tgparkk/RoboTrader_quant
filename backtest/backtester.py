@@ -255,26 +255,6 @@ class Backtester:
         # 단일 익절/손절선 (워크포워드 검증: TP16/SL8 종합 2위, 안정성 0.89)
         return self.params.target_profit_rate, self.params.stop_loss_rate
 
-    def _compute_smart_hard_cap(self, avg_score: float) -> int:
-        """
-        스마트 Hard Cap: 포트폴리오 평균 점수에 따라 최대 보유 상한 반환.
-
-        Tiers (config/constants.py SMART_HARD_CAP_TIERS):
-          [(75.0, 5), (72.0, 3), (0.0, 2)]
-          -> avg >= 75 => portfolio_size + 5
-          -> avg >= 72 => portfolio_size + 3
-          -> else      => portfolio_size + 2
-
-        Returns: max number of holdings allowed
-        """
-        from config.constants import SMART_HARD_CAP_TIERS
-        buffer = 2  # default (lowest tier)
-        for threshold, b in SMART_HARD_CAP_TIERS:
-            if avg_score >= threshold:
-                buffer = b
-                break
-        return self.params.portfolio_size + buffer
-
     def _execute_rebalancing(self, date: str):
         portfolio = self._get_portfolio(date)
         if not portfolio:
@@ -282,20 +262,7 @@ class Backtester:
 
         target_portfolio = portfolio[:self.params.portfolio_size]
         target_codes = {item['stock_code'] for item in target_portfolio}
-
-        # 스마트 Hard Cap: 매수 후보 풀을 max_holdings 크기로 확장
-        # (live와 동일: target_portfolio_size 고정, max_holdings까지 추가 매수 허용)
-        if self.params.use_smart_hard_cap and self.positions:
-            kept_scores_pre = []
-            for code in self.positions:
-                f = self._get_factors(date, code)
-                if f and f.get('total_score'):
-                    kept_scores_pre.append(f['total_score'])
-            avg_pre = sum(kept_scores_pre) / len(kept_scores_pre) if kept_scores_pre else 0.0
-            _pre_max = self._compute_smart_hard_cap(avg_pre)
-            buy_candidate_pool = portfolio[:_pre_max]
-        else:
-            buy_candidate_pool = target_portfolio
+        buy_candidate_pool = target_portfolio
 
         sell_list = []
         for stock_code, position in list(self.positions.items()):
@@ -386,17 +353,7 @@ class Backtester:
             buy_candidates.append(item)
 
         if buy_candidates:
-            # 스마트 Hard Cap: 포트폴리오 평균 점수 기반 동적 상한 계산
-            if self.params.use_smart_hard_cap and self.positions:
-                kept_scores = []
-                for code in self.positions:
-                    f = self._get_factors(date, code)
-                    if f and f.get('total_score'):
-                        kept_scores.append(f['total_score'])
-                avg_score = sum(kept_scores) / len(kept_scores) if kept_scores else 0.0
-                max_holdings = self._compute_smart_hard_cap(avg_score)
-            else:
-                max_holdings = self.params.portfolio_size
+            max_holdings = self.params.portfolio_size
             available_slots = max_holdings - len(self.positions)
             # 레짐 필터: CRISIS → 매수 중단, CAUTION → 매수 제한
             if self._today_regime == 'CRISIS':

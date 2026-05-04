@@ -346,8 +346,6 @@ def parse_args():
                         choices=['default', 'extended', 'fine'],
                         help='탐색 모드: default(5%%), extended(확장), fine(2.5%% 세밀)')
     parser.add_argument('--slippage', type=float, default=None, help='슬리피지 비율 (기본 0.001)')
-    parser.add_argument('--smart-hard-cap', action='store_true', default=False,
-                        help='스마트 Hard Cap 사용 (포트폴리오 평균 점수 기반 상한 동적 조절)')
     parser.add_argument('--regime', action='store_true', default=False,
                         help='레짐 필터 사용 (CRISIS/CAUTION 기반 매수 제한)')
     return parser.parse_args()
@@ -368,14 +366,12 @@ def main():
         safe_rank=25,
         use_dynamic_targets=False,
         buy_min_score=65.0,            # 현행 매수 최소 점수
-        use_smart_hard_cap=args.smart_hard_cap,
         regime_filter_enabled=args.regime,
     )
     if args.slippage is not None:
         bp_kw['slippage_rate'] = args.slippage
     base_params = BacktestParams(**bp_kw)
     print(f"  슬리피지: {base_params.slippage_rate:.4f} ({base_params.slippage_rate*100:.2f}%)")
-    print(f"  스마트 Hard Cap: {'ON' if args.smart_hard_cap else 'OFF'}")
     print(f"  레짐 필터: {'ON' if args.regime else 'OFF'}")
 
     if args.mode == 'fine':
