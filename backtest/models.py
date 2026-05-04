@@ -89,8 +89,9 @@ class BacktestParams:
     # 리밸런싱 매도 후 재매수 차단 일수 (0 = 차단 없음, 실전 기본값 3일)
     rebalancing_sell_cooldown_days: int = 0
 
-    # 5일 수익률 하드게이트 (None이면 비활성)
+    # 5일 수익률 하드게이트 (None이면 비활성, 백분율 단위)
     buy_ret5d_min: float = None
+    buy_ret5d_max: float = None  # 5일 누적 수익률 상한 (모멘텀 과열 차단, 백분율 단위)
 
     # 스마트 Hard Cap: 포트폴리오 평균 점수에 따라 보유 상한 동적 조절 (default OFF)
     use_smart_hard_cap: bool = False
@@ -124,6 +125,7 @@ class BacktestParams:
             'vix_crisis': self.vix_crisis,
             'caution_max_buy': self.caution_max_buy,
             'buy_ret5d_min': self.buy_ret5d_min,
+            'buy_ret5d_max': self.buy_ret5d_max,
             'use_smart_hard_cap': self.use_smart_hard_cap,
         }
 

@@ -362,10 +362,10 @@ class Backtester:
                 _factor_total = _f.get('total_score', 0) if _f else 0
                 if _factor_total < self.params.buy_min_score:
                     continue
-            # 5일 수익률 하드게이트
+            # 5일 수익률 하드게이트 (하한: 급락 차단 / 상한: 과열 차단)
             # Look-ahead 방지: D 09:05 매수 시점에는 D 종가를 모르므로 D-1 종가와
             # D-6 종가 기준으로 직전 5거래일 수익률을 계산한다.
-            if self.params.buy_ret5d_min is not None:
+            if self.params.buy_ret5d_min is not None or self.params.buy_ret5d_max is not None:
                 price_hist = self.daily_prices_cache.get(stock_code)
                 if price_hist is not None and date in price_hist.index:
                     idx = price_hist.index.get_loc(date)
@@ -374,7 +374,9 @@ class Backtester:
                         close_6d = float(price_hist.iloc[idx - 6]['close'])
                         if close_6d > 0:
                             ret_5d = (close_prev / close_6d - 1) * 100
-                            if ret_5d < self.params.buy_ret5d_min:
+                            if self.params.buy_ret5d_min is not None and ret_5d < self.params.buy_ret5d_min:
+                                continue
+                            if self.params.buy_ret5d_max is not None and ret_5d > self.params.buy_ret5d_max:
                                 continue
             price_data = self._get_daily_price(stock_code, date)
             if not price_data or price_data['open'] <= 0:
