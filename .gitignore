@@ -131,6 +131,8 @@ data/
 *.csv
 *.xlsx
 *.json.bak
+# results/ 안의 멀티버스 raw 결과는 track (재현 불가능한 historical)
+!results/*.csv
 
 # IDE 설정
 .vscode/
