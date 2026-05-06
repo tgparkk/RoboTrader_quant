@@ -4,6 +4,7 @@ main.py에서 분리된 상태 복원 및 후보 종목 로딩 로직을 포함�
 """
 from pathlib import Path
 from typing import List, Optional, Dict, Any
+import pandas as pd
 from utils.logger import setup_logger
 from utils.korean_time import now_kst
 from core.models import StockState
@@ -129,8 +130,11 @@ class StateRestorationHelper:
                         continue
                     quantity = int(holding['quantity'])
                     buy_price = float(holding['buy_price'])
-                    target_profit_rate = 0.12
-                    stop_loss_rate = 0.06
+                    # mom-strategy: DB 저장값 (BUY 시점 99.0) 우선 사용, 없을 시 99.0 fallback (TP/SL 비활성)
+                    db_tp = holding.get('target_profit_rate')
+                    db_sl = holding.get('stop_loss_rate')
+                    target_profit_rate = float(db_tp) if pd.notna(db_tp) else 99.0
+                    stop_loss_rate = float(db_sl) if pd.notna(db_sl) else 99.0
 
                     # 전날 종가 조회 (공통 메서드 사용)
                     prev_close = self.get_previous_close(stock_code)
@@ -203,8 +207,9 @@ class StateRestorationHelper:
                         'stock_name': row['stock_name'],
                         'quantity': int(row['quantity']),
                         'buy_price': float(row['buy_price']),
-                        'target_profit_rate': row.get('target_profit_rate', 0.12) or 0.12,
-                        'stop_loss_rate': row.get('stop_loss_rate', 0.06) or 0.06,
+                        # mom-strategy: DB 저장값 우선, 없을 시 99.0 fallback (TP/SL 비활성)
+                        'target_profit_rate': float(row['target_profit_rate']) if pd.notna(row.get('target_profit_rate')) else 99.0,
+                        'stop_loss_rate': float(row['stop_loss_rate']) if pd.notna(row.get('stop_loss_rate')) else 99.0,
                         'buy_record_id': row.get('buy_record_id')
                     }
 
@@ -225,12 +230,15 @@ class StateRestorationHelper:
                 if quantity <= 0:
                     continue
 
-                # 현재 설정 TP/SL 적용 (DB 저장값이 아닌 최신 설정 사용)
-                target_profit_rate = 0.12
-                stop_loss_rate = 0.06
-
-                if stock_code not in db_holdings_dict:
-                    logger.warning(f"⚠️ [실전매매] {stock_code} DB에 없음 - 기본 익절/손절률 적용")
+                # mom-strategy: DB 저장값 (BUY 시점 99.0) 우선 사용 — 매월 첫 거래일 리밸런싱 정책 위해 TP/SL 비활성 유지
+                db_info = db_holdings_dict.get(stock_code)
+                if db_info:
+                    target_profit_rate = db_info['target_profit_rate']
+                    stop_loss_rate = db_info['stop_loss_rate']
+                else:
+                    target_profit_rate = 99.0
+                    stop_loss_rate = 99.0
+                    logger.warning(f"⚠️ [실전매매] {stock_code} DB에 없음 - 기본 익절/손절률 99.0 적용 (TP/SL 비활성)")
 
                 # 전날 종가 조회
                 prev_close = self.get_previous_close(stock_code)
