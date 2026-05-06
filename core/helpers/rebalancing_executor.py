@@ -352,7 +352,7 @@ class RebalancingExecutor:
                     logger.info(f"✅ 당일 손절 종목 없음 (재매수 제한 없음)")
 
             # 🆕 최근 N일 리밸런싱 매도 종목 쿨다운 (요요 방지)
-            from config.constants import REBALANCING_SELL_COOLDOWN_DAYS
+            from config.constants import REBALANCING_SELL_COOLDOWN_DAYS, BUY_BLACKLIST
             recent_rebal_sold = []
             if self.db_manager:
                 recent_rebal_sold = self.db_manager.get_recent_rebalancing_sold_stocks(
@@ -430,6 +430,11 @@ class RebalancingExecutor:
                     # 🆕 오늘 손절한 종목은 재매수 금지 (익절 후 퀀트 상위 재진입은 허용)
                     if stock_code in today_stop_loss_stocks:
                         logger.warning(f"⚠️ {stock_code}({stock_name}) 매수 스킵: 오늘 손절한 종목 - 재매수 금지")
+                        continue
+
+                    # 🆕 매수 블랙리스트 (config/constants.py BUY_BLACKLIST)
+                    if stock_code in BUY_BLACKLIST:
+                        logger.warning(f"⚠️ {stock_code}({stock_name}) 매수 스킵: 블랙리스트")
                         continue
 
                     # 🆕 리밸런싱 매도 쿨다운 (요요 방지)

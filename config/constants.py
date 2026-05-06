@@ -35,3 +35,11 @@ BUY_RET5D_MIN = -3.0  # -3% 이하 급락 종목 매수 차단
 #   - V100 total_score = value_score는 재무비율 기반이라 일변동이 거의 0 → 필터가 거래의 85% 차단
 #   - 10M 기준 2년 백테스트: sm 유지 시 +40%(32거래) vs sm 제거 시 +214%(217거래)
 BUY_SCORE_MOMENTUM_MIN = None  # V100에서 비활성
+
+# 매수 블랙리스트: 한시적으로 매수를 차단할 종목 코드 set
+# 운영 중 손절 후 단기 재매수 회피, 모멘텀 천장 노출 등 임시 회피 용도
+# - 차단 위치: core/helpers/rebalancing_executor.py 매수 루프 (today_stop_loss_stocks 옆)
+# - 비활성: 빈 set()
+BUY_BLACKLIST = {
+    "058430",  # 포스코스틸리온: 4/30·5/6 2연속 손절 (V100 점수 1위 + ret_5d 양수로 자동 차단 미작동)
+}
