@@ -26,9 +26,10 @@ sys.path.insert(0, str(project_root))
 from backtest import Backtester, BacktestParams
 from backtest.models import DailySnapshot, TradeAction
 from backtest.metrics import MetricsCalculator
+from scripts.v100_threshold_multiverse import build_v100_cache
 
 
-START_DATE = "2023-01-01"
+START_DATE = "2024-04-01"
 END_DATE = "2026-05-06"
 
 # 운영 baseline (V100, TP12/SL6, BUY_RET5D_MIN=-3, sm 비활성)
@@ -108,6 +109,14 @@ def run_one(loader, trading_days, ret5d_max, start_norm, end_norm):
     bt.daily_prices_cache = loader.daily_prices_cache
     bt.portfolio_cache = loader.portfolio_cache
     bt.factors_cache = loader.factors_cache
+    bt.capital = params.initial_capital
+
+    # v100_threshold_multiverse.py:93 패턴: sim_days를 V100 cache keys 기반으로
+    # (DB date format vs calc_date format 불일치 해소)
+    s_ymd = start_norm.replace("-", "")
+    e_ymd = end_norm.replace("-", "")
+    trading_days = [f"{ymd[:4]}-{ymd[4:6]}-{ymd[6:8]}"
+                    for ymd in sorted(loader.factors_cache.keys()) if s_ymd <= ymd <= e_ymd]
 
     prev_total_value = params.initial_capital
     for date in trading_days:
@@ -184,7 +193,11 @@ def main():
     end_norm = loader._normalize_date(args.end)
     trading_days = loader._get_trading_days(start_norm, end_norm)
     loader._preload_data(trading_days)
-    print(f"데이터 로드 완료: {len(trading_days)}거래일\n")
+    # V100 일관 cache 빌드 (운영 quant_factors V100 정렬 일치)
+    fc, pc = build_v100_cache(loader.factors_cache, loader.portfolio_cache)
+    loader.factors_cache = fc
+    loader.portfolio_cache = pc
+    print(f"데이터 로드 완료: {len(trading_days)}거래일 (V100 cache 재빌드 완료)\n")
 
     rows = []
     t0 = time.time()

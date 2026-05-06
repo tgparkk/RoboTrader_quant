@@ -303,9 +303,9 @@ class QuantRebalancingService:
                             except Exception as e:
                                 self.logger.debug(f"점수 모멘텀 조회 실패 ({code}): {e}")
 
-                        # 5일 수익률 하드게이트: 급락 종목 매수 차단
-                        from config.constants import BUY_RET5D_MIN
-                        if BUY_RET5D_MIN is not None:
+                        # 5일 수익률 하드게이트: 급락 차단(MIN) + 모멘텀 천장 차단(MAX)
+                        from config.constants import BUY_RET5D_MIN, BUY_RET5D_MAX
+                        if BUY_RET5D_MIN is not None or BUY_RET5D_MAX is not None:
                             try:
                                 rows = self.db_manager.execute_query(
                                     "SELECT close FROM daily_prices WHERE stock_code = %s ORDER BY date DESC LIMIT 6",
@@ -316,10 +316,16 @@ class QuantRebalancingService:
                                     close_5d = float(rows[5][0])
                                     if close_5d > 0:
                                         ret_5d = (close_now / close_5d - 1) * 100
-                                        if ret_5d < BUY_RET5D_MIN:
+                                        if BUY_RET5D_MIN is not None and ret_5d < BUY_RET5D_MIN:
                                             self.logger.info(
                                                 f"⏭️ {code}({portfolio_item['stock_name']}) 매수 스킵: "
-                                                f"5일 수익률 {ret_5d:.1f}% < {BUY_RET5D_MIN}%"
+                                                f"5일 수익률 {ret_5d:.1f}% < {BUY_RET5D_MIN}% (급락)"
+                                            )
+                                            continue
+                                        if BUY_RET5D_MAX is not None and ret_5d > BUY_RET5D_MAX:
+                                            self.logger.info(
+                                                f"⏭️ {code}({portfolio_item['stock_name']}) 매수 스킵: "
+                                                f"5일 수익률 {ret_5d:.1f}% > {BUY_RET5D_MAX}% (모멘텀 천장)"
                                             )
                                             continue
                             except Exception as e:
