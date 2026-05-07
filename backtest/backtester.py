@@ -345,12 +345,51 @@ class Backtester:
                                 continue
                             if self.params.buy_ret5d_max is not None and ret_5d > self.params.buy_ret5d_max:
                                 continue
+            # V100 + Momentum 게이트: momentum_score 하한 / ret_20d 천장 / vol_20d 천장
+            # Look-ahead 방지: momentum_score는 _get_factors로 D-1 calc_date 사용,
+            # ret_20d/vol_20d는 daily_prices_cache에서 D-1 종가까지만 참조.
+            if self.params.buy_momentum_score_min is not None:
+                _factors = self._get_factors(date, stock_code)
+                _ms = _factors.get('momentum_score') if _factors else None
+                if _ms is None or float(_ms) < self.params.buy_momentum_score_min:
+                    continue
+            if self.params.buy_ret20d_max is not None or self.params.buy_vol20d_max is not None:
+                price_hist = self.daily_prices_cache.get(stock_code)
+                if price_hist is not None and date in price_hist.index:
+                    idx = price_hist.index.get_loc(date)
+                    if idx >= 21:
+                        if self.params.buy_ret20d_max is not None:
+                            close_prev = float(price_hist.iloc[idx - 1]['close'])
+                            close_21d = float(price_hist.iloc[idx - 21]['close'])
+                            if close_21d > 0:
+                                ret_20d = (close_prev / close_21d - 1) * 100
+                                if ret_20d > self.params.buy_ret20d_max:
+                                    continue
+                        if self.params.buy_vol20d_max is not None:
+                            recent = price_hist.iloc[idx - 21:idx]['close']
+                            if len(recent) >= 21 and (recent > 0).all():
+                                daily_ret = recent.pct_change().dropna() * 100
+                                vol_20d = float(daily_ret.std(ddof=1))
+                                if vol_20d > self.params.buy_vol20d_max:
+                                    continue
             price_data = self._get_daily_price(stock_code, date)
             if not price_data or price_data['open'] <= 0:
                 continue
             if not self._validate_buy_price(stock_code, price_data['open'], date, kospi_change):
                 continue
             buy_candidates.append(item)
+
+        # V100 + Momentum 부스트: V100 통과 후보 정렬을 total_score + α × momentum_score로 재계산
+        # available_slots < len(buy_candidates) 일 때 어떤 후보가 선택되는지에 영향
+        if self.params.momentum_boost_alpha and self.params.momentum_boost_alpha > 0 and buy_candidates:
+            _alpha = float(self.params.momentum_boost_alpha)
+
+            def _boost_key(it):
+                _f = self._get_factors(date, it['stock_code'])
+                _ms = _f.get('momentum_score', 50.0) if _f else 50.0
+                return float(it.get('total_score', 0.0)) + _alpha * float(_ms)
+
+            buy_candidates.sort(key=_boost_key, reverse=True)
 
         if buy_candidates:
             max_holdings = self.params.portfolio_size

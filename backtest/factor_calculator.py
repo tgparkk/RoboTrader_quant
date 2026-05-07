@@ -647,7 +647,7 @@ class HistoricalFactorCalculator:
                          f"Timing {float(row.get('timing_score', 50)):.1f}")
                 portfolio_insert.append((
                     calc_date, str(row['stock_code']), str(name),
-                    rank, float(row.get('hybrid_score', row['total_score'])), reason
+                    rank, float(row['total_score']), reason
                 ))
 
             cursor.executemany('''

@@ -93,6 +93,12 @@ class BacktestParams:
     buy_ret5d_min: float = None
     buy_ret5d_max: float = None  # 5일 누적 수익률 상한 (모멘텀 과열 차단, 백분율 단위)
 
+    # V100 + Momentum 게이트/부스트 (None이면 비활성)
+    buy_momentum_score_min: float = None  # momentum_score 하한 게이트 (0~100)
+    buy_ret20d_max: float = None  # 20일 누적 수익률 상한 (백분율, 모멘텀 천장)
+    buy_vol20d_max: float = None  # 20일 변동성 상한 (일별 std, 백분율 — daily_prices.volatility_20d 단위 일치)
+    momentum_boost_alpha: float = 0.0  # V100 95+ 통과 후보 정렬 키에 momentum_score 가중 (0=비활성)
+
     def to_dict(self) -> Dict[str, Any]:
         """딕셔너리로 변환"""
         return {
@@ -123,6 +129,10 @@ class BacktestParams:
             'caution_max_buy': self.caution_max_buy,
             'buy_ret5d_min': self.buy_ret5d_min,
             'buy_ret5d_max': self.buy_ret5d_max,
+            'buy_momentum_score_min': self.buy_momentum_score_min,
+            'buy_ret20d_max': self.buy_ret20d_max,
+            'buy_vol20d_max': self.buy_vol20d_max,
+            'momentum_boost_alpha': self.momentum_boost_alpha,
         }
 
     @classmethod
