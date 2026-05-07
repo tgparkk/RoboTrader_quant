@@ -19,10 +19,23 @@ python scripts/<script>.py --start 2023-01-01 --end 2026-03-31
 ## 현재 라이브 설정 (베이스라인)
 
 ```python
+# 2026-05-07 갱신 — V100 단일 팩터 + 6단계 매수 게이트
 portfolio_size=10, target_profit_rate=0.12, stop_loss_rate=0.06
 hard_stop=65, soft_stop=67, soft_stop_rank=30, safe=75, safe_rank=25
-buy_min_score=65, rebalancing_sell_cooldown_days=3
-BUY_RET5D_MIN=-3.0, BUY_SCORE_MOMENTUM_MIN=0.5
+buy_min_score=95.0  # V100 전환 (2026-04-14)
+rebalancing_sell_cooldown_days=3
+
+# 매수 게이트 (적용 순서)
+BUY_RET5D_MIN = -3.0           # 5일 급락 차단
+BUY_RET5D_MAX = 17.0           # 5일 모멘텀 천장 (2026-05-06)
+BUY_RET20D_MAX = 30.0          # 20일 모멘텀 천장 (2026-05-07)
+BUY_MOMENTUM_SCORE_MIN = 30.0  # momentum_score 합성 점수 하한 (2026-05-07)
+BUY_SCORE_MOMENTUM_MIN = None  # V100 전환 후 비활성
+
+# 백테스트 비용 (실측 교정)
+slippage_rate = 0.0025         # 왕복 0.45% (2026-04-13 실측)
+buy_cost_rate = 0.00015
+sell_cost_rate = 0.00245
 ```
 
 ---
