@@ -113,7 +113,11 @@ REBALANCING_SELL_COOLDOWN_DAYS = 3     # 리밸런싱 매도 후 재매수 차�
 
 # 매수 필터
 BUY_RET5D_MIN = -3.0                   # 직전 5거래일 수익률 필터 (-3% 이하 급락 종목 매수 차단)
+BUY_RET5D_MAX = 17.0                   # 5일 누적 모멘텀 천장 (2026-05-06, 058430 사고 대응)
+BUY_RET20D_MAX = 30.0                  # 20일 누적 모멘텀 천장 (2026-05-07, 4축 멀티버스 검증)
+BUY_MOMENTUM_SCORE_MIN = 30.0          # momentum_score 합성 점수 하한 (2026-05-07)
 BUY_SCORE_MOMENTUM_MIN = None          # 점수 모멘텀 필터 (V100 전환으로 2026-04-14 비활성)
+BUY_BLACKLIST = {"058430"}             # 한시 차단 (058430 사고 후 한시 유지)
 ```
 
 ### 리밸런싱 기준 (quant_rebalancing_service.py)

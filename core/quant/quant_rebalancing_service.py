@@ -331,6 +331,41 @@ class QuantRebalancingService:
                             except Exception as e:
                                 self.logger.debug(f"5일 수익률 조회 실패 ({code}): {e}")
 
+                        # 20일 수익률 모멘텀 천장 게이트 (긴 누적 폭증 차단)
+                        from config.constants import BUY_RET20D_MAX
+                        if BUY_RET20D_MAX is not None:
+                            try:
+                                rows = self.db_manager.execute_query(
+                                    "SELECT close FROM daily_prices WHERE stock_code = %s ORDER BY date DESC LIMIT 21",
+                                    (code,)
+                                )
+                                if rows and len(rows) >= 21:
+                                    close_now = float(rows[0][0])
+                                    close_20d = float(rows[20][0])
+                                    if close_20d > 0:
+                                        ret_20d = (close_now / close_20d - 1) * 100
+                                        if ret_20d > BUY_RET20D_MAX:
+                                            self.logger.info(
+                                                f"⏭️ {code}({portfolio_item['stock_name']}) 매수 스킵: "
+                                                f"20일 수익률 {ret_20d:.1f}% > {BUY_RET20D_MAX}% (장기 모멘텀 천장)"
+                                            )
+                                            continue
+                            except Exception as e:
+                                self.logger.debug(f"20일 수익률 조회 실패 ({code}): {e}")
+
+                        # 모멘텀 점수 하한 게이트 (momentum_score 합성 점수 0~100)
+                        from config.constants import BUY_MOMENTUM_SCORE_MIN
+                        if BUY_MOMENTUM_SCORE_MIN is not None:
+                            mom_factors = factors_map.get(code)
+                            if mom_factors:
+                                ms = mom_factors.get('momentum_score')
+                                if ms is None or float(ms) < BUY_MOMENTUM_SCORE_MIN:
+                                    self.logger.info(
+                                        f"⏭️ {code}({portfolio_item['stock_name']}) 매수 스킵: "
+                                        f"모멘텀 점수 {ms if ms is not None else 'n/a'} < {BUY_MOMENTUM_SCORE_MIN}"
+                                    )
+                                    continue
+
                         # 목표 익절/손절률 계산
                         factors_data = factors_map.get(code)
                         target_profit, stop_loss = self.profit_loss_calculator.calculate_from_portfolio_item(
