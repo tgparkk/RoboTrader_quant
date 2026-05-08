@@ -1077,7 +1077,33 @@ class DatabaseManager:
             return pd.DataFrame()
         finally:
             self._put_connection(conn)
-    
+
+    def get_recent_closes(self, stock_code: str, days: int) -> List[float]:
+        """daily_prices에서 최근 N일 종가를 DESC 정렬로 반환.
+
+        Args:
+            stock_code: 종목코드
+            days: 조회할 거래일 수 (LIMIT 값)
+
+        Returns:
+            List[float]: 종가 리스트. rows[0]=가장 최근, rows[-1]=days-1 거래일 전.
+            조회 실패 시 빈 리스트 (호출 측은 길이 검증 필요).
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT close FROM daily_prices WHERE stock_code = %s ORDER BY date DESC LIMIT %s",
+                (stock_code, days)
+            )
+            rows = cursor.fetchall()
+            return [float(r[0]) for r in rows]
+        except Exception as e:
+            self.logger.error(f"최근 종가 조회 실패 ({stock_code}, {days}일): {e}")
+            return []
+        finally:
+            self._put_connection(conn)
+
     def get_candidate_performance(self, days: int = 30) -> pd.DataFrame:
         """후보 종목 성과 분석"""
         conn = self._get_connection()

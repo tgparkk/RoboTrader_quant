@@ -307,13 +307,10 @@ class QuantRebalancingService:
                         from config.constants import BUY_RET5D_MIN, BUY_RET5D_MAX
                         if BUY_RET5D_MIN is not None or BUY_RET5D_MAX is not None:
                             try:
-                                rows = self.db_manager.execute_query(
-                                    "SELECT close FROM daily_prices WHERE stock_code = %s ORDER BY date DESC LIMIT 6",
-                                    (code,)
-                                )
-                                if rows and len(rows) >= 6:
-                                    close_now = float(rows[0][0])
-                                    close_5d = float(rows[5][0])
+                                closes = self.db_manager.get_recent_closes(code, 6)
+                                if len(closes) >= 6:
+                                    close_now = closes[0]
+                                    close_5d = closes[5]
                                     if close_5d > 0:
                                         ret_5d = (close_now / close_5d - 1) * 100
                                         if BUY_RET5D_MIN is not None and ret_5d < BUY_RET5D_MIN:
@@ -328,20 +325,24 @@ class QuantRebalancingService:
                                                 f"5일 수익률 {ret_5d:.1f}% > {BUY_RET5D_MAX}% (모멘텀 천장)"
                                             )
                                             continue
+                                else:
+                                    self.logger.error(
+                                        f"⚠️ [게이트 무력화] {code} 5일 수익률 조회 데이터 부족: "
+                                        f"{len(closes)}건 (6건 필요) — 매수 게이트 미적용"
+                                    )
                             except Exception as e:
-                                self.logger.debug(f"5일 수익률 조회 실패 ({code}): {e}")
+                                self.logger.error(
+                                    f"⚠️ [게이트 무력화] {code} 5일 수익률 조회 실패: {e} — 매수 게이트 미적용"
+                                )
 
                         # 20일 수익률 모멘텀 천장 게이트 (긴 누적 폭증 차단)
                         from config.constants import BUY_RET20D_MAX
                         if BUY_RET20D_MAX is not None:
                             try:
-                                rows = self.db_manager.execute_query(
-                                    "SELECT close FROM daily_prices WHERE stock_code = %s ORDER BY date DESC LIMIT 21",
-                                    (code,)
-                                )
-                                if rows and len(rows) >= 21:
-                                    close_now = float(rows[0][0])
-                                    close_20d = float(rows[20][0])
+                                closes = self.db_manager.get_recent_closes(code, 21)
+                                if len(closes) >= 21:
+                                    close_now = closes[0]
+                                    close_20d = closes[20]
                                     if close_20d > 0:
                                         ret_20d = (close_now / close_20d - 1) * 100
                                         if ret_20d > BUY_RET20D_MAX:
@@ -350,8 +351,15 @@ class QuantRebalancingService:
                                                 f"20일 수익률 {ret_20d:.1f}% > {BUY_RET20D_MAX}% (장기 모멘텀 천장)"
                                             )
                                             continue
+                                else:
+                                    self.logger.error(
+                                        f"⚠️ [게이트 무력화] {code} 20일 수익률 조회 데이터 부족: "
+                                        f"{len(closes)}건 (21건 필요) — 매수 게이트 미적용"
+                                    )
                             except Exception as e:
-                                self.logger.debug(f"20일 수익률 조회 실패 ({code}): {e}")
+                                self.logger.error(
+                                    f"⚠️ [게이트 무력화] {code} 20일 수익률 조회 실패: {e} — 매수 게이트 미적용"
+                                )
 
                         # 모멘텀 점수 하한 게이트 (momentum_score 합성 점수 0~100)
                         from config.constants import BUY_MOMENTUM_SCORE_MIN
@@ -365,6 +373,10 @@ class QuantRebalancingService:
                                         f"모멘텀 점수 {ms if ms is not None else 'n/a'} < {BUY_MOMENTUM_SCORE_MIN}"
                                     )
                                     continue
+                            else:
+                                self.logger.error(
+                                    f"⚠️ [게이트 무력화] {code} 팩터 데이터 없음 — 모멘텀 점수 게이트 미적용"
+                                )
 
                         # 목표 익절/손절률 계산
                         factors_data = factors_map.get(code)
