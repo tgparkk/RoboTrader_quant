@@ -478,7 +478,7 @@ class StateRestorationHelper:
         try:
             # 리밸런싱 모드일 때는 실행하지 않음 (순수 리밸런싱 방식)
             if getattr(self.config, 'rebalancing_mode', False):
-                logger.debug("ℹ️ 리밸런싱 모드: 장중 조건검색 체크 스킵 (09:05 리밸런싱으로만 포지션 구성)")
+                logger.debug("ℹ️ 리밸런싱 모드: 장중 조건검색 체크 스킵 (09:30 리밸런싱으로만 포지션 구성)")
                 return
 
             quant_candidates = await self.candidate_selector.get_quant_candidates(limit=QUANT_CANDIDATE_LIMIT)

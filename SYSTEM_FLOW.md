@@ -27,7 +27,7 @@ python main.py
 | 거래 모니터링 | TP/SL 신호 감지 + 매도 실행 | **3초마다** |
 | 시스템 모니터링 | 스케줄 작업 (스크리닝, 백업) | 5초마다 체크 |
 | 텔레그램 알림 | 매매·이상 이벤트 전송 | 이벤트 발생 시 |
-| 리밸런싱 | 09:05 1회 매수/매도/유지 결정 | 1일 1회 |
+| 리밸런싱 | 09:30 1회 매수/매도/유지 결정 | 1일 1회 |
 
 ---
 
@@ -53,7 +53,7 @@ python main.py
 09:00  장 시작
        └─ TP/SL 즉시 작동 (09:00 즉시 손절 허용, 2026-03-31 변경)
 
-09:05  리밸런싱 (1회)
+09:30  리밸런싱 (1회)
        ├─ 전날 15:35 스크리닝 결과 조회 (quant_portfolio)
        ├─ 3단계 매도 필터 → 탈락 종목 시장가 매도
        ├─ 6단계 매수 게이트 → 신규 종목 시장가 매수
@@ -70,7 +70,7 @@ python main.py
 
 ---
 
-## 3. 매수 흐름 (09:05 리밸런싱)
+## 3. 매수 흐름 (09:30 리밸런싱)
 
 전날 15:35 스크리닝 결과(`quant_portfolio` 상위 10) 중 신규 편입 종목에 대해:
 
@@ -93,7 +93,7 @@ python main.py
 
 ## 4. 매도 흐름
 
-### 리밸런싱 매도 (09:05)
+### 리밸런싱 매도 (09:30)
 
 ```python
 for stock in 보유종목:
@@ -173,7 +173,7 @@ SELECTED → BUY_PENDING → POSITIONED → SELL_CANDIDATE → SELL_PENDING → 
 | 시스템 시작 | `main.py` |
 | 매매 판단 (TP/SL) | `core/trading_decision_engine.py` |
 | 종목 상태 관리 | `core/trading_stock_manager.py` |
-| 09:05 리밸런싱 | `core/quant/quant_rebalancing_service.py` |
+| 09:30 리밸런싱 | `core/quant/quant_rebalancing_service.py` |
 | 매수 실행 + 검증 | `core/helpers/rebalancing_executor.py` |
 | 15:35 스크리닝 | `core/quant/quant_screening_service.py` |
 | TP/SL 계산 | `core/quant/target_profit_loss_calculator.py` |

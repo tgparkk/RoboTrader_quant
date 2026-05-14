@@ -4,7 +4,7 @@ DB 기반 백테스터 구현
 일봉 데이터(daily_prices)와 퀀트 포트폴리오(quant_portfolio) 기반 백테스트
 - 매수: 당일 시가 (가격 검증 포함)
 - 손익절: 고가/저가 기반 장중 시뮬레이션
-- 리밸런싱: 매일 09:05 실행 가정
+- 리밸런싱: 매일 09:30 실행 가정
 - 라이브 규칙: 재매수 차단, 가격 검증, 리밸런싱 중 손절 중단
 """
 import psycopg2
@@ -93,7 +93,7 @@ class Backtester:
             if self.params.crisis_sell_all and self.positions:
                 crisis_sold = self._check_crisis_sell_all(date)
 
-            # TP/SL을 리밸런싱보다 먼저 체크 (실전과 동일: 3초마다 TP/SL → 09:05 리밸런싱)
+            # TP/SL을 리밸런싱보다 먼저 체크 (실전과 동일: 3초마다 TP/SL → 09:30 리밸런싱)
             if not crisis_sold:
                 self._check_stop_profit_loss(date)
                 self._execute_rebalancing(date)
@@ -214,7 +214,7 @@ class Backtester:
     def _get_prev_calc_date(self, date: str) -> Optional[str]:
         """거래일 D에 대해 직전 거래일의 calc_date(yyyymmdd) 반환.
 
-        Look-ahead 방지: 라이브는 D-1 15:35 스크리닝 결과를 D 09:05에 사용.
+        Look-ahead 방지: 라이브는 D-1 15:35 스크리닝 결과를 D 09:30에 사용.
         백테스트도 D의 의사결정에 calc_date=D-1 데이터만 사용해야 함.
         factors_cache 키를 정렬해 직전 거래일 하나를 찾는다.
         """
@@ -330,7 +330,7 @@ class Backtester:
                 if _factor_total < self.params.buy_min_score:
                     continue
             # 5일 수익률 하드게이트 (하한: 급락 차단 / 상한: 과열 차단)
-            # Look-ahead 방지: D 09:05 매수 시점에는 D 종가를 모르므로 D-1 종가와
+            # Look-ahead 방지: D 09:30 매수 시점에는 D 종가를 모르므로 D-1 종가와
             # D-6 종가 기준으로 직전 5거래일 수익률을 계산한다.
             if self.params.buy_ret5d_min is not None or self.params.buy_ret5d_max is not None:
                 price_hist = self.daily_prices_cache.get(stock_code)

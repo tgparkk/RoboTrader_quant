@@ -72,7 +72,7 @@ class DayTradingBot:
 
         # 리밸런싱 모드 상태 로깅
         if getattr(self.config, 'rebalancing_mode', False):
-            self.logger.info("🔄 리밸런싱 모드 활성화: 09:05 리밸런싱으로 매수, 장중 손절/익절 매도 판단 활성화")
+            self.logger.info("🔄 리밸런싱 모드 활성화: 09:30 리밸런싱으로 매수, 장중 손절/익절 매도 판단 활성화")
         else:
             self.logger.info("🔄 하이브리드 모드: 리밸런싱 + 실시간 매수 판단 병행")
         
@@ -488,7 +488,7 @@ class DayTradingBot:
             self.logger.error(f"❌ 텔레그램 태스크 오류: {e}")
     
     async def _rebalancing_task(self):
-        """리밸런싱 태스크 (9단계: 익일 09:05 시장가 매도/매수)"""
+        """리밸런싱 태스크 (9단계: 익일 09:30 시장가 매도/매수)"""
         try:
             self.logger.info("🔄 리밸런싱 태스크 시작")
             
@@ -507,8 +507,10 @@ class DayTradingBot:
                         await asyncio.sleep(60)
                         continue
 
-                    # 09:05 시점 체크 (시초가 형성 후) — 09:05~09:30 범위 (재시작 대응)
-                    if current_time.hour == 9 and 5 <= current_time.minute <= 30:
+                    # 09:30 시점 체크 (시초 변동성 흡수 후) — 09:30~09:55 범위 (재시작 대응)
+                    # 변경 사유: 진입시점 멀티버스(2026-05-14)에서 09:30 매수가 09:00/09:05 시초 매수 대비
+                    # 14개월 sharpe 0.34→0.75(+2.2배), 누적수익률 +6.84%→+11.44% 우월 확인
+                    if current_time.hour == 9 and 30 <= current_time.minute <= 55:
                         # 하루에 한 번만 실행
                         today_str = current_time.strftime('%Y%m%d')
                         if self._last_rebalancing_date != today_str:
@@ -547,7 +549,7 @@ class DayTradingBot:
                                                 "🚨 CRISIS: 08:40 전량 매도 주문 완료 상태 — 매수 차단"
                                             )
                                         else:
-                                            # 폴백: 장전 분석 미실행 → 09:05에 전량 매도
+                                            # 폴백: 장전 분석 미실행 → 09:30에 전량 매도
                                             self.logger.warning("🚨 CRISIS (폴백): 전량 매도 + 매수 차단")
                                             if self.telegram:
                                                 try:
@@ -802,7 +804,7 @@ class DayTradingBot:
                                     except Exception:
                                         pass
                                 await self._execute_crisis_sell_all()
-                                # 09:05 리밸런싱에서 매수 차단하도록 결과 유지
+                                # 09:30 리밸런싱에서 매수 차단하도록 결과 유지
 
                         except Exception as e:
                             self.logger.error(f"❌ 장전 시장 파악 오류: {e}")
@@ -818,7 +820,7 @@ class DayTradingBot:
 
                 # 15:35 장 마감 후: 전체 일봉 수집 → 퀀트 스크리닝 → 일일 매매 리포트 (순차 실행)
                 # 비영업일(주말/공휴일)에는 스킵 — quant_portfolio 빈/부분 데이터 저장으로
-                # 다음 영업일 09:05 리밸런싱 fallback이 잘못된 날짜를 픽업하는 것을 방지
+                # 다음 영업일 09:30 리밸런싱 fallback이 잘못된 날짜를 픽업하는 것을 방지
                 if current_time.hour == 15 and current_time.minute >= 35:
                     from utils.korean_holidays import is_holiday
                     is_business_day = current_time.weekday() < 5 and not is_holiday(current_time)

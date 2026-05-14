@@ -148,12 +148,12 @@ class IntradayStockManager:
                 #self.logger.debug(f"✅ {stock_code}({stock_name}) 장중 선정 완료 - "
                 #               f"시간: {current_time.strftime('%H:%M:%S')}")
             
-            # 🔥 과거 데이터 수집 (09:05 이전에도 시도)
+            # 🔥 과거 데이터 수집 (09:30 이전에도 시도)
             current_time = now_kst()
             self.logger.info(f"📈 {stock_code} 과거 데이터 수집 시작... (선정시간: {current_time.strftime('%H:%M:%S')})")
             
             # 🆕 리밸런싱 모드: 일봉 데이터만 수집 (분봉 데이터 불필요)
-            # 리밸런싱 방식은 09:05에 한 번에 매수하므로 분봉 데이터가 필요 없음
+            # 리밸런싱 방식은 09:30에 한 번에 매수하므로 분봉 데이터가 필요 없음
             if hasattr(self, 'config') and getattr(self.config, 'rebalancing_mode', False):
                 success = await self._collect_daily_data_only(stock_code)
             else:
@@ -198,7 +198,7 @@ class IntradayStockManager:
         """
         리밸런싱 모드: 일봉 데이터만 수집 (분봉 데이터 불필요)
         
-        리밸런싱 방식은 09:05에 한 번에 매수하므로 분봉 데이터가 필요 없습니다.
+        리밸런싱 방식은 09:30에 한 번에 매수하므로 분봉 데이터가 필요 없습니다.
         일봉 데이터만 수집하여 API 호출을 최소화합니다.
         
         Args:
@@ -1379,7 +1379,7 @@ class IntradayStockManager:
             if not stock_codes:
                 return
 
-            # 🆕 data_complete = False인 종목 재수집 (09:05 이전 선정 종목)
+            # 🆕 data_complete = False인 종목 재수집 (09:30 이전 선정 종목)
             incomplete_stocks = []
             with self._lock:
                 for code in stock_codes:

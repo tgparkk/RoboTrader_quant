@@ -48,7 +48,7 @@ KOSPI + KOSDAQ 약 2,500종목 → V100 점수 95점 이상 통과 → 6게이�
 | **08:30** | 전일 일봉 + 재무 데이터 수집 |
 | **08:40** | 장전 시장 분석 (KRX 예상 + 미장 + NewsQuant → CRISIS/CAUTION/NORMAL) |
 | **09:00** | 장 시작 — 즉시 TP/SL 작동 |
-| **09:05** | 리밸런싱 (매도/매수/유지 자동 결정) — 1회 |
+| **09:30** | 리밸런싱 (매도/매수/유지 자동 결정) — 1회 |
 | **09:00 ~ 15:20** | 장중 모니터링 (3초마다 익절/손절 체크) |
 | **15:35** | 일봉 수집 → 퀀트 스크리닝 → 일일 리포트 (순차 실행) |
 
@@ -83,7 +83,7 @@ buy_min_score = 95.0 (V100 점수 95점 이상만 매수 후보)
 | **익절** | 12% |
 | **손절** | 6% |
 
-리밸런싱 매도 (09:05): 점수 < 65 → 긴급매도, 65~67 & 순위 > 30 → 조건부매도, ≥ 75 또는 순위 ≤ 25 → 안전 유지.
+리밸런싱 매도 (09:30): 점수 < 65 → 긴급매도, 65~67 & 순위 > 30 → 조건부매도, ≥ 75 또는 순위 ≤ 25 → 안전 유지.
 
 장중 매도 (3초마다): 익절/손절선 도달 시 즉시 시장가 매도.
 
@@ -129,7 +129,7 @@ buy_min_score = 95.0 (V100 점수 95점 이상만 매수 후보)
 |--------|----------|------|------|
 | 일봉 | 08:30 + 15:35 | `daily_prices` (PG) | 2단계 수집 |
 | 재무 | 08:30 | `financial_data`, `quant_*` (PG) | yfinance |
-| 퀀트 점수 | 15:35 | `quant_factors`, `quant_portfolio` (PG) | 다음 날 09:05 리밸런싱용 |
+| 퀀트 점수 | 15:35 | `quant_factors`, `quant_portfolio` (PG) | 다음 날 09:30 리밸런싱용 |
 | 매매 기록 | 즉시 | `real_trading_records` / `virtual_trading_records` (PG) | 손익·복원 |
 | 분봉 | — | 메모리만 | DB 미저장 |
 | 현재가 | — | API 실시간 | DB 미저장 |
@@ -146,7 +146,7 @@ DB: PostgreSQL `robotrader_quant`, port 5433. 백테스트 DB: `robotrader_backt
 // config/trading_config.json
 {
   "paper_trading": false,      // false=실전, true=가상
-  "rebalancing_mode": true     // true=09:05 리밸런싱 모드
+  "rebalancing_mode": true     // true=09:30 리밸런싱 모드
 }
 ```
 
@@ -218,7 +218,7 @@ RoboTrader_quant/
 │  ├─ candidate_selector.py             # 1차 필터링
 │  ├─ quant/
 │  │  ├─ quant_screening_service.py     # V100 스크리닝 (15:35)
-│  │  ├─ quant_rebalancing_service.py   # 09:05 리밸런싱 + 6단계 매수 게이트
+│  │  ├─ quant_rebalancing_service.py   # 09:30 리밸런싱 + 6단계 매수 게이트
 │  │  └─ target_profit_loss_calculator.py  # 고정 TP/SL 12%/6%
 │  └─ helpers/
 │     ├─ rebalancing_executor.py        # 리밸런싱 실행 (가격 검증 + 자금 예약)
@@ -266,12 +266,12 @@ RoboTrader_quant/
 ## 자주 묻는 질문 (FAQ)
 
 ### Q1. 매수는 언제 하나요?
-**A**: 09:05 리밸런싱 시 1회만. 6단계 게이트 통과한 V100 점수 95+ 종목 중 신규 편입 대상.
+**A**: 09:30 리밸런싱 시 1회만. 6단계 게이트 통과한 V100 점수 95+ 종목 중 신규 편입 대상.
 
 ### Q2. 매도는 언제 하나요?
-- 09:05 리밸런싱: 점수 < 65 또는 탈락 종목
+- 09:30 리밸런싱: 점수 < 65 또는 탈락 종목
 - 장중 (3초마다): 익절(+12%) 또는 손절(-6%) 도달 시 즉시
-- 09:00부터 TP/SL 즉시 작동 (09:05 리밸런싱과 독립)
+- 09:00부터 TP/SL 즉시 작동 (09:30 리밸런싱과 독립)
 
 ### Q3. 종목은 어떻게 선정하나요?
 **A**: 매일 15:35에 KOSPI+KOSDAQ 약 2,500개 종목에서 V100 점수(Value 단일)를 계산하여 95점 이상 종목 중 상위 10개를 다음 날 매수 후보로 선정.

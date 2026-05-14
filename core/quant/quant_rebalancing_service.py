@@ -1,7 +1,7 @@
 """
 퀀트 리밸런싱 시스템 (9단계 기준)
 - 보유 vs 목표 포트 비교, 매도·매수 대상 산출
-- 매도: 익일 09:05 시장가 전량
+- 매도: 익일 09:30 시장가 전량
 - 매수: 동등 비중, 시장가 주문
 - 리밸런싱 주기 선택(일간/주간/월간)
 """
@@ -116,7 +116,7 @@ class QuantRebalancingService:
             current_holdings = self._get_current_holdings()
 
             # 2. 목표 포트폴리오 조회 (전날 장 마감 후 생성된 포트폴리오 사용)
-            # 예: 12/3 09:05 리밸런싱 시 → 12/2 15:40에 생성된 포트폴리오 사용
+            # 예: 12/3 09:30 리밸런싱 시 → 12/2 15:40에 생성된 포트폴리오 사용
             portfolio_date = calc_date
             target_portfolio = self.db_manager.get_quant_portfolio(portfolio_date, limit=self.target_portfolio_size)
 
@@ -629,7 +629,7 @@ class QuantRebalancingService:
         """
         리밸런싱 실행
         
-        - 매도: 익일 09:05 시장가 전량
+        - 매도: 익일 09:30 시장가 전량
         - 매수: 동등 비중, 시장가 주문
         
         Args:
@@ -639,14 +639,14 @@ class QuantRebalancingService:
             sell_list = plan.get('sell_list', [])
             buy_list = plan.get('buy_list', [])
             
-            # 매도 주문 (익일 09:05 시장가 전량)
+            # 매도 주문 (익일 09:30 시장가 전량)
             sell_results = []
             for sell_item in sell_list:
                 stock_code = sell_item['stock_code']
                 quantity = sell_item['quantity']
                 
                 if self.order_manager:
-                    # TODO: 익일 09:05 시장가 전량 매도 주문
+                    # TODO: 익일 09:30 시장가 전량 매도 주문
                     # 현재는 즉시 매도로 구현 (추후 예약 주문으로 개선)
                     result = self._execute_sell_order(stock_code, quantity)
                     sell_results.append({
