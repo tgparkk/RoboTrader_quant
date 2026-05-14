@@ -183,6 +183,31 @@ def get_today_status(target_date: str = None):
         print(f"[보유 현황] {holding_count or 0}종목 | 투자원금: {holding_value:,.0f}원")
         print()
 
+        # 4. 매수 게이트 차단 종목 (리밸런싱 시 후보였으나 게이트로 차단됨)
+        cursor.execute('''
+            SELECT rank, stock_code, stock_name, total_score,
+                   gate_type, gate_value, threshold, reason
+            FROM rebalancing_skip_log
+            WHERE rebalancing_date = %s
+            ORDER BY rank NULLS LAST, stock_code
+        ''', (target_date,))
+
+        skips = cursor.fetchall()
+        if skips:
+            print("[매수 게이트 차단]")
+            print("-" * 70)
+            for rank, code, name, score, gate, gval, thr, reason in skips:
+                rank_str = f"{rank:>2}위" if rank is not None else " - "
+                score_str = f"{score:>5.1f}" if score is not None else "  -  "
+                short_name = (name or '')[:8]
+                print(f"{rank_str} | {code} {short_name:<8} | 점수 {score_str} | {reason or gate}")
+            print("-" * 70)
+            print(f"총 차단: {len(skips)}건")
+            print()
+        else:
+            print("[매수 게이트 차단] 없음")
+            print()
+
     finally:
         conn.close()
 

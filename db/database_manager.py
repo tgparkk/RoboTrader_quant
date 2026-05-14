@@ -375,6 +375,25 @@ class DatabaseManager:
                     )
                 ''')
 
+                # 매수 게이트 차단 로그 테이블
+                # gate_type: SCORE_MIN, SCORE_MOMENTUM, RET5D_MIN, RET5D_MAX, RET20D_MAX, MOMENTUM_SCORE
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS rebalancing_skip_log (
+                        id SERIAL PRIMARY KEY,
+                        rebalancing_date TEXT NOT NULL,
+                        stock_code VARCHAR(10) NOT NULL,
+                        stock_name VARCHAR(100),
+                        rank INTEGER,
+                        total_score DOUBLE PRECISION,
+                        gate_type VARCHAR(32) NOT NULL,
+                        gate_value DOUBLE PRECISION,
+                        threshold DOUBLE PRECISION,
+                        reason TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(rebalancing_date, stock_code, gate_type)
+                    )
+                ''')
+
                 # 매매 기록 테이블 (기존)
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS trading_records (
@@ -465,6 +484,8 @@ class DatabaseManager:
                     'CREATE INDEX IF NOT EXISTS idx_real_code_action ON real_trading_records(stock_code, action)',
                     'CREATE INDEX IF NOT EXISTS idx_virtual_buy_record ON virtual_trading_records(buy_record_id, action)',
                     'CREATE INDEX IF NOT EXISTS idx_real_buy_record ON real_trading_records(buy_record_id, action)',
+                    'CREATE INDEX IF NOT EXISTS idx_rebalancing_skip_date ON rebalancing_skip_log(rebalancing_date)',
+                    'CREATE INDEX IF NOT EXISTS idx_rebalancing_skip_code ON rebalancing_skip_log(stock_code, rebalancing_date)',
                 ]
                 for stmt in index_stmts:
                     cursor.execute(stmt)
@@ -2070,6 +2091,73 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"리밸런싱 이력 저장 실패: {e}")
             raise
+        finally:
+            self._put_connection(conn)
+
+    def save_rebalancing_skips(self, rebalancing_date, skip_records: list):
+        """매수 게이트 차단 로그 일괄 저장
+
+        Args:
+            rebalancing_date: 리밸런싱 날짜 (str 'YYYY-MM-DD' 또는 date)
+            skip_records: [{'stock_code', 'stock_name', 'rank', 'total_score',
+                            'gate_type', 'gate_value', 'threshold', 'reason'}, ...]
+                gate_type: SCORE_MIN | SCORE_MOMENTUM | RET5D_MIN | RET5D_MAX | RET20D_MAX | MOMENTUM_SCORE
+        """
+        if not skip_records:
+            return
+
+        conn = self._get_connection()
+        try:
+            with conn:
+                cursor = conn.cursor()
+                for rec in skip_records:
+                    cursor.execute('''
+                        INSERT INTO rebalancing_skip_log
+                        (rebalancing_date, stock_code, stock_name, rank, total_score,
+                         gate_type, gate_value, threshold, reason)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (rebalancing_date, stock_code, gate_type) DO UPDATE SET
+                            stock_name = EXCLUDED.stock_name,
+                            rank = EXCLUDED.rank,
+                            total_score = EXCLUDED.total_score,
+                            gate_value = EXCLUDED.gate_value,
+                            threshold = EXCLUDED.threshold,
+                            reason = EXCLUDED.reason
+                    ''', (
+                        str(rebalancing_date),
+                        rec.get('stock_code', ''),
+                        rec.get('stock_name', ''),
+                        rec.get('rank'),
+                        rec.get('total_score'),
+                        rec.get('gate_type', ''),
+                        rec.get('gate_value'),
+                        rec.get('threshold'),
+                        rec.get('reason'),
+                    ))
+            self.logger.info(f"✅ 매수 게이트 차단 {len(skip_records)}건 저장 ({rebalancing_date})")
+        except Exception as e:
+            self.logger.error(f"매수 게이트 차단 저장 실패: {e}")
+        finally:
+            self._put_connection(conn)
+
+    def get_rebalancing_skips_by_date(self, date) -> list:
+        """특정 날짜 매수 게이트 차단 종목 조회 (순위 오름차순)"""
+        conn = self._get_connection()
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT stock_code, stock_name, rank, total_score,
+                           gate_type, gate_value, threshold, reason
+                    FROM rebalancing_skip_log
+                    WHERE rebalancing_date = %s
+                    ORDER BY rank NULLS LAST, stock_code
+                ''', (str(date),))
+                columns = [desc[0] for desc in cursor.description]
+                return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        except Exception as e:
+            self.logger.error(f"매수 게이트 차단 조회 실패: {e}")
+            return []
         finally:
             self._put_connection(conn)
 

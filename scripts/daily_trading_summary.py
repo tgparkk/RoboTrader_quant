@@ -322,6 +322,42 @@ def print_today_trading_summary():
         print(f"퀀트 팩터 계산: {factor_count:,}개 종목 ({latest_factor_date})")
         print()
 
+        # ==================== 6. 매수 게이트 차단 종목 ====================
+        print("=" * 100)
+        print("6. 매수 게이트 차단 종목")
+        print("=" * 100)
+        print()
+
+        cursor.execute('''
+            SELECT rank, stock_code, stock_name, total_score,
+                   gate_type, gate_value, threshold, reason
+            FROM rebalancing_skip_log
+            WHERE rebalancing_date = %s
+            ORDER BY rank NULLS LAST, stock_code
+        ''', (today,))
+
+        skip_rows = cursor.fetchall()
+        if skip_rows:
+            print(f"오늘 리밸런싱 후보 중 게이트로 차단된 종목 ({len(skip_rows)}건)")
+            print("-" * 100)
+            print(f"{'순위':<6} {'종목코드':<10} {'종목명':<20} {'점수':>8} {'게이트':<16} {'사유'}")
+            print("-" * 100)
+            gate_counts = {}
+            for rank, code, name, score, gate, gval, thr, reason in skip_rows:
+                rank_str = f"{rank}" if rank is not None else "-"
+                score_str = f"{score:.1f}" if score is not None else "-"
+                print(f"{rank_str:<6} {code:<10} {(name or ''):<20} {score_str:>8} "
+                      f"{gate:<16} {reason or ''}")
+                gate_counts[gate] = gate_counts.get(gate, 0) + 1
+
+            print("-" * 100)
+            counts_str = ", ".join(f"{g}={c}" for g, c in sorted(gate_counts.items()))
+            print(f"게이트별 차단 건수: {counts_str}")
+            print()
+        else:
+            print("오늘 게이트로 차단된 종목이 없습니다.")
+            print()
+
     print("=" * 100)
     print("요약 완료!")
     print("=" * 100)

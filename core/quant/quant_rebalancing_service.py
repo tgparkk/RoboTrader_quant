@@ -239,6 +239,7 @@ class QuantRebalancingService:
 
             # 5. 매수 대상: 목표 포트에 있지만 보유하지 않은 종목
             buy_list = []
+            skip_records: list = []  # 게이트 차단 종목 누적 (DB 저장용)
             # will_keep_codes 재계산 (강제매도 반영)
             sell_codes_final = {s['stock_code'] for s in sell_list}
             will_keep_codes = set()
@@ -271,10 +272,22 @@ class QuantRebalancingService:
                         # 매수 최소 점수 필터: "팔 종목을 사지 않는다"
                         item_score = portfolio_item.get('total_score', 0)
                         if self.buy_min_score > 0 and item_score < self.buy_min_score:
-                            self.logger.info(
-                                f"⏭️ {code}({portfolio_item['stock_name']}) 매수 스킵: "
+                            msg = (
                                 f"점수 미달 ({item_score:.1f} < {self.buy_min_score:.0f})"
                             )
+                            self.logger.info(
+                                f"⏭️ {code}({portfolio_item['stock_name']}) 매수 스킵: {msg}"
+                            )
+                            skip_records.append({
+                                'stock_code': code,
+                                'stock_name': portfolio_item['stock_name'],
+                                'rank': portfolio_item.get('rank'),
+                                'total_score': item_score,
+                                'gate_type': 'SCORE_MIN',
+                                'gate_value': item_score,
+                                'threshold': self.buy_min_score,
+                                'reason': msg,
+                            })
                             skipped_by_score += 1
                             continue
 
@@ -289,11 +302,23 @@ class QuantRebalancingService:
                                     prev_score = prev_factors.get('total_score', 0)
                                     score_momentum = item_score - prev_score
                                     if score_momentum < BUY_SCORE_MOMENTUM_MIN:
-                                        self.logger.info(
-                                            f"⏭️ {code}({portfolio_item['stock_name']}) 매수 스킵: "
+                                        msg = (
                                             f"점수 모멘텀 부족 ({score_momentum:+.1f} < {BUY_SCORE_MOMENTUM_MIN:+.1f}, "
                                             f"현재 {item_score:.1f}, 전일 {prev_score:.1f})"
                                         )
+                                        self.logger.info(
+                                            f"⏭️ {code}({portfolio_item['stock_name']}) 매수 스킵: {msg}"
+                                        )
+                                        skip_records.append({
+                                            'stock_code': code,
+                                            'stock_name': portfolio_item['stock_name'],
+                                            'rank': portfolio_item.get('rank'),
+                                            'total_score': item_score,
+                                            'gate_type': 'SCORE_MOMENTUM',
+                                            'gate_value': score_momentum,
+                                            'threshold': BUY_SCORE_MOMENTUM_MIN,
+                                            'reason': msg,
+                                        })
                                         continue
                                     else:
                                         self.logger.debug(
@@ -314,16 +339,36 @@ class QuantRebalancingService:
                                     if close_5d > 0:
                                         ret_5d = (close_now / close_5d - 1) * 100
                                         if BUY_RET5D_MIN is not None and ret_5d < BUY_RET5D_MIN:
+                                            msg = f"5일 수익률 {ret_5d:.1f}% < {BUY_RET5D_MIN}% (급락)"
                                             self.logger.info(
-                                                f"⏭️ {code}({portfolio_item['stock_name']}) 매수 스킵: "
-                                                f"5일 수익률 {ret_5d:.1f}% < {BUY_RET5D_MIN}% (급락)"
+                                                f"⏭️ {code}({portfolio_item['stock_name']}) 매수 스킵: {msg}"
                                             )
+                                            skip_records.append({
+                                                'stock_code': code,
+                                                'stock_name': portfolio_item['stock_name'],
+                                                'rank': portfolio_item.get('rank'),
+                                                'total_score': item_score,
+                                                'gate_type': 'RET5D_MIN',
+                                                'gate_value': ret_5d,
+                                                'threshold': BUY_RET5D_MIN,
+                                                'reason': msg,
+                                            })
                                             continue
                                         if BUY_RET5D_MAX is not None and ret_5d > BUY_RET5D_MAX:
+                                            msg = f"5일 수익률 {ret_5d:.1f}% > {BUY_RET5D_MAX}% (모멘텀 천장)"
                                             self.logger.info(
-                                                f"⏭️ {code}({portfolio_item['stock_name']}) 매수 스킵: "
-                                                f"5일 수익률 {ret_5d:.1f}% > {BUY_RET5D_MAX}% (모멘텀 천장)"
+                                                f"⏭️ {code}({portfolio_item['stock_name']}) 매수 스킵: {msg}"
                                             )
+                                            skip_records.append({
+                                                'stock_code': code,
+                                                'stock_name': portfolio_item['stock_name'],
+                                                'rank': portfolio_item.get('rank'),
+                                                'total_score': item_score,
+                                                'gate_type': 'RET5D_MAX',
+                                                'gate_value': ret_5d,
+                                                'threshold': BUY_RET5D_MAX,
+                                                'reason': msg,
+                                            })
                                             continue
                                 else:
                                     self.logger.error(
@@ -346,10 +391,20 @@ class QuantRebalancingService:
                                     if close_20d > 0:
                                         ret_20d = (close_now / close_20d - 1) * 100
                                         if ret_20d > BUY_RET20D_MAX:
+                                            msg = f"20일 수익률 {ret_20d:.1f}% > {BUY_RET20D_MAX}% (장기 모멘텀 천장)"
                                             self.logger.info(
-                                                f"⏭️ {code}({portfolio_item['stock_name']}) 매수 스킵: "
-                                                f"20일 수익률 {ret_20d:.1f}% > {BUY_RET20D_MAX}% (장기 모멘텀 천장)"
+                                                f"⏭️ {code}({portfolio_item['stock_name']}) 매수 스킵: {msg}"
                                             )
+                                            skip_records.append({
+                                                'stock_code': code,
+                                                'stock_name': portfolio_item['stock_name'],
+                                                'rank': portfolio_item.get('rank'),
+                                                'total_score': item_score,
+                                                'gate_type': 'RET20D_MAX',
+                                                'gate_value': ret_20d,
+                                                'threshold': BUY_RET20D_MAX,
+                                                'reason': msg,
+                                            })
                                             continue
                                 else:
                                     self.logger.error(
@@ -368,10 +423,22 @@ class QuantRebalancingService:
                             if mom_factors:
                                 ms = mom_factors.get('momentum_score')
                                 if ms is None or float(ms) < BUY_MOMENTUM_SCORE_MIN:
-                                    self.logger.info(
-                                        f"⏭️ {code}({portfolio_item['stock_name']}) 매수 스킵: "
+                                    msg = (
                                         f"모멘텀 점수 {ms if ms is not None else 'n/a'} < {BUY_MOMENTUM_SCORE_MIN}"
                                     )
+                                    self.logger.info(
+                                        f"⏭️ {code}({portfolio_item['stock_name']}) 매수 스킵: {msg}"
+                                    )
+                                    skip_records.append({
+                                        'stock_code': code,
+                                        'stock_name': portfolio_item['stock_name'],
+                                        'rank': portfolio_item.get('rank'),
+                                        'total_score': item_score,
+                                        'gate_type': 'MOMENTUM_SCORE',
+                                        'gate_value': float(ms) if ms is not None else None,
+                                        'threshold': BUY_MOMENTUM_SCORE_MIN,
+                                        'reason': msg,
+                                    })
                                     continue
                             else:
                                 self.logger.error(
@@ -537,6 +604,14 @@ class QuantRebalancingService:
                     self.db_manager.save_rebalancing_history(rebal_date, history_records)
             except Exception as e:
                 self.logger.warning(f"⚠️ 리밸런싱 이력 저장 실패 (무시): {e}")
+
+            # 매수 게이트 차단 종목 저장 (보고서용)
+            try:
+                if skip_records:
+                    rebal_date_iso = f"{calc_date[:4]}-{calc_date[4:6]}-{calc_date[6:8]}"
+                    self.db_manager.save_rebalancing_skips(rebal_date_iso, skip_records)
+            except Exception as e:
+                self.logger.warning(f"⚠️ 매수 게이트 차단 저장 실패 (무시): {e}")
 
             return {
                 'sell_list': sell_list,
