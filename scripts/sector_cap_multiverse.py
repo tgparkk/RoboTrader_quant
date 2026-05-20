@@ -15,6 +15,7 @@ import argparse
 import json
 import sys
 from collections import defaultdict
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -112,7 +113,7 @@ def run_backtest(start: str, end: str) -> dict:
         "sharpe": result.sharpe_ratio,
         "return": result.total_return * 100.0,
         "mdd": -abs(result.max_drawdown * 100.0),
-        "win_rate": result.win_rate,
+        "win_rate": result.win_rate * 100.0,
         "trades": result.winning_trades + result.losing_trades,
     }
 
@@ -128,7 +129,7 @@ def print_table(results: dict, avg_inds: dict) -> None:
     print("=" * 78)
     header = f"{'캡':<10}{'평균산업수':<10}"
     for pname in PERIODS:
-        header += f"{pname:>16}"
+        header += f"{pname:>17}"
     print(header)
     for cap in CAPS:
         line = f"{_cap_label(cap):<10}{avg_inds[cap]:<10.1f}"
@@ -146,7 +147,7 @@ def write_report(results: dict, avg_inds: dict, start: str, end: str) -> None:
     lines = [
         "# 섹터캡 멀티버스 백테스트 — 결과",
         "",
-        f"- 실행일: 2026-05-20",
+        f"- 실행일: {date.today()}",
         f"- 기간: {start} ~ {end}, 자본 1,000만원",
         f"- 설계: `docs/superpowers/specs/2026-05-20-sector-cap-multiverse-design.md`",
         "",
