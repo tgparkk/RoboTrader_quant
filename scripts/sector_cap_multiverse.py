@@ -199,7 +199,7 @@ def main() -> None:
     ranked = read_ranked_factors(args.start, args.end)
     print(f"[factors] {len(ranked)}개 calc_date 로드")
     if not ranked:
-        print("[ERROR] quant_factors 비어 있음 — --skip-recompute 없이 재실행 필요")
+        print("[ERROR] quant_factors 비어 있음 - --skip-recompute 없이 재실행 필요")
         sys.exit(1)
 
     results: dict = {}
@@ -208,7 +208,7 @@ def main() -> None:
         avg_inds[cap] = rebuild_portfolio(ranked, industry_map, cap)
         for pname, (ps, pe) in PERIODS.items():
             results[(cap, pname)] = run_backtest(ps, pe)
-        print(f"[{_cap_label(cap)}] 완료 — 평균 보유 산업 수 {avg_inds[cap]:.1f}")
+        print(f"[{_cap_label(cap)}] 완료 - 평균 보유 산업 수 {avg_inds[cap]:.1f}")
 
     # quant_portfolio 를 baseline 으로 복원 (DB 를 알려진 상태로)
     rebuild_portfolio(ranked, industry_map, None)
