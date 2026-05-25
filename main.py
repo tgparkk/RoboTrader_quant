@@ -744,7 +744,10 @@ class DayTradingBot:
                         self.order_manager.cleanup_old_completed_orders()
 
                 # 08:40 장전 시장 파악 (NXT + 미장)
-                if current_time.hour == 8 and current_time.minute >= 40:
+                # 휴일 가드: CRISIS 매도 분기가 휴장일에 KIS 시장가 매도 주문을 발송하면
+                # 다음 영업일 09:00 시가에 의도치 않게 체결될 수 있어 명시적으로 차단.
+                from utils.korean_holidays import is_holiday as _is_holiday
+                if current_time.hour == 8 and current_time.minute >= 40 and not _is_holiday(current_time):
                     if self._last_pre_market_date != current_time.date():
                         self._last_pre_market_date = current_time.date()
                         self.logger.info(f"🔍 08:40+ 장전 시장 파악 시작 ({current_time.strftime('%H:%M:%S')})")
