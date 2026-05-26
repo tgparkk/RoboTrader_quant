@@ -124,6 +124,13 @@ class FilteredBacktester(Backtester):
                     days_since_sell = self._calc_holding_days(sell_date, date)
                     if days_since_sell <= self.params.rebalancing_sell_cooldown_days:
                         continue
+            # SL 손절 cooldown 필터 (params.stop_loss_cooldown_days, _stop_loss_sold_dates는 Backtester에서 추적)
+            if self.params.stop_loss_cooldown_days > 0:
+                sl_date = self._stop_loss_sold_dates.get(stock_code)
+                if sl_date is not None:
+                    days_since_sl = self._calc_holding_days(sl_date, date)
+                    if days_since_sl <= self.params.stop_loss_cooldown_days:
+                        continue
             # 매수 최소 점수
             # 주의: item['total_score']는 quant_portfolio의 hybrid_score. 실전(quant_rebalancing_service.py)과
             # 의미 일치를 위해 pure 팩터 total_score를 factors_cache에서 조회해 사용.

@@ -55,6 +55,8 @@ class Backtester:
         self._regime_stats: Dict[str, int] = {'NORMAL': 0, 'CAUTION': 0, 'CRISIS': 0}
         # 쿨다운 추적: {stock_code: sell_date} — 리밸런싱 매도된 종목과 매도일
         self._rebalancing_sold_dates: Dict[str, str] = {}
+        # TP/SL 손절 cooldown 추적: {stock_code: stop_loss_date}
+        self._stop_loss_sold_dates: Dict[str, str] = {}
         # look-ahead 방지: factors_cache 키 정렬 (prev_calc_date 이분탐색용)
         self._sorted_factor_dates: Optional[List[str]] = None
 
@@ -321,6 +323,13 @@ class Backtester:
                     days_since_sell = self._calc_holding_days(sell_date, date)
                     if days_since_sell <= self.params.rebalancing_sell_cooldown_days:
                         continue
+            # 쿨다운 필터: TP/SL 손절 매도 후 N일 이내 재매수 차단 (요요 방지)
+            if self.params.stop_loss_cooldown_days > 0:
+                sl_date = self._stop_loss_sold_dates.get(stock_code)
+                if sl_date is not None:
+                    days_since_sl = self._calc_holding_days(sl_date, date)
+                    if days_since_sl <= self.params.stop_loss_cooldown_days:
+                        continue
             # 매수 최소 점수 필터: 절대 품질 기준 미달 시 매수 스킵
             # 운영(quant_rebalancing_service.py:272-273)과 동일하게 quant_portfolio의
             # total_score 직접 사용. V100 시대(2026-04-14~)엔 V=T이고, 4-factor 시대엔
@@ -510,6 +519,8 @@ class Backtester:
                 profit_rate = position.calculate_profit_rate(realistic_sl_price)
                 self._execute_sell(stock_code, date, f"손절 실행 ({profit_rate:.1%})", sell_price=realistic_sl_price)
                 self._today_stop_profit_sold.add(stock_code)
+                if self.params.stop_loss_cooldown_days > 0:
+                    self._stop_loss_sold_dates[stock_code] = date
             elif hit_profit:
                 profit_rate = position.calculate_profit_rate(realistic_tp_price)
                 self._execute_sell(stock_code, date, f"목표 익절 도달 ({profit_rate:.1%})", sell_price=realistic_tp_price)
@@ -518,6 +529,8 @@ class Backtester:
                 profit_rate = position.calculate_profit_rate(realistic_sl_price)
                 self._execute_sell(stock_code, date, f"손절 실행 ({profit_rate:.1%})", sell_price=realistic_sl_price)
                 self._today_stop_profit_sold.add(stock_code)
+                if self.params.stop_loss_cooldown_days > 0:
+                    self._stop_loss_sold_dates[stock_code] = date
             elif self.params.max_hold_days > 0:
                 # 최대 보유일 초과 → 종가 강제 매도
                 days_held = self._calc_holding_days(position.buy_date, date)
