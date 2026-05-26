@@ -1945,6 +1945,56 @@ class DatabaseManager:
         finally:
             self._put_connection(conn)
 
+    def get_recent_stop_loss_stocks(self, days: int = 10, include_real: bool = False) -> List[str]:
+        """최근 N일(캘린더)간 TP/SL 손절로 매도한 종목 코드 리스트 (요요 방지 쿨다운)
+
+        `get_recent_rebalancing_sold_stocks`는 reason LIKE '%리밸런싱%'만 매칭해서 TP/SL 손절은
+        cooldown 미적용 — 그래서 별도 함수로 분리. 2026-05-26 진단:
+        136490(3회), 151860(3회), 068790·058430(각 2회) 반복 손절이 5월 손실 ~100% 차지.
+        """
+        conn = self._get_connection()
+        try:
+            with conn:
+                cursor = conn.cursor()
+
+                cursor.execute('''
+                    SELECT DISTINCT stock_code
+                    FROM virtual_trading_records
+                    WHERE action = 'SELL'
+                      AND timestamp::date >= CURRENT_DATE - %s
+                      AND (reason LIKE '%%손절%%' OR reason LIKE '%%stop%%loss%%')
+                ''', (days,))
+
+                result = cursor.fetchall()
+                sl_sold = set(row[0] for row in result)
+
+                if include_real:
+                    cursor.execute('''
+                        SELECT DISTINCT stock_code
+                        FROM real_trading_records
+                        WHERE action = 'SELL'
+                          AND timestamp::date >= CURRENT_DATE - %s
+                          AND (reason LIKE '%%손절%%' OR reason LIKE '%%stop%%loss%%')
+                    ''', (days,))
+
+                    real_result = cursor.fetchall()
+                    sl_sold.update(row[0] for row in real_result)
+
+                sl_sold_list = list(sl_sold)
+
+                if sl_sold_list:
+                    self.logger.info(
+                        f"최근 {days}일 손절 매도 종목: {len(sl_sold_list)}개 ({', '.join(sl_sold_list)})"
+                    )
+
+                return sl_sold_list
+
+        except Exception as e:
+            self.logger.error(f"손절 매도 종목 조회 실패: {e}")
+            return []
+        finally:
+            self._put_connection(conn)
+
     def get_recent_rebalancing_sold_stocks(self, days: int = 3, include_real: bool = False) -> List[str]:
         """최근 N일간 리밸런싱으로 매도한 종목 코드 리스트 (요요 방지 쿨다운)"""
         conn = self._get_connection()

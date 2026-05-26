@@ -8,6 +8,18 @@ QUANT_CANDIDATE_LIMIT = 50  # 장중 퀀트 후보 종목 최대 수
 
 REBALANCING_SELL_COOLDOWN_DAYS = 3  # 리밸런싱 매도 후 재매수 차단 일수 (요요 방지)
 
+# TP/SL 손절 후 동일 종목 재매수 차단 일수 (캘린더일)
+# 2026-05-26: 5월 슬럼프(승률 12.5%, -654K) 진단 결과, 동일 종목 반복 손절 (136490·151860 각 3회,
+#   068790·058430 각 2회) 패턴이 5월 손실의 ~100%를 차지함을 확인.
+#   `get_recent_rebalancing_sold_stocks`는 reason LIKE '%리밸런싱%'만 매칭해서 TP/SL 손절 cooldown 미적용.
+# 실측 4~5월 simulation 결과 N별 효과:
+#   N=5  : Δ +334K, 5월 -270K (59% 차단)
+#   N=7  : Δ +462K, 5월 -142K (78% 차단)
+#   N=10 : Δ +525K, 5월  -79K (88% 차단) ★ plateau 진입, 4월 false positive 1건(-50K)
+#   N>=14: N=10과 동일 수렴
+# 운영 backtester 풀 기간(2023~2026.05) sweep에서도 N=10이 sharpe Δ +0.52로 1위.
+STOP_LOSS_COOLDOWN_DAYS = 10  # 손절 후 N일(캘린더) 내 재매수 차단
+
 # 리밸런싱 주문 관련
 REBALANCING_ORDER_INTERVAL = 0.1  # 리밸런싱 주문 간 대기 시간 (초)
 SELL_ORDER_WAIT_TIMEOUT = 300  # 매도 주문 체결 대기 최대 시간 (초, 5분)

@@ -352,7 +352,9 @@ class RebalancingExecutor:
                     logger.info(f"✅ 당일 손절 종목 없음 (재매수 제한 없음)")
 
             # 🆕 최근 N일 리밸런싱 매도 종목 쿨다운 (요요 방지)
-            from config.constants import REBALANCING_SELL_COOLDOWN_DAYS, BUY_BLACKLIST
+            from config.constants import (
+                REBALANCING_SELL_COOLDOWN_DAYS, BUY_BLACKLIST, STOP_LOSS_COOLDOWN_DAYS,
+            )
             recent_rebal_sold = []
             if self.db_manager:
                 recent_rebal_sold = self.db_manager.get_recent_rebalancing_sold_stocks(
@@ -362,6 +364,18 @@ class RebalancingExecutor:
                     logger.info(
                         f"🔄 리밸런싱 매도 쿨다운 ({REBALANCING_SELL_COOLDOWN_DAYS}일): "
                         f"{len(recent_rebal_sold)}개 ({', '.join(recent_rebal_sold)})"
+                    )
+
+            # 🆕 최근 N일 손절 매도 종목 쿨다운 (요요 방지, 2026-05-26 5월 슬럼프 진단 결과)
+            recent_stop_loss_sold = []
+            if self.db_manager and STOP_LOSS_COOLDOWN_DAYS > 0:
+                recent_stop_loss_sold = self.db_manager.get_recent_stop_loss_stocks(
+                    days=STOP_LOSS_COOLDOWN_DAYS, include_real=True
+                )
+                if recent_stop_loss_sold:
+                    logger.info(
+                        f"🛑 손절 매도 쿨다운 ({STOP_LOSS_COOLDOWN_DAYS}일): "
+                        f"{len(recent_stop_loss_sold)}개 ({', '.join(recent_stop_loss_sold)})"
                     )
 
             # 🆕 코스피 변동률 조회 (1회만)
@@ -440,6 +454,11 @@ class RebalancingExecutor:
                     # 🆕 리밸런싱 매도 쿨다운 (요요 방지)
                     if stock_code in recent_rebal_sold:
                         logger.info(f"⏳ {stock_code}({stock_name}) 매수 스킵: 리밸런싱 매도 후 쿨다운 ({REBALANCING_SELL_COOLDOWN_DAYS}일)")
+                        continue
+
+                    # 🆕 손절 매도 쿨다운 (TP/SL 손절 후 동일 종목 N일 재매수 차단)
+                    if stock_code in recent_stop_loss_sold:
+                        logger.info(f"🛑 {stock_code}({stock_name}) 매수 스킵: 손절 매도 후 쿨다운 ({STOP_LOSS_COOLDOWN_DAYS}일)")
                         continue
 
                     # 현재가 조회
