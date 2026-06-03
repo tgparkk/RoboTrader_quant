@@ -149,6 +149,7 @@ Thumbs.db
 .claude/worktrees/
 .claude/scheduled_tasks.lock
 robotrader_quant.pid
+holiday_kis_cache.json
 # KRX 자동 갱신 (08:20). 신규 클론 시 `python scripts/update_stock_list.py`로 부트스트랩
 stock_list.json
 
