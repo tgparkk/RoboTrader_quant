@@ -1,6 +1,7 @@
 # 민감한 설정 파일
 config/key.ini
 token_info.json
+holiday_kis_cache.json
 
 # Python
 __pycache__/

@@ -114,6 +114,9 @@ SPECIAL_HOLIDAYS = {
     "2026-03-02": "삼일절 대체공휴일 (3/1 = 일)",
     "2026-05-01": "근로자의 날",
     "2026-05-25": "부처님오신날 대체공휴일 (5/24=일)",
+    "2026-06-03": "제9회 전국동시지방선거",
+    "2026-08-17": "광복절 대체공휴일 (8/15 = 토)",
+    "2026-10-05": "개천절 대체공휴일 (10/3 = 토)",
     "2026-12-31": "KRX 연말 휴장",
     # 향후 선거일/대체공휴일 추가 시 KRX 공식 캘린더 (https://global.krx.co.kr) 참조
 }
@@ -136,9 +139,15 @@ def is_lunar_holiday(date: datetime) -> bool:
 
 
 def is_special_holiday(date: datetime) -> bool:
-    """임시 공휴일 여부 확인"""
+    """임시 공휴일 여부 확인 (수동 목록 + KIS API 런타임 휴장일 병합)"""
     date_str = date.strftime("%Y-%m-%d")
-    return date_str in SPECIAL_HOLIDAYS
+    if date_str in SPECIAL_HOLIDAYS:
+        return True
+    try:
+        from utils.holiday_kis_sync import is_kis_closed_day
+        return is_kis_closed_day(date)
+    except Exception:
+        return False
 
 
 def is_holiday(date: datetime) -> bool:

@@ -214,6 +214,13 @@ class DayTradingBot:
                 return False
             self.logger.info("✅ API 매니저 초기화 완료")
 
+            # 1.1. KIS 휴장일 동기화 (하루 1회, fail-open)
+            try:
+                from utils.holiday_kis_sync import sync_today as _sync_holidays
+                _sync_holidays()
+            except Exception as e:
+                self.logger.warning(f"휴장일 동기화 스킵: {e}")
+
             # 1.5. 자금 관리자 초기화 (API 초기화 후)
             # 🎯 테스트 기간: 가상매매 모드로 항상 1000만원 설정
             if self.decision_engine.is_virtual_mode:
