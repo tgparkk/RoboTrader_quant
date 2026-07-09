@@ -45,7 +45,7 @@ def backtest_pg_connection():
 
 @contextmanager
 def shared_pg_connection():
-    """Context manager for shared DB (V100 robotrader_quant) — daily_prices read 전용."""
+    """Context manager for shared DB (kis_template) — daily_prices READ-ONLY 전용."""
     with pg_connection(SHARED_DB_CONFIG) as conn:
         yield conn
 
