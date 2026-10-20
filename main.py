@@ -191,6 +191,17 @@ class DayTradingBot:
         """시그널 핸들러 (Ctrl+C 등)"""
         self.logger.info(f"종료 신호 수신: {signum}")
         self.is_running = False
+        # 각자 깃발로 도는 루프도 멈춰야 run_daily_cycle 의 gather 가 끝나 shutdown() 에 도달한다
+        # (동기 호출만 · shutdown() 은 여기서 부르지 않음 — run_daily_cycle finally 에서 1회)
+        for name, stop in (('trading_manager', 'stop_monitoring'),
+                           ('order_manager', 'stop_monitoring'),
+                           ('data_collector', 'stop_collection')):
+            target = getattr(self, name, None)
+            if target is not None and hasattr(target, stop):
+                try:
+                    getattr(target, stop)()
+                except Exception as e:
+                    self.logger.error(f"❌ 종료 신호 처리 중 {name}.{stop} 오류: {e}")
     
     async def initialize(self) -> bool:
         """시스템 초기화"""
@@ -496,7 +507,16 @@ class DayTradingBot:
                 self.telegram.periodic_status_task()
             ]
             
-            await asyncio.gather(*telegram_tasks, return_exceptions=True)
+            telegram_gather = asyncio.gather(*telegram_tasks, return_exceptions=True)
+            # 주기 알림은 while True 라 스스로 끝나지 않음 → 종료 신호(is_running=False) 시 취소
+            while self.is_running and not telegram_gather.done():
+                await asyncio.sleep(1)
+            if not telegram_gather.done():
+                telegram_gather.cancel()
+                try:
+                    await telegram_gather
+                except asyncio.CancelledError:
+                    pass
             
         except Exception as e:
             self.logger.error(f"❌ 텔레그램 태스크 오류: {e}")
