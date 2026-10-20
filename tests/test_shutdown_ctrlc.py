@@ -128,3 +128,148 @@ def test_run_daily_cycle_reaches_shutdown_after_signal():
 
     asyncio.run(_scenario())
     assert calls["shutdown"] == 1
+
+
+# ---------------------------------------------------------------------------
+# 리뷰 델타 (B1·M2·M3·M7) — 실제 shutdown() 을 가짜 매니저로 실행
+# ---------------------------------------------------------------------------
+
+class _ListLogger:
+    """기록만 하는 로거 (info 가 예외를 내게 만들 수 있음 = stdout 막힘 흉내)."""
+
+    def __init__(self, info_raises=False):
+        self.records = []
+        self._info_raises = info_raises
+
+    def info(self, msg, *a, **k):
+        if self._info_raises:
+            raise RuntimeError("stdout blocked")
+        self.records.append(("info", msg))
+
+    def warning(self, msg, *a, **k):
+        self.records.append(("warning", msg))
+
+    def error(self, msg, *a, **k):
+        self.records.append(("error", msg))
+
+
+class _FakeOrderManagerWithPending:
+    """미체결 1건 보유 · _monitor_pending_orders 가 체결 처리(콜백) 후 목록에서 뺀다."""
+
+    def __init__(self):
+        self.pending_orders = {"ORD1": object()}
+        self.filled_callbacks = []
+        self.is_monitoring = False
+
+    async def _monitor_pending_orders(self):
+        for order_id in list(self.pending_orders):
+            self.filled_callbacks.append(order_id)  # on_order_filled 자리
+            del self.pending_orders[order_id]
+
+    def stop_monitoring(self):
+        self.is_monitoring = False
+
+
+class _Recorder:
+    def __init__(self, events):
+        self.events = events
+
+    def stop_collection(self):
+        self.events.append("stop_collection")
+
+    async def shutdown(self):
+        self.events.append("telegram.shutdown")
+
+    def close(self):
+        self.events.append("db.close")
+
+
+def _bot_for_real_shutdown(tmp_path, events):
+    bot = _bare_bot()
+    bot.pid_file = tmp_path / "test.pid"
+    bot.order_manager = _FakeOrderManagerWithPending()
+    rec = _Recorder(events)
+    bot.data_collector = rec
+    bot.telegram = rec
+    bot.db_manager = rec
+    bot.api_manager = type("A", (), {"shutdown": lambda self: events.append("api.shutdown")})()
+    bot._quant_screening_task = None
+    bot._daily_data_collection_task = None
+    return bot
+
+
+def test_shutdown_processes_pending_orders_while_waiting(tmp_path, monkeypatch):
+    """B1: 처리기가 주문 감시 루프를 멈춘 뒤에도 shutdown 대기가 미체결을 처리(체결 콜백)해 비운다."""
+    import main as main_mod
+    monkeypatch.setattr(main_mod, "is_market_open", lambda *a, **k: True)
+    events = []
+    bot = _bot_for_real_shutdown(tmp_path, events)
+
+    bot._signal_handler(signal.SIGINT, None)  # 주문 감시 루프 OFF
+    assert bot.order_manager.is_monitoring is False
+
+    loop_t = {}
+
+    async def _run():
+        t0 = asyncio.get_event_loop().time()
+        await bot.shutdown()
+        loop_t["elapsed"] = asyncio.get_event_loop().time() - t0
+
+    asyncio.run(_run())
+    assert bot.order_manager.filled_callbacks == ["ORD1"]
+    assert bot.order_manager.pending_orders == {}
+    assert loop_t["elapsed"] < 10, loop_t
+    assert "db.close" in events
+
+
+def test_shutdown_waits_for_after_market_flow_before_closing_db(tmp_path):
+    """M2: create_task 로 뜬 장 마감 플로우가 도는 중이면 끝난 뒤에 DB·API 를 닫는다."""
+    events = []
+    bot = _bot_for_real_shutdown(tmp_path, events)
+    bot.order_manager.pending_orders = {}
+
+    async def _flow():
+        await asyncio.sleep(0.3)
+        events.append("flow.done")
+
+    async def _run():
+        bot._quant_screening_task = asyncio.ensure_future(_flow())
+        await asyncio.sleep(0)
+        await bot.shutdown()
+
+    asyncio.run(_run())
+    assert "flow.done" in events and "db.close" in events
+    assert events.index("flow.done") < events.index("db.close"), events
+    assert events.index("flow.done") < events.index("api.shutdown"), events
+
+
+def test_signal_handler_lowers_flags_before_logging():
+    """M3: 로그 출력이 막혀(예외) 도 깃발 4개는 이미 내려가 있어야 한다."""
+    bot = _bare_bot()
+    bot.logger = _ListLogger(info_raises=True)
+    bot.trading_manager = _bare(TradingStockManager, "is_monitoring")
+    bot.order_manager = _bare(OrderManager, "is_monitoring")
+    bot.data_collector = _bare(RealTimeDataCollector, "is_running")
+    try:
+        bot._signal_handler(signal.SIGINT, None)
+    except RuntimeError:
+        pass
+    assert bot.is_running is False
+    assert bot.trading_manager.is_monitoring is False
+    assert bot.order_manager.is_monitoring is False
+    assert bot.data_collector.is_running is False
+
+
+def test_signal_handler_warns_when_stop_method_missing():
+    """M7: stop 메서드가 없는 매니저면 warning 1줄을 남긴다 (깃발은 직접 내림)."""
+    bot = _bare_bot()
+    bot.logger = _ListLogger()
+
+    class _NoStop:
+        is_monitoring = True
+
+    bot.trading_manager = _NoStop()
+    bot._signal_handler(signal.SIGINT, None)
+    assert bot.trading_manager.is_monitoring is False
+    warnings = [m for lvl, m in bot.logger.records if lvl == "warning"]
+    assert len(warnings) == 1 and "trading_manager" in warnings[0], bot.logger.records
