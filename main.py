@@ -1332,15 +1332,15 @@ class DayTradingBot:
         try:
             self.logger.info("🛑 시스템 종료 시작")
 
-            # 0. gather 밖(create_task)에서 도는 장 마감 플로우·일봉 수집이 있으면 끝날 때까지 대기 (각 최대 120초)
+            # 0. gather 밖(create_task)에서 도는 장 마감 플로우·일봉 수집이 있으면 끝날 때까지 대기 (각 최대 300초 · 16:00 플로우 실측 ≈145초)
             for label, task in (('장 마감 후 플로우', getattr(self, '_quant_screening_task', None)),
                                 ('일봉 수집', getattr(self, '_daily_data_collection_task', None))):
                 if task is not None and not task.done():
-                    self.logger.info(f"⏳ {label} 진행 중 — 완료 대기 (최대 120초)...")
+                    self.logger.info(f"⏳ {label} 진행 중 — 완료 대기 (최대 300초)...")
                     try:
-                        await asyncio.wait_for(task, timeout=120)
+                        await asyncio.wait_for(task, timeout=300)
                     except asyncio.TimeoutError:
-                        self.logger.warning(f"⚠️ {label} 120초 대기 타임아웃 - 계속 종료")
+                        self.logger.warning(f"⚠️ {label} 300초 대기 타임아웃 - 작업이 취소됨, 계속 종료")
                     except Exception as task_err:
                         self.logger.warning(f"{label} 대기 중 오류: {task_err}")
 
