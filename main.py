@@ -189,8 +189,29 @@ class DayTradingBot:
 
     def _signal_handler(self, signum, frame):
         """시그널 핸들러 (Ctrl+C 등)"""
-        self.logger.info(f"종료 신호 수신: {signum}")
+        # 각자 깃발로 도는 루프도 멈춰야 run_daily_cycle 의 gather 가 끝나 shutdown() 에 도달한다
+        # (동기 호출만 · shutdown() 은 여기서 부르지 않음 — run_daily_cycle finally 에서 1회)
+        # 깃발 먼저 직접 대입, 로그는 뒤 (stdout 이 막혀 로그가 멈춰도 루프는 내려가도록)
+        targets = (('trading_manager', 'is_monitoring', 'stop_monitoring'),
+                   ('order_manager', 'is_monitoring', 'stop_monitoring'),
+                   ('data_collector', 'is_running', 'stop_collection'))
         self.is_running = False
+        for name, flag, _ in targets:
+            target = getattr(self, name, None)
+            if target is not None and hasattr(target, flag):
+                setattr(target, flag, False)
+        self.logger.info(f"종료 신호 수신: {signum}")
+        for name, flag, stop in targets:
+            target = getattr(self, name, None)
+            if target is None:
+                continue
+            if not hasattr(target, stop):
+                self.logger.warning(f"⚠️ 종료 신호: {name}.{stop} 없음 — 깃발 {flag} 직접 대입만 함")
+                continue
+            try:
+                getattr(target, stop)()
+            except Exception as e:
+                self.logger.error(f"❌ 종료 신호 처리 중 {name}.{stop} 오류: {e}")
     
     async def initialize(self) -> bool:
         """시스템 초기화"""
@@ -496,7 +517,16 @@ class DayTradingBot:
                 self.telegram.periodic_status_task()
             ]
             
-            await asyncio.gather(*telegram_tasks, return_exceptions=True)
+            telegram_gather = asyncio.gather(*telegram_tasks, return_exceptions=True)
+            # 주기 알림은 while True 라 스스로 끝나지 않음 → 종료 신호(is_running=False) 시 취소
+            while self.is_running and not telegram_gather.done():
+                await asyncio.sleep(1)
+            if not telegram_gather.done():
+                telegram_gather.cancel()
+                try:
+                    await telegram_gather
+                except asyncio.CancelledError:
+                    pass
             
         except Exception as e:
             self.logger.error(f"❌ 텔레그램 태스크 오류: {e}")
@@ -1302,6 +1332,18 @@ class DayTradingBot:
         try:
             self.logger.info("🛑 시스템 종료 시작")
 
+            # 0. gather 밖(create_task)에서 도는 장 마감 플로우·일봉 수집이 있으면 끝날 때까지 대기 (각 최대 300초 · 16:00 플로우 실측 ≈145초)
+            for label, task in (('장 마감 후 플로우', getattr(self, '_quant_screening_task', None)),
+                                ('일봉 수집', getattr(self, '_daily_data_collection_task', None))):
+                if task is not None and not task.done():
+                    self.logger.info(f"⏳ {label} 진행 중 — 완료 대기 (최대 300초)...")
+                    try:
+                        await asyncio.wait_for(task, timeout=300)
+                    except asyncio.TimeoutError:
+                        self.logger.warning(f"⚠️ {label} 300초 대기 타임아웃 - 작업이 취소됨, 계속 종료")
+                    except Exception as task_err:
+                        self.logger.warning(f"{label} 대기 중 오류: {task_err}")
+
             # 1. 미체결 주문 완료 대기 (최대 60초)
             if hasattr(self, 'order_manager') and self.order_manager.pending_orders:
                 pending_count = len(self.order_manager.pending_orders)
@@ -1309,7 +1351,14 @@ class DayTradingBot:
                 try:
                     deadline = asyncio.get_event_loop().time() + 60.0
                     while self.order_manager.pending_orders and asyncio.get_event_loop().time() < deadline:
-                        await asyncio.sleep(1)
+                        # 신호 처리기가 주문 감시 루프를 멈췄으므로 대기 중 직접 체결 확인·콜백 처리
+                        if is_market_open():
+                            try:
+                                await self.order_manager._monitor_pending_orders()
+                            except Exception as mon_err:
+                                self.logger.warning(f"미체결 주문 처리 중 오류: {mon_err}")
+                        if self.order_manager.pending_orders:
+                            await asyncio.sleep(3)
                     remaining = len(self.order_manager.pending_orders)
                     if remaining > 0:
                         self.logger.warning(f"⚠️ 미체결 주문 {remaining}건 대기 타임아웃 - 강제 종료")
